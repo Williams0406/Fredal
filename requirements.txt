@@ -12,3 +12,4 @@ gunicorn
 dj-database-url
 django-cloudinary-storage
 cloudinary
+django-filter
