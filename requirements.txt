@@ -1,0 +1,15 @@
+pandas
+django
+openpyxl
+djangorestframework
+django-cors-headers
+djangorestframework-simplejwt
+psycopg2-binary
+datetime
+pillow
+drf-nested-routers
+whitenoise
+gunicorn
+dj-database-url
+django-cloudinary-storage
+cloudinary
