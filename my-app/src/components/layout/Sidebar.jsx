@@ -5,7 +5,7 @@ import { usePathname } from "next/navigation";
 import { useAuth } from "@/context/AuthContext";
 import { MENU_ITEMS } from "@/config/menu";
 
-export default function Sidebar() {
+export default function Sidebar({ collapsed, onToggle }) {
   const pathname = usePathname();
   const { user } = useAuth();
 
@@ -18,86 +18,100 @@ export default function Sidebar() {
   );
 
   return (
-    <aside className="w-64 min-h-screen bg-[#1e3a8a] text-white flex flex-col">
-      
-      {/* Logo / Identidad - 60% azul marino según guía */}
-      <div className="px-6 py-6 border-b border-white/10">
-        <div className="flex items-center gap-3">
-          <div className="w-10 h-10 bg-white/10 rounded-lg flex items-center justify-center">
-            <svg className="w-6 h-6" fill="currentColor" viewBox="0 0 24 24">
-              <path d="M19.428 15.428a2 2 0 00-1.022-.547l-2.387-.477a6 6 0 00-3.86.517l-.318.158a6 6 0 01-3.86.517L6.05 15.21a2 2 0 00-1.806.547M8 4h8l-1 1v5.172a2 2 0 00.586 1.414l5 5c1.26 1.26.367 3.414-1.415 3.414H4.828c-1.782 0-2.674-2.154-1.414-3.414l5-5A2 2 0 009 10.172V5L8 4z" />
-            </svg>
-          </div>
+    <aside
+      className={`
+        ${collapsed ? "w-20" : "w-64"}
+        min-h-screen bg-[#1e3a8a] text-white
+        flex flex-col transition-all duration-300
+      `}
+    >
+      {/* Header / Logo */}
+      <div className="px-4 py-4 border-b border-white/10 flex items-center justify-between">
+        {!collapsed && (
           <div>
-            <h1 className="text-xl font-bold tracking-tight">
-              FREDAL
-            </h1>
-            <p className="text-xs text-white/60">
-              Peruvian Group
-            </p>
+            <h1 className="text-xl font-bold">FREDAL</h1>
+            <p className="text-xs text-white/60">Peruvian Group</p>
           </div>
-        </div>
+        )}
+
+        {/* Botón plegar */}
+        <button
+          onClick={onToggle}
+          className="p-2 rounded-lg hover:bg-white/10 transition"
+        >
+          <svg
+            className="w-5 h-5"
+            fill="none"
+            stroke="currentColor"
+            viewBox="0 0 24 24"
+          >
+            <path
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              strokeWidth={2}
+              d={collapsed ? "M9 5l7 7-7 7" : "M15 19l-7-7 7-7"}
+            />
+          </svg>
+        </button>
       </div>
 
-      {/* Menú de navegación */}
-      <nav className="flex-1 px-3 py-6 space-y-1 overflow-y-auto">
+      {/* Menú */}
+      <nav className="flex-1 px-2 py-6 space-y-1">
         {menuItems.map((item) => {
-          const isActive = pathname === item.path || pathname.startsWith(item.path + '/');
+          const isActive =
+            pathname === item.path ||
+            pathname.startsWith(item.path + "/");
 
           return (
             <Link
               key={item.path}
               href={item.path}
               className={`
-                flex items-center gap-3 rounded-lg px-4 py-3 text-sm font-medium 
-                transition-all duration-200 group
+                flex items-center gap-3 rounded-lg px-3 py-3 text-sm
+                transition-all duration-200
                 ${
                   isActive
-                    ? "bg-white/15 text-white shadow-sm"
-                    : "text-white/70 hover:bg-white/10 hover:text-white"
+                    ? "bg-white/15 text-white"
+                    : "text-white/70 hover:bg-white/10"
                 }
               `}
             >
-              {/* Ícono según la sección */}
-              <div className={`
-                flex-shrink-0 transition-all duration-200
-                ${isActive ? "text-[#84cc16]" : "text-white/50 group-hover:text-white/70"}
-              `}>
+              {/* Ícono */}
+              <div className="w-5 h-5 flex-shrink-0">
                 {getIconForPath(item.path)}
               </div>
-              
-              <span className="flex-1">{item.label}</span>
-              
-              {/* Indicador visual activo - verde lima 10% según guía */}
-              {isActive && (
-                <div className="w-1.5 h-1.5 bg-[#84cc16] rounded-full"></div>
+
+              {/* Texto */}
+              {!collapsed && (
+                <span className="flex-1">{item.label}</span>
+              )}
+
+              {/* Indicador activo */}
+              {isActive && !collapsed && (
+                <div className="w-1.5 h-1.5 bg-[#84cc16] rounded-full" />
               )}
             </Link>
           );
         })}
       </nav>
 
-      {/* Información del usuario - footer fijo */}
-      <div className="border-t border-white/10 px-4 py-4 bg-[#1e3a8a]/50">
+      {/* Footer usuario */}
+      <div className="border-t border-white/10 px-4 py-4">
         <div className="flex items-center gap-3">
-          {/* Avatar */}
-          <div className="w-9 h-9 bg-white/10 rounded-lg flex items-center justify-center 
-                        text-sm font-semibold flex-shrink-0">
-            {user.username?.charAt(0).toUpperCase() || "U"}
-          </div>
-          
-          {/* Info */}
-          <div className="flex-1 min-w-0">
-            <p className="text-sm font-medium text-white truncate">
-              {user.username}
-            </p>
-            <p className="text-xs text-white/60 truncate">
-              {user.roles?.[0] || "Usuario"}
-            </p>
+          <div className="w-9 h-9 bg-white/10 rounded-lg flex items-center justify-center">
+            {user.username?.charAt(0).toUpperCase()}
           </div>
 
-          {/* Indicador de sesión activa */}
-          <div className="w-2 h-2 bg-[#84cc16] rounded-full flex-shrink-0"></div>
+          {!collapsed && (
+            <div className="min-w-0">
+              <p className="text-sm font-medium truncate">
+                {user.username}
+              </p>
+              <p className="text-xs text-white/60 truncate">
+                {user.roles?.[0]}
+              </p>
+            </div>
+          )}
         </div>
       </div>
     </aside>

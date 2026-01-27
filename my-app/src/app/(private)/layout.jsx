@@ -1,4 +1,3 @@
-// src/app/(private)/layout.jsx
 "use client";
 
 import { useEffect, useState } from "react";
@@ -11,6 +10,7 @@ export default function PrivateLayout({ children }) {
   const router = useRouter();
   const [user, setUser] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [collapsed, setCollapsed] = useState(false);
 
   useEffect(() => {
     const init = async () => {
@@ -31,7 +31,12 @@ export default function PrivateLayout({ children }) {
 
   return (
     <div className="flex min-h-screen">
-      <Sidebar user={user} />
+      <Sidebar
+        user={user}
+        collapsed={collapsed}
+        onToggle={() => setCollapsed(!collapsed)}
+      />
+
       <div className="flex-1 flex flex-col">
         <Header user={user} />
         <main className="p-6 flex-1 overflow-auto">
