@@ -16,7 +16,7 @@ export default function ItemHistorialModal({ itemId, open, onClose }) {
     }
   }, [open, itemId]);
 
-  // 🔑 UX: cerrar con ESC
+  // Cerrar con ESC
   useEffect(() => {
     const handler = (e) => {
       if (e.key === "Escape") onClose();
@@ -27,9 +27,9 @@ export default function ItemHistorialModal({ itemId, open, onClose }) {
 
   if (!open) return null;
 
-  // 🔄 Agrupar historial por unidad (id implícito)
+  // Agrupar historial por unidad
   const agrupado = historial.reduce((acc, h) => {
-    const key = h.item_unidad || h.id; // fallback seguro
+    const key = h.item_unidad || h.id;
     acc[key] = acc[key] || [];
     acc[key].push(h);
     return acc;
@@ -37,91 +37,170 @@ export default function ItemHistorialModal({ itemId, open, onClose }) {
 
   return (
     <div
-      className="fixed inset-0 bg-black/40 z-50 flex items-center justify-center"
+      className="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4"
       onClick={onClose}
     >
       <div
-        className="bg-white rounded-lg w-full max-w-4xl max-h-[85vh] overflow-hidden"
+        className="bg-white rounded-xl w-full max-w-5xl max-h-[90vh] flex flex-col"
         onClick={(e) => e.stopPropagation()}
       >
-        {/* HEADER */}
-        <div className="flex justify-between items-center px-6 py-4 border-b">
-          <h2 className="text-lg font-semibold">
-            📜 Historial de ubicación y estado
-          </h2>
-          <button
-            onClick={onClose}
-            className="text-sm px-3 py-1 border rounded hover:bg-gray-100"
-          >
-            Cerrar
-          </button>
+        {/* Header */}
+        <div className="border-b border-gray-200 px-6 py-4 flex-shrink-0">
+          <div className="flex justify-between items-center">
+            <div>
+              <h2 className="text-xl font-semibold text-[#1e3a8a] flex items-center gap-2">
+                <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} 
+                        d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                </svg>
+                Historial de Ubicaciones
+              </h2>
+              <p className="text-sm text-gray-600 mt-1">
+                Registro completo de movimientos y estados de las unidades
+              </p>
+            </div>
+            <button
+              onClick={onClose}
+              className="text-gray-400 hover:text-gray-600 transition-colors duration-200"
+            >
+              <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+              </svg>
+            </button>
+          </div>
         </div>
 
-        {/* BODY */}
-        <div className="p-6 overflow-y-auto max-h-[70vh] space-y-6">
-          {loading && (
-            <p className="text-gray-500 text-sm">Cargando historial…</p>
-          )}
-
-          {!loading && historial.length === 0 && (
-            <p className="text-gray-500 text-sm">
-              No hay historial registrado para este item.
-            </p>
-          )}
-
-          {Object.values(agrupado).map((movimientos, idx) => (
-            <div
-              key={idx}
-              className="border rounded-lg p-4 bg-gray-50"
-            >
-              <h3 className="font-medium mb-3">
-                🔧 Unidad #{idx + 1}
-              </h3>
-
-              <table className="w-full text-sm bg-white border">
-                <thead className="bg-gray-100">
-                  <tr>
-                    <th className="p-2 border">Ubicación</th>
-                    <th className="p-2 border">Orden</th>
-                    <th className="p-2 border">Desde</th>
-                    <th className="p-2 border">Hasta</th>
-                    <th className="p-2 border">Estado</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {movimientos.map((h, i) => (
-                    <tr key={i} className="border-t">
-                      <td className="p-2">
-                        {h.tipo} – {h.nombre}
-                      </td>
-                      <td className="p-2 text-center">
-                        {h.orden_trabajo || "—"}
-                      </td>
-                      <td className="p-2">{h.fecha_inicio}</td>
-                      <td className="p-2">
-                        {h.fecha_fin || (
-                          <span className="text-green-600 font-medium">
-                            Actual
-                          </span>
-                        )}
-                      </td>
-                      <td className="p-2 text-center">
-                        <span
-                          className={`px-2 py-1 rounded text-xs font-medium
-                            ${h.fecha_fin
-                              ? "bg-gray-200 text-gray-700"
-                              : "bg-green-100 text-green-700"
-                            }`}
-                        >
-                          {h.fecha_fin ? "Histórico" : "Activo"}
-                        </span>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
+        {/* Content */}
+        <div className="flex-1 overflow-y-auto px-6 py-6">
+          {loading ? (
+            <div className="flex items-center justify-center py-12">
+              <div className="text-center">
+                <div className="w-12 h-12 border-4 border-[#1e3a8a] border-t-transparent rounded-full animate-spin mx-auto mb-4"></div>
+                <p className="text-sm text-gray-600">Cargando historial...</p>
+              </div>
             </div>
-          ))}
+          ) : historial.length === 0 ? (
+            <div className="text-center py-12">
+              <svg className="w-16 h-16 text-gray-400 mx-auto mb-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} 
+                      d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+              </svg>
+              <p className="text-sm text-gray-600 font-medium">
+                No hay historial registrado
+              </p>
+              <p className="text-xs text-gray-500 mt-1">
+                Los movimientos aparecerán aquí cuando se registren
+              </p>
+            </div>
+          ) : (
+            <div className="space-y-6">
+              {Object.entries(agrupado).map(([key, movimientos], idx) => (
+                <div
+                  key={key}
+                  className="border border-gray-200 rounded-lg overflow-hidden"
+                >
+                  {/* Header de la unidad */}
+                  <div className="bg-gray-50 px-5 py-3 border-b border-gray-200">
+                    <h3 className="font-semibold text-gray-900 flex items-center gap-2">
+                      <svg className="w-5 h-5 text-[#1e3a8a]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} 
+                              d="M7 7h.01M7 3h5c.512 0 1.024.195 1.414.586l7 7a2 2 0 010 2.828l-7 7a2 2 0 01-2.828 0l-7-7A1.994 1.994 0 013 12V7a4 4 0 014-4z" />
+                      </svg>
+                      Unidad #{idx + 1}
+                      <span className="text-sm font-normal text-gray-600">
+                        ({movimientos.length} movimiento{movimientos.length !== 1 ? 's' : ''})
+                      </span>
+                    </h3>
+                  </div>
+
+                  {/* Tabla de movimientos */}
+                  <div className="overflow-x-auto">
+                    <table className="w-full">
+                      <thead className="bg-gray-50 border-b border-gray-200">
+                        <tr>
+                          <th className="px-4 py-3 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider">
+                            Ubicación
+                          </th>
+                          <th className="px-4 py-3 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider">
+                            Orden de Trabajo
+                          </th>
+                          <th className="px-4 py-3 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider">
+                            Fecha Inicio
+                          </th>
+                          <th className="px-4 py-3 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider">
+                            Fecha Fin
+                          </th>
+                          <th className="px-4 py-3 text-center text-xs font-semibold text-gray-700 uppercase tracking-wider">
+                            Estado
+                          </th>
+                        </tr>
+                      </thead>
+                      <tbody className="bg-white divide-y divide-gray-200">
+                        {movimientos.map((h, i) => (
+                          <tr key={i} className="hover:bg-gray-50 transition-colors duration-150">
+                            <td className="px-4 py-3 text-sm">
+                              <div>
+                                <span className="font-medium text-gray-900">{h.tipo}</span>
+                                <span className="text-gray-600"> – {h.nombre}</span>
+                              </div>
+                            </td>
+                            <td className="px-4 py-3 text-sm text-gray-700">
+                              {h.orden_trabajo || (
+                                <span className="text-gray-400">Sin orden</span>
+                              )}
+                            </td>
+                            <td className="px-4 py-3 text-sm text-gray-700">
+                              {new Date(h.fecha_inicio).toLocaleDateString('es-PE')}
+                            </td>
+                            <td className="px-4 py-3 text-sm">
+                              {h.fecha_fin ? (
+                                new Date(h.fecha_fin).toLocaleDateString('es-PE')
+                              ) : (
+                                <span className="text-[#84cc16] font-semibold flex items-center gap-1">
+                                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} 
+                                          d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+                                  </svg>
+                                  Ubicación actual
+                                </span>
+                              )}
+                            </td>
+                            <td className="px-4 py-3 text-center">
+                              <span
+                                className={`
+                                  inline-flex items-center px-2.5 py-1 rounded-full text-xs font-semibold
+                                  ${h.fecha_fin
+                                    ? "bg-gray-100 text-gray-700"
+                                    : "bg-green-100 text-green-700"
+                                  }
+                                `}
+                              >
+                                {h.fecha_fin ? "Histórico" : "Activo"}
+                              </span>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+
+        {/* Footer */}
+        <div className="bg-gray-50 border-t border-gray-200 px-6 py-4 rounded-b-xl flex-shrink-0">
+          <div className="flex justify-end">
+            <button
+              onClick={onClose}
+              className="px-5 py-2.5 text-sm font-medium text-gray-700 bg-white 
+                       border border-gray-300 rounded-lg hover:bg-gray-50 
+                       transition-all duration-200"
+            >
+              Cerrar
+            </button>
+          </div>
         </div>
       </div>
     </div>

@@ -265,7 +265,18 @@ export const userAPI = {
 
 export const proveedorAPI = {
   list: () => api.get("/api/proveedores/"),
-  create: (data) => api.post("/api/proveedores/", data),
+
+  retrieve: (id) =>
+    api.get(`/api/proveedores/${id}/`),
+
+  create: (data) =>
+    api.post("/api/proveedores/", data),
+
+  update: (id, data) =>
+    api.put(`/api/proveedores/${id}/`, data),
+
+  delete: (id) =>
+    api.delete(`/api/proveedores/${id}/`),
 };
 
 export default api;

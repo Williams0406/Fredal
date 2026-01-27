@@ -2,7 +2,13 @@
 
 import { useEffect, useState } from "react";
 import { itemAPI, maquinariaAPI, trabajadorAPI, almacenAPI } from "@/lib/api";
-import { Select } from "@/components/ui/select";
+
+const ESTADOS_UNIDAD = {
+  NUEVO: "Nuevo",
+  USADO: "Usado",
+  INOPERATIVO: "Inoperativo",
+  REPARADO: "Reparado",
+};
 
 export default function ItemUbicacionModal({ itemId, open, onClose }) {
   const [item, setItem] = useState(null);
@@ -11,35 +17,35 @@ export default function ItemUbicacionModal({ itemId, open, onClose }) {
   const [maquinarias, setMaquinarias] = useState([]);
   const [trabajadores, setTrabajadores] = useState([]);
   const [editingUnitId, setEditingUnitId] = useState(null);
+  const [loading, setLoading] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState("");
 
   useEffect(() => {
     if (open && itemId) {
-      itemAPI.retrieve(itemId).then((res) => {
-        setItem(res.data);
-      });
-
-      // Traer opciones de ubicaciones
-      fetchUbicaciones();
+      loadData();
     }
   }, [open, itemId]);
 
-  const fetchUbicaciones = async () => {
-    const [alm, maq, tra] = await Promise.all([
-      almacenAPI.list(),     // ✅ correcto
-      maquinariaAPI.list(),
-      trabajadorAPI.list(),
-    ]);
+  const loadData = async () => {
+    setLoading(true);
+    try {
+      const [itemRes, almRes, maqRes, traRes] = await Promise.all([
+        itemAPI.retrieve(itemId),
+        almacenAPI.list(),
+        maquinariaAPI.list(),
+        trabajadorAPI.list(),
+      ]);
 
-    setAlmacenes(alm.data || []);
-    setMaquinarias(maq.data || []);
-    setTrabajadores(tra.data || []);
-  };
-
-  const ESTADOS_UNIDAD = {
-    NUEVO: "NUEVO",
-    USADO: "USADO",
-    INOPERATIVO: "INOPERATIVO",
-    REPARADO: "REPARADO",
+      setItem(itemRes.data);
+      setAlmacenes(almRes.data || []);
+      setMaquinarias(maqRes.data || []);
+      setTrabajadores(traRes.data || []);
+    } catch (err) {
+      console.error("Error loading data:", err);
+    } finally {
+      setLoading(false);
+    }
   };
 
   const startEditUnidad = (unidad) => {
@@ -66,200 +72,354 @@ export default function ItemUbicacionModal({ itemId, open, onClose }) {
     });
 
     setEditingUnitId(unidad.id);
+    setError("");
   };
 
+  const handleSave = async (unidadId) => {
+    // Validaciones
+    if (!editValues.tipoUbicacion) {
+      setError("Selecciona un tipo de ubicación");
+      return;
+    }
 
-  if (!open || !item) return null;
+    if (!editValues.ubicacion) {
+      setError("Selecciona una ubicación específica");
+      return;
+    }
+
+    setSaving(true);
+    setError("");
+
+    try {
+      await itemAPI.cambiarEstadoUnidad(item.id, {
+        unidad_id: unidadId,
+        nuevo_estado: editValues.estado,
+        almacen_id:
+          editValues.tipoUbicacion === "almacen"
+            ? Number(editValues.ubicacion)
+            : null,
+        maquinaria_id:
+          editValues.tipoUbicacion === "maquinaria"
+            ? Number(editValues.ubicacion)
+            : null,
+        trabajador_id:
+          editValues.tipoUbicacion === "trabajador"
+            ? Number(editValues.ubicacion)
+            : null,
+      });
+
+      const res = await itemAPI.retrieve(item.id);
+      setItem(res.data);
+      setEditingUnitId(null);
+    } catch (err) {
+      setError(err.response?.data?.detail || "Error al guardar");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleCancel = () => {
+    setEditingUnitId(null);
+    setError("");
+  };
+
+  if (!open) return null;
 
   return (
     <div
-      className="fixed inset-0 z-50 bg-black/40 flex items-center justify-center"
-      onClick={(e) => e.target === e.currentTarget && onClose()}
+      className="fixed inset-0 z-50 bg-black/40 flex items-center justify-center p-4"
+      onClick={onClose}
     >
-      <div className="bg-white w-full max-w-4xl rounded-lg p-6 space-y-4 max-h-[90vh] overflow-y-auto relative">
-        <div className="flex justify-between items-center">
-          <h2 className="text-xl font-semibold">Detalle de Unidades</h2>
-          <button
-            onClick={onClose}
-            className="text-gray-500 hover:text-gray-700 text-xl"
-          >
-            ✕
-          </button>
+      <div
+        className="bg-white w-full max-w-5xl rounded-xl max-h-[90vh] flex flex-col"
+        onClick={(e) => e.stopPropagation()}
+      >
+        {/* Header */}
+        <div className="border-b border-gray-200 px-6 py-4 flex-shrink-0">
+          <div className="flex justify-between items-center">
+            <div>
+              <h2 className="text-xl font-semibold text-[#1e3a8a] flex items-center gap-2">
+                <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} 
+                        d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z" />
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 11a3 3 0 11-6 0 3 3 0 016 0z" />
+                </svg>
+                Gestión de Ubicaciones
+              </h2>
+              <p className="text-sm text-gray-600 mt-1">
+                {item?.nombre} - Administra el estado y ubicación de cada unidad
+              </p>
+            </div>
+            <button
+              onClick={onClose}
+              className="text-gray-400 hover:text-gray-600 transition-colors duration-200"
+            >
+              <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+              </svg>
+            </button>
+          </div>
         </div>
 
-        <div className="overflow-x-auto">
-          <table className="w-full border-collapse">
-            <thead>
-              <tr className="border-b">
-                <th className="py-2 text-left">Serie</th>
-                <th className="py-2 text-left">Estado</th>
-                <th className="py-2 text-left">Ubicación</th>
-                <th className="py-2 text-left">Fecha Inicio</th>
-                <th className="py-2 text-left">Acciones</th>
-              </tr>
-            </thead>
-            <tbody>
-              {item.unidades.map((u) => {
-                const isEditing = editingUnitId === u.id;
-                return (
-                  <tr key={u.id} className="border-b last:border-b-0 hover:bg-gray-50">
-                    <td className="py-2 font-mono">{u.serie || "—"}</td>
+        {/* Content */}
+        <div className="flex-1 overflow-y-auto px-6 py-6">
+          {/* Error message */}
+          {error && (
+            <div className="mb-4 p-4 bg-red-50 border border-red-200 rounded-lg">
+              <p className="text-sm text-red-700">{error}</p>
+            </div>
+          )}
 
-                    <td className="py-2">
-                      {isEditing ? (
-                        <select
-                          className="border px-1 py-0.5 rounded"
-                          value={editValues.estado}
-                          onChange={(e) =>
-                            setEditValues({
-                              ...editValues,
-                              estado: e.target.value,
-                            })
-                          }
-                        >
-                          {Object.keys(ESTADOS_UNIDAD).map((e) => (
-                            <option key={e} value={e}>
-                              {e}
-                            </option>
-                          ))}
-                        </select>
-                      ) : (
-                        <span className="px-2 py-1 rounded text-xs font-semibold bg-gray-200 text-gray-700">
-                          {u.estado}
-                        </span>
-                      )}
-                    </td>
+          {loading ? (
+            <div className="flex items-center justify-center py-12">
+              <div className="text-center">
+                <div className="w-12 h-12 border-4 border-[#1e3a8a] border-t-transparent rounded-full animate-spin mx-auto mb-4"></div>
+                <p className="text-sm text-gray-600">Cargando unidades...</p>
+              </div>
+            </div>
+          ) : !item || item.unidades.length === 0 ? (
+            <div className="text-center py-12">
+              <svg className="w-16 h-16 text-gray-400 mx-auto mb-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} 
+                      d="M20 7l-8-4-8 4m16 0l-8 4m8-4v10l-8 4m0-10L4 7m8 4v10M4 7v10l8 4" />
+              </svg>
+              <p className="text-sm text-gray-600 font-medium">
+                No hay unidades registradas
+              </p>
+              <p className="text-xs text-gray-500 mt-1">
+                Las unidades aparecerán aquí cuando se registren compras
+              </p>
+            </div>
+          ) : (
+            <div className="border border-gray-200 rounded-lg overflow-hidden">
+              <div className="overflow-x-auto">
+                <table className="w-full">
+                  <thead className="bg-gray-50 border-b border-gray-200">
+                    <tr>
+                      <th className="px-4 py-3 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider">
+                        Serie
+                      </th>
+                      <th className="px-4 py-3 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider">
+                        Estado
+                      </th>
+                      <th className="px-4 py-3 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider">
+                        Ubicación
+                      </th>
+                      <th className="px-4 py-3 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider">
+                        Fecha Asignación
+                      </th>
+                      <th className="px-4 py-3 text-center text-xs font-semibold text-gray-700 uppercase tracking-wider">
+                        Acciones
+                      </th>
+                    </tr>
+                  </thead>
+                  <tbody className="bg-white divide-y divide-gray-200">
+                    {item.unidades.map((u) => {
+                      const isEditing = editingUnitId === u.id;
+                      
+                      return (
+                        <tr key={u.id} className="hover:bg-gray-50 transition-colors duration-150">
+                          {/* Serie */}
+                          <td className="px-4 py-3 text-sm font-mono text-gray-900">
+                            {u.serie || <span className="text-gray-400">Sin serie</span>}
+                          </td>
 
-                    <td className="py-2">
-                      {isEditing ? (
-                        <>
-                          <select
-                            className="border px-1 py-0.5 rounded mr-1"
-                            value={editValues.tipoUbicacion}
-                            onChange={(e) =>
-                              setEditValues({
-                                ...editValues,
-                                tipoUbicacion: e.target.value,
-                                ubicacion: "",
-                              })
-                            }
-                          >
-                            <option value="">SIN UBICACIÓN</option>
-                            <option value="almacen">Almacén</option>
-                            <option value="maquinaria">Maquinaria</option>
-                            <option value="trabajador">Trabajador</option>
-                          </select>
+                          {/* Estado */}
+                          <td className="px-4 py-3 text-sm">
+                            {isEditing ? (
+                              <select
+                                value={editValues.estado}
+                                onChange={(e) =>
+                                  setEditValues({
+                                    ...editValues,
+                                    estado: e.target.value,
+                                  })
+                                }
+                                className="px-3 py-2 border border-gray-300 rounded-lg text-sm
+                                         focus:outline-none focus:ring-2 focus:ring-[#1e3a8a] focus:border-transparent"
+                              >
+                                {Object.entries(ESTADOS_UNIDAD).map(([key, label]) => (
+                                  <option key={key} value={key}>
+                                    {label}
+                                  </option>
+                                ))}
+                              </select>
+                            ) : (
+                              <span
+                                className={`
+                                  inline-flex px-2.5 py-1 rounded-full text-xs font-semibold
+                                  ${u.estado === "NUEVO" ? "bg-blue-100 text-blue-700" : ""}
+                                  ${u.estado === "USADO" ? "bg-gray-100 text-gray-700" : ""}
+                                  ${u.estado === "INOPERATIVO" ? "bg-red-100 text-red-700" : ""}
+                                  ${u.estado === "REPARADO" ? "bg-green-100 text-green-700" : ""}
+                                `}
+                              >
+                                {ESTADOS_UNIDAD[u.estado] || u.estado}
+                              </span>
+                            )}
+                          </td>
 
-                          <select
-                            className="border px-1 py-0.5 rounded"
-                            value={editValues.ubicacion || ""}
-                            onChange={(e) =>
-                              setEditValues({
-                                ...editValues,
-                                ubicacion: e.target.value,
-                              })
-                            }
-                          >
-                            <option value="">-- Seleccione --</option>
-                            {editValues.tipoUbicacion === "almacen" &&
-                              almacenes.map((a) => (
-                                <option key={a.id} value={a.id}>
-                                  {a.nombre}
-                                </option>
-                              ))}
-                            {editValues.tipoUbicacion === "maquinaria" &&
-                              maquinarias.map((m) => (
-                                <option key={m.id} value={m.id}>
-                                  {m.nombre}
-                                </option>
-                              ))}
-                            {editValues.tipoUbicacion === "trabajador" &&
-                              trabajadores.map((t) => (
-                                <option key={t.id} value={t.id}>
-                                  {t.nombres} {t.apellidos}
-                                </option>
-                              ))}
-                          </select>
-                        </>
-                      ) : u.ubicacion_actual ? (
-                        <span className="font-medium">
-                          {u.ubicacion_actual.tipo}{" "}
-                          <span className="text-gray-500">– {u.ubicacion_actual.nombre}</span>
-                        </span>
-                      ) : (
-                        <span className="italic text-gray-400">SIN UBICACIÓN</span>
-                      )}
-                    </td>
+                          {/* Ubicación */}
+                          <td className="px-4 py-3 text-sm">
+                            {isEditing ? (
+                              <div className="flex gap-2">
+                                <select
+                                  value={editValues.tipoUbicacion}
+                                  onChange={(e) =>
+                                    setEditValues({
+                                      ...editValues,
+                                      tipoUbicacion: e.target.value,
+                                      ubicacion: "",
+                                    })
+                                  }
+                                  className="px-3 py-2 border border-gray-300 rounded-lg text-sm
+                                           focus:outline-none focus:ring-2 focus:ring-[#1e3a8a] focus:border-transparent"
+                                >
+                                  <option value="">Tipo...</option>
+                                  <option value="almacen">Almacén</option>
+                                  <option value="maquinaria">Maquinaria</option>
+                                  <option value="trabajador">Trabajador</option>
+                                </select>
 
-                    <td className="py-2 text-gray-600">
-                      {u.ubicacion_actual?.fecha_inicio
-                        ? new Date(u.ubicacion_actual.fecha_inicio).toLocaleDateString()
-                        : "—"}
-                    </td>
-                    <td className="py-2">
-                      {isEditing ? (
-                        <div className="flex gap-1">
-                          <button
-                            className="px-2 py-1 text-xs bg-green-500 text-white rounded"
-                            onClick={async () => {
-                              if (!editValues.tipoUbicacion || !editValues.ubicacion) return;
+                                <select
+                                  value={editValues.ubicacion || ""}
+                                  onChange={(e) =>
+                                    setEditValues({
+                                      ...editValues,
+                                      ubicacion: e.target.value,
+                                    })
+                                  }
+                                  disabled={!editValues.tipoUbicacion}
+                                  className={`
+                                    flex-1 px-3 py-2 border border-gray-300 rounded-lg text-sm
+                                    focus:outline-none focus:ring-2 focus:ring-[#1e3a8a] focus:border-transparent
+                                    ${!editValues.tipoUbicacion ? "bg-gray-50 cursor-not-allowed" : ""}
+                                  `}
+                                >
+                                  <option value="">Seleccione...</option>
+                                  {editValues.tipoUbicacion === "almacen" &&
+                                    almacenes.map((a) => (
+                                      <option key={a.id} value={a.id}>
+                                        {a.nombre}
+                                      </option>
+                                    ))}
+                                  {editValues.tipoUbicacion === "maquinaria" &&
+                                    maquinarias.map((m) => (
+                                      <option key={m.id} value={m.id}>
+                                        {m.codigo_maquina} - {m.nombre}
+                                      </option>
+                                    ))}
+                                  {editValues.tipoUbicacion === "trabajador" &&
+                                    trabajadores.map((t) => (
+                                      <option key={t.id} value={t.id}>
+                                        {t.nombres} {t.apellidos}
+                                      </option>
+                                    ))}
+                                </select>
+                              </div>
+                            ) : u.ubicacion_actual ? (
+                              <div>
+                                <span className="font-medium text-gray-900">
+                                  {u.ubicacion_actual.tipo}
+                                </span>
+                                <span className="text-gray-600">
+                                  {" "}– {u.ubicacion_actual.nombre}
+                                </span>
+                              </div>
+                            ) : (
+                              <span className="text-gray-400 italic">Sin ubicación</span>
+                            )}
+                          </td>
 
-                              await itemAPI.cambiarEstadoUnidad(item.id, {
-                                unidad_id: u.id,
-                                nuevo_estado: editValues.estado,
-                                almacen_id:
-                                  editValues.tipoUbicacion === "almacen"
-                                    ? Number(editValues.ubicacion)
-                                    : null,
-                                maquinaria_id:
-                                  editValues.tipoUbicacion === "maquinaria"
-                                    ? Number(editValues.ubicacion)
-                                    : null,
-                                trabajador_id:
-                                  editValues.tipoUbicacion === "trabajador"
-                                    ? Number(editValues.ubicacion)
-                                    : null,
-                              });
+                          {/* Fecha */}
+                          <td className="px-4 py-3 text-sm text-gray-600">
+                            {u.ubicacion_actual?.fecha_inicio ? (
+                              new Date(u.ubicacion_actual.fecha_inicio).toLocaleDateString('es-PE')
+                            ) : (
+                              <span className="text-gray-400">—</span>
+                            )}
+                          </td>
 
-                              const res = await itemAPI.retrieve(item.id);
-                              setItem(res.data);
-                              setEditingUnitId(null);
-                            }}
-                          >
-                            Guardar
-                          </button>
+                          {/* Acciones */}
+                          <td className="px-4 py-3 text-center">
+                            {isEditing ? (
+                              <div className="flex items-center justify-center gap-2">
+                                <button
+                                  onClick={() => handleSave(u.id)}
+                                  disabled={saving}
+                                  className="px-3 py-1.5 text-xs font-medium text-white bg-[#84cc16]
+                                           rounded-lg hover:bg-[#84cc16]/90 transition-all duration-200
+                                           disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-1"
+                                >
+                                  {saving ? (
+                                    <>
+                                      <div className="w-3 h-3 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
+                                      Guardando
+                                    </>
+                                  ) : (
+                                    <>
+                                      <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                                      </svg>
+                                      Guardar
+                                    </>
+                                  )}
+                                </button>
 
-                          <button
-                            className="px-2 py-1 text-xs bg-gray-200 rounded"
-                            onClick={() => setEditingUnitId(null)}
-                          >
-                            Cancelar
-                          </button>
-                        </div>
-                      ) : (
-                        <button
-                          className="px-2 py-1 text-xs bg-blue-500 text-white rounded"
-                          onClick={() => startEditUnidad(u)}
-                        >
-                          Editar
-                        </button>
-                      )}
-                    </td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
+                                <button
+                                  onClick={handleCancel}
+                                  disabled={saving}
+                                  className="px-3 py-1.5 text-xs font-medium text-gray-700 bg-gray-100
+                                           border border-gray-300 rounded-lg hover:bg-gray-200 
+                                           transition-all duration-200 disabled:opacity-50"
+                                >
+                                  Cancelar
+                                </button>
+                              </div>
+                            ) : (
+                              <button
+                                onClick={() => startEditUnidad(u)}
+                                className="px-3 py-1.5 text-xs font-medium text-white bg-[#1e3a8a]
+                                         rounded-lg hover:bg-[#1e3a8a]/90 transition-all duration-200
+                                         flex items-center gap-1 mx-auto"
+                              >
+                                <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} 
+                                        d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
+                                </svg>
+                                Editar
+                              </button>
+                            )}
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
         </div>
 
-        <div className="flex justify-end px-6 py-4 border-t bg-gray-50 rounded-b-xl gap-2">
-          
-          <button
-            onClick={onClose}
-            className="px-4 py-2 bg-gray-200 rounded hover:bg-gray-300"
-          >
-            Cerrar
-          </button>
+        {/* Footer */}
+        <div className="bg-gray-50 border-t border-gray-200 px-6 py-4 rounded-b-xl flex-shrink-0">
+          <div className="flex justify-between items-center">
+            <div className="text-sm text-gray-600">
+              {item && item.unidades.length > 0 && (
+                <span>
+                  Total de unidades: <span className="font-semibold text-gray-900">{item.unidades.length}</span>
+                </span>
+              )}
+            </div>
+            <button
+              onClick={onClose}
+              className="px-5 py-2.5 text-sm font-medium text-gray-700 bg-white 
+                       border border-gray-300 rounded-lg hover:bg-gray-50 
+                       transition-all duration-200"
+            >
+              Cerrar
+            </button>
+          </div>
         </div>
       </div>
     </div>

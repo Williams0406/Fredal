@@ -3,9 +3,24 @@
 import KanbanColumn from "./KanbanColumn";
 
 const ESTADOS = [
-  { key: "PENDIENTE", label: "Pendiente" },
-  { key: "EN_PROCESO", label: "En Proceso" },
-  { key: "FINALIZADO", label: "Finalizado" },
+  { 
+    key: "PENDIENTE", 
+    label: "Pendiente",
+    icon: "⏳",
+    color: "gray"
+  },
+  { 
+    key: "EN_PROCESO", 
+    label: "En Proceso",
+    icon: "⚙️",
+    color: "blue"
+  },
+  { 
+    key: "FINALIZADO", 
+    label: "Finalizado",
+    icon: "✓",
+    color: "green"
+  },
 ];
 
 export default function KanbanBoard({
@@ -16,20 +31,24 @@ export default function KanbanBoard({
   onView,
 }) {
   return (
-    <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-      {ESTADOS.map((estado) => (
-        <KanbanColumn
-          key={estado.key}
-          estado={estado}
-          trabajos={trabajos.filter(
-            (t) => t.estatus === estado.key
-          )}
-          onStatusChange={onStatusChange}
-          onEdit={onEdit}
-          onDelete={onDelete}
-          onView={onView}
-        />
-      ))}
+    <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+      {ESTADOS.map((estado) => {
+        const trabajosFiltrados = trabajos.filter(
+          (t) => t.estatus === estado.key
+        );
+
+        return (
+          <KanbanColumn
+            key={estado.key}
+            estado={estado}
+            trabajos={trabajosFiltrados}
+            onStatusChange={onStatusChange}
+            onEdit={onEdit}
+            onDelete={onDelete}
+            onView={onView}
+          />
+        );
+      })}
     </div>
   );
 }
