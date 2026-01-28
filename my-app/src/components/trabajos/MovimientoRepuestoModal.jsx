@@ -17,6 +17,8 @@ export default function MovimientoRepuestoModal({
   const [movimientosDB, setMovimientosDB] = useState([]); // existentes
   const [movimientosNew, setMovimientosNew] = useState([]); // nuevos
   const [loading, setLoading] = useState(false);
+  const [itemSearch, setItemSearch] = useState("");
+  const [showItemDropdown, setShowItemDropdown] = useState(false);
 
   const [form, setForm] = useState({
     item: "",
@@ -214,6 +216,12 @@ export default function MovimientoRepuestoModal({
     }
   };
 
+  const itemsFiltrados = items.filter((i) =>
+    `${i.codigo} ${i.nombre}`
+      .toLowerCase()
+      .includes(itemSearch.toLowerCase())
+  );
+
   /* ================== UI ================== */
 
   return (
@@ -267,26 +275,55 @@ export default function MovimientoRepuestoModal({
                   <label className="block text-sm font-medium text-gray-700 mb-2">
                     Item
                   </label>
-                  <select
-                    value={form.item}
-                    onChange={(e) =>
-                      setForm((p) => ({
-                        ...p,
-                        item: e.target.value,
-                        item_unidad: "",
-                      }))
-                    }
-                    className="w-full px-4 py-3 border border-gray-300 rounded-lg text-sm
-                             focus:outline-none focus:ring-2 focus:ring-[#1e3a8a] focus:border-transparent
-                             transition-all duration-200"
-                  >
-                    <option value="">Seleccione un item</option>
-                    {items.map((i) => (
-                      <option key={i.id} value={String(i.id)}>
-                        {i.codigo} - {i.nombre}
-                      </option>
-                    ))}
-                  </select>
+                  <div className="relative">
+                    <input
+                      type="text"
+                      placeholder="Buscar item por código o nombre..."
+                      value={itemSearch}
+                      onChange={(e) => {
+                        setItemSearch(e.target.value);
+                        setShowItemDropdown(true);
+                        setForm((p) => ({ ...p, item: "", item_unidad: "" }));
+                      }}
+                      onFocus={() => setShowItemDropdown(true)}
+                      className="w-full px-4 py-3 border border-gray-300 rounded-lg text-sm
+                                focus:outline-none focus:ring-2 focus:ring-[#1e3a8a] focus:border-transparent"
+                    />
+
+                    {showItemDropdown && itemSearch && (
+                      <div
+                        className="absolute z-30 mt-1 w-full bg-white border border-gray-200
+                                  rounded-lg shadow-lg max-h-56 overflow-y-auto"
+                      >
+                        {itemsFiltrados.length > 0 ? (
+                          itemsFiltrados.map((i) => (
+                            <button
+                              key={i.id}
+                              type="button"
+                              onClick={() => {
+                                setForm((p) => ({
+                                  ...p,
+                                  item: String(i.id),
+                                  item_unidad: "",
+                                }));
+                                setItemSearch(`${i.codigo} - ${i.nombre}`);
+                                setShowItemDropdown(false);
+                              }}
+                              className="w-full text-left px-4 py-2 text-sm hover:bg-blue-50
+                                        transition-colors"
+                            >
+                              <span className="font-medium">{i.codigo}</span>{" "}
+                              <span className="text-gray-600">— {i.nombre}</span>
+                            </button>
+                          ))
+                        ) : (
+                          <div className="px-4 py-2 text-sm text-gray-500">
+                            No se encontraron items
+                          </div>
+                        )}
+                      </div>
+                    )}
+                  </div>
                 </div>
 
                 {/* Unidad */}
