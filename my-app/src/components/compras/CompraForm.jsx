@@ -1,14 +1,14 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, useMemo } from "react";
 import { compraAPI, itemAPI, proveedorAPI } from "@/lib/api";
 
 const IGV = 1.18;
 
+// 1. Quitamos moneda de aquí, ahora se controla globalmente
 const emptyDetalle = {
   item: "",
   cantidad: 1,
-  moneda: "PEN",
   tipo_registro: "VALOR_UNITARIO",
   monto: "",
 };
@@ -19,9 +19,10 @@ export default function CompraForm({ onCreated }) {
   const [proveedores, setProveedores] = useState([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
+  const [searchTerm, setSearchTerm] = useState("");
 
   /* =========================
-     CABECERA
+      CABECERA
   ========================= */
 
   const [cabecera, setCabecera] = useState({
@@ -29,10 +30,11 @@ export default function CompraForm({ onCreated }) {
     proveedor: "",
     tipo_comprobante: "",
     codigo_comprobante: "",
+    moneda: "PEN", // 2. Agregado a la cabecera
   });
 
   /* =========================
-     DETALLE
+      DETALLE
   ========================= */
 
   const [detalles, setDetalles] = useState([{ ...emptyDetalle }]);
@@ -45,7 +47,7 @@ export default function CompraForm({ onCreated }) {
   }, [open]);
 
   /* =========================
-     HELPERS
+      HELPERS
   ========================= */
 
   const updateDetalle = (index, field, value) => {
@@ -108,29 +110,16 @@ export default function CompraForm({ onCreated }) {
   };
 
   /* =========================
-     SUBMIT
+      SUBMIT
   ========================= */
 
   const handleSubmit = async () => {
     setError("");
 
-    // Validaciones
-    if (!cabecera.fecha) {
-      setError("La fecha es obligatoria");
-      return;
-    }
+    if (!cabecera.fecha) { setError("La fecha es obligatoria"); return; }
+    if (!cabecera.tipo_comprobante) { setError("El tipo de comprobante es obligatorio"); return; }
+    if (!cabecera.codigo_comprobante?.trim()) { setError("El código de comprobante es obligatorio"); return; }
 
-    if (!cabecera.tipo_comprobante) {
-      setError("El tipo de comprobante es obligatorio");
-      return;
-    }
-
-    if (!cabecera.codigo_comprobante?.trim()) {
-      setError("El código de comprobante es obligatorio");
-      return;
-    }
-
-    // Validar que todos los detalles tengan item y monto
     for (let i = 0; i < detalles.length; i++) {
       if (!detalles[i].item) {
         setError(`Falta seleccionar el item en la línea ${i + 1}`);
@@ -145,20 +134,21 @@ export default function CompraForm({ onCreated }) {
     setLoading(true);
 
     try {
-      for (const d of detalles) {
-        await compraAPI.create({
-          fecha: cabecera.fecha,
-          proveedor: cabecera.proveedor || null,
-          tipo_comprobante: cabecera.tipo_comprobante,
-          codigo_comprobante: cabecera.codigo_comprobante,
+      await compraAPI.batch({
+        fecha: cabecera.fecha,
+        proveedor: cabecera.proveedor || null,
+        tipo_comprobante: cabecera.tipo_comprobante,
+        codigo_comprobante: cabecera.codigo_comprobante,
+        moneda: cabecera.moneda, // Enviamos la moneda de la cabecera
 
+        items: detalles.map((d) => ({
           item: Number(d.item),
           cantidad: Number(d.cantidad),
-          moneda: d.moneda,
+          moneda: cabecera.moneda, // Todos los items heredan la moneda del comprobante
           tipo_registro: d.tipo_registro,
           monto: Number(d.monto),
-        });
-      }
+        })),
+      });
 
       setOpen(false);
       setCabecera({
@@ -166,9 +156,11 @@ export default function CompraForm({ onCreated }) {
         proveedor: "",
         tipo_comprobante: "",
         codigo_comprobante: "",
+        moneda: "PEN",
       });
       setDetalles([{ ...emptyDetalle }]);
       onCreated?.();
+
     } catch (err) {
       console.error(err);
       setError(err.response?.data?.detail || "Error al registrar la compra");
@@ -177,17 +169,32 @@ export default function CompraForm({ onCreated }) {
     }
   };
 
-  /* =========================
-     UI
-  ========================= */
+  // FILTRADO LÓGICO DE ÍTEMS
+  const itemsFiltrados = useMemo(() => {
+    return items.filter(it => 
+      it.nombre.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      it.codigo.toLowerCase().includes(searchTerm.toLowerCase())
+    );
+  }, [items, searchTerm]);
+
+  // CÁLCULO DEL TOTAL GENERAL (Suma de todos los ítems)
+  const totalGeneralCompra = useMemo(() => {
+    return detalles.reduce((acc, d) => {
+      const montoNum = parseFloat(d.monto) || 0;
+      const cantNum = parseFloat(d.cantidad) || 0;
+      const esValor = d.tipo_registro === "VALOR_UNITARIO";
+      const costoFila = esValor ? (montoNum * IGV) * cantNum : montoNum * cantNum;
+      return acc + costoFila;
+    }, 0);
+  }, [detalles]);
 
   return (
     <>
       <button
         onClick={() => setOpen(true)}
         className="bg-[#1e3a8a] text-white px-5 py-2.5 rounded-lg text-sm font-medium
-                 hover:bg-[#1e3a8a]/90 focus:outline-none focus:ring-2 focus:ring-[#1e3a8a] 
-                 focus:ring-offset-2 transition-all duration-200 flex items-center gap-2"
+                  hover:bg-[#1e3a8a]/90 focus:outline-none focus:ring-2 focus:ring-[#1e3a8a] 
+                  focus:ring-offset-2 transition-all duration-200 flex items-center gap-2"
       >
         <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
@@ -221,24 +228,22 @@ export default function CompraForm({ onCreated }) {
               </div>
             </div>
 
-            {/* Content */}
             <div className="flex-1 overflow-y-auto px-6 py-6">
               <div className="space-y-6">
                 
-                {/* Error message */}
                 {error && (
                   <div className="p-4 bg-red-50 border border-red-200 rounded-lg">
                     <p className="text-sm text-red-700">{error}</p>
                   </div>
                 )}
 
-                {/* CABECERA */}
+                {/* CABECERA - Información del Comprobante */}
                 <div className="bg-gray-50 rounded-lg border border-gray-200 p-5">
                   <h3 className="text-base font-semibold text-gray-900 mb-4">
                     Información del Comprobante
                   </h3>
 
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                     <div>
                       <label className="block text-sm font-medium text-gray-700 mb-2">
                         Fecha <span className="text-red-500">*</span>
@@ -246,34 +251,43 @@ export default function CompraForm({ onCreated }) {
                       <input
                         type="date"
                         value={cabecera.fecha}
-                        onChange={(e) =>
-                          setCabecera({ ...cabecera, fecha: e.target.value })
-                        }
+                        onChange={(e) => setCabecera({ ...cabecera, fecha: e.target.value })}
                         className="w-full px-4 py-3 border border-gray-300 rounded-lg text-sm
-                                 focus:outline-none focus:ring-2 focus:ring-[#1e3a8a] focus:border-transparent
-                                 transition-all duration-200"
+                                  focus:outline-none focus:ring-2 focus:ring-[#1e3a8a] focus:border-transparent"
                       />
                     </div>
 
                     <div>
                       <label className="block text-sm font-medium text-gray-700 mb-2">
-                        Proveedor (opcional)
+                        Proveedor
                       </label>
                       <select
                         value={cabecera.proveedor}
-                        onChange={(e) =>
-                          setCabecera({ ...cabecera, proveedor: e.target.value })
-                        }
+                        onChange={(e) => setCabecera({ ...cabecera, proveedor: e.target.value })}
                         className="w-full px-4 py-3 border border-gray-300 rounded-lg text-sm
-                                 focus:outline-none focus:ring-2 focus:ring-[#1e3a8a] focus:border-transparent
-                                 transition-all duration-200"
+                                  focus:outline-none focus:ring-2 focus:ring-[#1e3a8a] focus:border-transparent"
                       >
                         <option value="">Sin proveedor</option>
                         {proveedores.map((p) => (
-                          <option key={p.id} value={p.id.toString()}>
-                            {p.nombre}
-                          </option>
+                          <option key={p.id} value={p.id.toString()}>{p.nombre}</option>
                         ))}
+                      </select>
+                    </div>
+
+                    {/* 3. CAMPO MONEDA MOVIDO AQUÍ */}
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-2">
+                        Moneda <span className="text-red-500">*</span>
+                      </label>
+                      <select
+                        value={cabecera.moneda}
+                        onChange={(e) => setCabecera({ ...cabecera, moneda: e.target.value })}
+                        className="w-full px-4 py-3 border border-gray-300 rounded-lg text-sm font-semibold
+                                  focus:outline-none focus:ring-2 focus:ring-[#1e3a8a] bg-white"
+                      >
+                        <option value="PEN">Soles (PEN)</option>
+                        <option value="USD">Dólares (USD)</option>
+                        <option value="EUR">Euros (EUR)</option>
                       </select>
                     </div>
 
@@ -283,12 +297,9 @@ export default function CompraForm({ onCreated }) {
                       </label>
                       <select
                         value={cabecera.tipo_comprobante}
-                        onChange={(e) =>
-                          setCabecera({ ...cabecera, tipo_comprobante: e.target.value })
-                        }
+                        onChange={(e) => setCabecera({ ...cabecera, tipo_comprobante: e.target.value })}
                         className="w-full px-4 py-3 border border-gray-300 rounded-lg text-sm
-                                 focus:outline-none focus:ring-2 focus:ring-[#1e3a8a] focus:border-transparent
-                                 transition-all duration-200"
+                                  focus:outline-none focus:ring-2 focus:ring-[#1e3a8a] focus:border-transparent"
                       >
                         <option value="">Seleccione tipo</option>
                         <option value="FACTURA">Factura</option>
@@ -296,7 +307,7 @@ export default function CompraForm({ onCreated }) {
                       </select>
                     </div>
 
-                    <div>
+                    <div className="md:col-span-2">
                       <label className="block text-sm font-medium text-gray-700 mb-2">
                         Código de comprobante <span className="text-red-500">*</span>
                       </label>
@@ -304,15 +315,9 @@ export default function CompraForm({ onCreated }) {
                         type="text"
                         placeholder="Ej: F001-00123"
                         value={cabecera.codigo_comprobante}
-                        onChange={(e) =>
-                          setCabecera({
-                            ...cabecera,
-                            codigo_comprobante: e.target.value,
-                          })
-                        }
+                        onChange={(e) => setCabecera({ ...cabecera, codigo_comprobante: e.target.value })}
                         className="w-full px-4 py-3 border border-gray-300 rounded-lg text-sm
-                                 focus:outline-none focus:ring-2 focus:ring-[#1e3a8a] focus:border-transparent
-                                 transition-all duration-200 placeholder:text-gray-400"
+                                  focus:outline-none focus:ring-2 focus:ring-[#1e3a8a] placeholder:text-gray-400"
                       />
                     </div>
                   </div>
@@ -322,116 +327,96 @@ export default function CompraForm({ onCreated }) {
                 <div>
                   <div className="flex justify-between items-center mb-4">
                     <h3 className="text-base font-semibold text-gray-900">
-                      Items de la Compra
+                      Items de la Compra ({cabecera.moneda})
                     </h3>
                     <button
                       onClick={addDetalle}
                       className="px-4 py-2 text-sm font-medium text-[#84cc16] bg-green-50 
-                               border border-green-200 rounded-lg hover:bg-green-100 
-                               transition-all duration-200 flex items-center gap-2"
+                                border border-green-200 rounded-lg hover:bg-green-100"
                     >
-                      <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
-                      </svg>
-                      Agregar Item
+                      + Agregar Item
                     </button>
                   </div>
 
                   <div className="space-y-4">
                     {detalles.map((d, i) => {
                       const calc = calcular(d);
-
                       return (
-                        <div
-                          key={i}
-                          className="border border-gray-200 rounded-lg p-4 bg-white"
-                        >
+                        <div key={i} className="border border-gray-200 rounded-lg p-4 bg-white">
                           <div className="flex justify-between items-center mb-4">
-                            <span className="text-sm font-semibold text-gray-700">
-                              Item #{i + 1}
-                            </span>
+                            <span className="text-sm font-semibold text-gray-700">Item #{i + 1}</span>
                             {detalles.length > 1 && (
-                              <button
-                                onClick={() => removeDetalle(i)}
-                                className="text-red-600 hover:text-red-800 text-sm font-medium
-                                         transition-colors duration-200 flex items-center gap-1"
-                              >
-                                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} 
-                                        d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
-                                </svg>
-                                Quitar
+                              <button onClick={() => removeDetalle(i)} className="text-red-600 text-sm flex items-center gap-1">
+                                🗑 Quitar
                               </button>
                             )}
                           </div>
 
-                          <div className="grid grid-cols-5 gap-3 mb-3">
-                            <div className="col-span-2">
-                              <label className="block text-xs font-medium text-gray-700 mb-1">
-                                Item
-                              </label>
-                              <select
-                                value={d.item}
-                                onChange={(e) =>
-                                  updateDetalle(i, "item", e.target.value)
-                                }
-                                className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm
-                                         focus:outline-none focus:ring-2 focus:ring-[#1e3a8a] focus:border-transparent"
-                              >
-                                <option value="">Seleccione item</option>
-                                {items.map((it) => (
-                                  <option key={it.id} value={it.id.toString()}>
-                                    {it.codigo} — {it.nombre}
-                                  </option>
-                                ))}
-                              </select>
+                          <div className="grid grid-cols-1 md:grid-cols-4 gap-3 mb-3">
+                            <div className="md:col-span-2">
+                              <label className="block text-xs font-medium text-gray-700 mb-1">Item</label>
+                              <div className="relative">
+                                <input
+                                  type="text"
+                                  placeholder="Buscar item por código o nombre..."
+                                  value={
+                                    d.item
+                                      ? items.find(it => it.id.toString() === d.item)?.nombre || ""
+                                      : searchTerm
+                                  }
+                                  onChange={(e) => {
+                                    setSearchTerm(e.target.value);
+                                    updateDetalle(i, "item", "");
+                                  }}
+                                  className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm
+                                            focus:ring-2 focus:ring-[#1e3a8a]"
+                                />
+
+                                {searchTerm && (
+                                  <div className="absolute z-20 bg-white border border-gray-200 rounded-lg
+                                                  shadow-lg mt-1 max-h-48 overflow-y-auto w-full">
+                                    {itemsFiltrados.length > 0 ? (
+                                      itemsFiltrados.map((it) => (
+                                        <button
+                                          type="button"
+                                          key={it.id}
+                                          onClick={() => {
+                                            updateDetalle(i, "item", it.id.toString());
+                                            setSearchTerm("");
+                                          }}
+                                          className="w-full text-left px-3 py-2 text-sm hover:bg-blue-50"
+                                        >
+                                          <span className="font-medium">{it.codigo}</span>{" "}
+                                          <span className="text-gray-500">— {it.nombre}</span>
+                                        </button>
+                                      ))
+                                    ) : (
+                                      <div className="px-3 py-2 text-sm text-gray-500">
+                                        No se encontraron items
+                                      </div>
+                                    )}
+                                  </div>
+                                )}
+                              </div>
                             </div>
 
                             <div>
-                              <label className="block text-xs font-medium text-gray-700 mb-1">
-                                Cantidad
-                              </label>
+                              <label className="block text-xs font-medium text-gray-700 mb-1">Cantidad</label>
                               <input
                                 type="number"
                                 min="1"
                                 value={d.cantidad}
-                                onChange={(e) =>
-                                  updateDetalle(i, "cantidad", e.target.value)
-                                }
-                                className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm
-                                         focus:outline-none focus:ring-2 focus:ring-[#1e3a8a] focus:border-transparent"
+                                onChange={(e) => updateDetalle(i, "cantidad", e.target.value)}
+                                className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-[#1e3a8a]"
                               />
                             </div>
 
                             <div>
-                              <label className="block text-xs font-medium text-gray-700 mb-1">
-                                Moneda
-                              </label>
-                              <select
-                                value={d.moneda}
-                                onChange={(e) =>
-                                  updateDetalle(i, "moneda", e.target.value)
-                                }
-                                className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm
-                                         focus:outline-none focus:ring-2 focus:ring-[#1e3a8a] focus:border-transparent"
-                              >
-                                <option value="PEN">PEN</option>
-                                <option value="USD">USD</option>
-                                <option value="EUR">EUR</option>
-                              </select>
-                            </div>
-
-                            <div>
-                              <label className="block text-xs font-medium text-gray-700 mb-1">
-                                Tipo registro
-                              </label>
+                              <label className="block text-xs font-medium text-gray-700 mb-1">Tipo registro</label>
                               <select
                                 value={d.tipo_registro}
-                                onChange={(e) =>
-                                  updateDetalle(i, "tipo_registro", e.target.value)
-                                }
-                                className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm
-                                         focus:outline-none focus:ring-2 focus:ring-[#1e3a8a] focus:border-transparent"
+                                onChange={(e) => updateDetalle(i, "tipo_registro", e.target.value)}
+                                className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-[#1e3a8a]"
                               >
                                 <option value="VALOR_UNITARIO">Valor unit.</option>
                                 <option value="COSTO_UNITARIO">Costo unit.</option>
@@ -441,55 +426,27 @@ export default function CompraForm({ onCreated }) {
                             </div>
                           </div>
 
-                          <div className="grid grid-cols-2 gap-3 mb-3">
-                            <div>
+                          <div className="grid grid-cols-1 md:grid-cols-4 gap-3 mb-3">
+                             <div className="md:col-span-1">
                               <label className="block text-xs font-medium text-gray-700 mb-1">
-                                Monto
+                                Monto ({cabecera.moneda})
                               </label>
                               <input
                                 type="number"
                                 step="0.01"
                                 placeholder="0.00"
                                 value={d.monto}
-                                onChange={(e) =>
-                                  updateDetalle(i, "monto", e.target.value)
-                                }
-                                className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm
-                                         focus:outline-none focus:ring-2 focus:ring-[#1e3a8a] focus:border-transparent
-                                         placeholder:text-gray-400"
+                                onChange={(e) => updateDetalle(i, "monto", e.target.value)}
+                                className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-[#1e3a8a]"
                               />
                             </div>
-                          </div>
 
-                          {/* Cálculos */}
-                          <div className="bg-blue-50 border border-blue-200 rounded-lg p-3">
-                            <p className="text-xs font-medium text-blue-900 mb-2">
-                              Valores calculados (IGV 18%):
-                            </p>
-                            <div className="grid grid-cols-4 gap-3 text-xs">
-                              <div>
-                                <span className="text-blue-700">V. Unit:</span>
-                                <span className="ml-1 font-semibold text-blue-900">
-                                  {calc.valor_unitario.toFixed(2)}
-                                </span>
-                              </div>
-                              <div>
-                                <span className="text-blue-700">C. Unit:</span>
-                                <span className="ml-1 font-semibold text-blue-900">
-                                  {calc.costo_unitario.toFixed(2)}
-                                </span>
-                              </div>
-                              <div>
-                                <span className="text-blue-700">V. Total:</span>
-                                <span className="ml-1 font-semibold text-blue-900">
-                                  {calc.valor_total.toFixed(2)}
-                                </span>
-                              </div>
-                              <div>
-                                <span className="text-blue-700">C. Total:</span>
-                                <span className="ml-1 font-semibold text-blue-900">
-                                  {calc.costo_total.toFixed(2)}
-                                </span>
+                            <div className="md:col-span-3 bg-blue-50 border border-blue-200 rounded-lg p-3">
+                              <div className="grid grid-cols-4 gap-2 text-[10px] md:text-xs">
+                                <div><span className="text-blue-700 block">V. Unit:</span><span className="font-bold">{cabecera.moneda} {calc.valor_unitario.toFixed(2)}</span></div>
+                                <div><span className="text-blue-700 block">C. Unit:</span><span className="font-bold">{cabecera.moneda} {calc.costo_unitario.toFixed(2)}</span></div>
+                                <div><span className="text-blue-700 block">V. Total:</span><span className="font-bold">{cabecera.moneda} {calc.valor_total.toFixed(2)}</span></div>
+                                <div><span className="text-blue-700 block">C. Total:</span><span className="font-bold">{cabecera.moneda} {calc.costo_total.toFixed(2)}</span></div>
                               </div>
                             </div>
                           </div>
@@ -501,42 +458,39 @@ export default function CompraForm({ onCreated }) {
               </div>
             </div>
 
-            {/* Footer */}
+            {/* FOOTER DEL MODAL CON TOTAL GENERAL */}
             <div className="bg-gray-50 border-t border-gray-200 px-6 py-4 rounded-b-xl flex-shrink-0">
-              <div className="flex justify-end gap-3">
-                <button
-                  onClick={() => setOpen(false)}
-                  disabled={loading}
-                  className="px-5 py-2.5 text-sm font-medium text-gray-700 bg-white 
-                           border border-gray-300 rounded-lg hover:bg-gray-50 
-                           transition-all duration-200 disabled:opacity-50"
-                >
-                  Cancelar
-                </button>
-                <button
-                  onClick={handleSubmit}
-                  disabled={loading}
-                  className="px-5 py-2.5 text-sm font-medium text-white bg-[#1e3a8a]
-                           rounded-lg hover:bg-[#1e3a8a]/90 focus:outline-none 
-                           focus:ring-2 focus:ring-[#1e3a8a] focus:ring-offset-2
-                           transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed
-                           flex items-center gap-2"
-                >
-                  {loading ? (
-                    <>
-                      <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
-                      Guardando...
-                    </>
-                  ) : (
-                    <>
-                      <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} 
-                              d="M5 13l4 4L19 7" />
-                      </svg>
-                      Guardar Compra
-                    </>
-                  )}
-                </button>
+              <div className="flex justify-between items-center">
+                <div className="flex flex-col">
+                  <span className="text-sm text-gray-500 font-medium">
+                    TOTAL GENERAL ESTIMADO (CON IGV)
+                  </span>
+                  <span className="text-2xl font-bold text-[#1e3a8a]">
+                    {cabecera.moneda}{" "}
+                    {totalGeneralCompra.toLocaleString("en-US", {
+                      minimumFractionDigits: 2,
+                      maximumFractionDigits: 2,
+                    })}
+                  </span>
+                </div>
+
+                <div className="flex gap-3">
+                  <button
+                    onClick={() => setOpen(false)}
+                    disabled={loading}
+                    className="px-5 py-2.5 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-lg"
+                  >
+                    Cancelar
+                  </button>
+
+                  <button
+                    onClick={handleSubmit}
+                    disabled={loading}
+                    className="px-5 py-2.5 text-sm font-medium text-white bg-[#1e3a8a] rounded-lg disabled:opacity-50"
+                  >
+                    {loading ? "Guardando..." : "Guardar Compra"}
+                  </button>
+                </div>
               </div>
             </div>
           </div>

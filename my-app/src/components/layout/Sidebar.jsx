@@ -21,7 +21,9 @@ export default function Sidebar({ collapsed, onToggle }) {
     <aside
       className={`
         ${collapsed ? "w-20" : "w-64"}
-        min-h-screen bg-[#1e3a8a] text-white
+        fixed top-0 left-0 z-40
+        h-screen
+        bg-[#1e3a8a] text-white
         flex flex-col transition-all duration-300
       `}
     >

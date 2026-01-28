@@ -30,14 +30,19 @@ export default function PrivateLayout({ children }) {
   if (loading) return <p>Cargando...</p>;
 
   return (
-    <div className="flex min-h-screen">
+    <div className="min-h-screen">
       <Sidebar
         user={user}
         collapsed={collapsed}
         onToggle={() => setCollapsed(!collapsed)}
       />
 
-      <div className="flex-1 flex flex-col">
+      <div
+        className={`
+          flex flex-col min-h-screen transition-all duration-300
+          ${collapsed ? "ml-20" : "ml-64"}
+        `}
+      >
         <Header user={user} />
         <main className="p-6 flex-1 overflow-auto">
           {children}

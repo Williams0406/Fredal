@@ -239,6 +239,7 @@ export const actividadTrabajoAPI = {
 export const compraAPI = {
   list: (params) => api.get("/api/compras/", { params }),
   create: (data) => api.post("/api/compras/", data),
+  batch: (data) => api.post("/api/compras/batch/", data),
 };
 
 export const movimientoRepuestoAPI = {

@@ -19,6 +19,7 @@ from .models import (
     Item,
     Maquinaria,
     Compra,
+    CompraDetalle,
     Trabajador,
     OrdenTrabajo,
     ActividadTrabajo,
@@ -35,7 +36,9 @@ from .serializers import (
     UserSerializer,
     ItemSerializer,
     MaquinariaSerializer,
-    CompraSerializer,
+    CompraCreateItemSerializer,
+    CompraCreateSerializer,
+    CompraDetalleListSerializer,
     MeSerializer,
     OrdenTrabajoSerializer,
     ActividadTrabajoSerializer,
@@ -51,7 +54,7 @@ from .serializers import (
     ItemProveedorSerializer,
     ProveedorSerializer,
     KardexContableSerializer,
-    AlmacenSerializer,
+    AlmacenSerializer
 )
 from .permissions import (
     IsAdmin,
@@ -217,7 +220,7 @@ class ItemViewSet(viewsets.ModelViewSet):
         item = self.get_object()
 
         # 📥 Compras
-        compras = Compra.objects.filter(item=item).order_by("fecha")
+        compras = CompraDetalle.objects.filter(item=item).select_related("compra").order_by("compra__fecha")
 
         # 📤 Salidas
         salidas = (
@@ -248,11 +251,7 @@ class ItemViewSet(viewsets.ModelViewSet):
             maquinaria = orden.maquinaria if orden else None
 
             # ⚠️ Seguridad: por si alguna unidad no tiene compra
-            costo_unitario = (
-                compra.costo_unitario
-                if compra and compra.valor_unitario
-                else Decimal("0.00")
-            )
+            costo_unitario = detalle.costo_unitario if detalle else Decimal("0.00")
 
             eventos.append({
                 "fecha": s.fecha,
@@ -414,7 +413,8 @@ class MaquinariaViewSet(viewsets.ModelViewSet):
 
         for h in historiales:
             unidad = h.item_unidad
-            compra = unidad.compra
+            detalle = unidad.compra_detalle
+            compra = detalle.compra if detalle else None
 
             costo = (
                 compra.costo_unitario
@@ -444,32 +444,20 @@ class MaquinariaViewSet(viewsets.ModelViewSet):
         })
 
 class CompraViewSet(viewsets.ModelViewSet):
-    queryset = Compra.objects.select_related(
-        "item", "proveedor"
-    ).all()
-    serializer_class = CompraSerializer
+    queryset = CompraDetalle.objects.all().order_by("-compra__fecha")
     permission_classes = [CompraPermission]
 
-    filter_backends = [
-        DjangoFilterBackend,
-        filters.SearchFilter,
-    ]
+    def get_serializer_class(self):
+        if self.action in ["create", "batch"]:
+            return CompraCreateSerializer
+        return CompraDetalleListSerializer # Para el listado general
 
-    filterset_fields = [
-        "tipo_comprobante",
-        "fecha",
-        "item__volvo",   # ✅ correcto
-    ]
-
-    search_fields = [
-        "codigo_comprobante",
-        "item__nombre",
-        "item__codigo",
-        "proveedor__nombre",
-    ]
-
-    def perform_create(self, serializer):
+    @action(detail=False, methods=["post"])
+    def batch(self, request):
+        serializer = self.get_serializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
         serializer.save()
+        return Response(serializer.data, status=status.HTTP_201_CREATED)
 
 class TrabajadorViewSet(viewsets.ModelViewSet):
     queryset = Trabajador.objects.all()

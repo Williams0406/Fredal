@@ -47,19 +47,19 @@ class Maquinaria(models.Model):
 
         historiales = (
             HistorialUbicacionItem.objects
-            .select_related("item_unidad__compra")
+            .select_related("item_unidad__compra_detalle")
             .filter(
                 maquinaria=self,
                 fecha_fin__isnull=True,
-                item_unidad__compra__isnull=False
+                item_unidad__compra_detalle__isnull=False
             )
         )
 
         total = Decimal("0.00")
 
         for h in historiales:
-            compra = h.item_unidad.compra
-            total += compra.valor_unitario * Decimal("1.18")
+            detalle = h.item_unidad.compra_detalle
+            total += detalle.costo_unitario
 
         return total
 
@@ -102,8 +102,8 @@ class ItemUnidad(models.Model):
         related_name="unidades"
     )
 
-    compra = models.ForeignKey(
-        "Compra",
+    compra_detalle = models.ForeignKey(
+        "CompraDetalle",
         on_delete=models.PROTECT,
         related_name="unidades",
         null=True,
@@ -364,6 +364,7 @@ class MovimientoRepuesto(models.Model):
             raise ValidationError(
                 "La unidad no puede estar en estado INOPERATIVO"
             )
+        
     
 
 # =========================
@@ -383,29 +384,44 @@ class Compra(models.Model):
 
     tipo_comprobante = models.CharField(max_length=10, choices=TipoComprobante.choices)
     codigo_comprobante = models.CharField(max_length=50)
-    item = models.ForeignKey(Item, on_delete=models.PROTECT)
     proveedor = models.ForeignKey(Proveedor, on_delete=models.PROTECT, related_name="compras", null=True, blank=True)
-    IGV = Decimal("1.18")
-
-    cantidad = models.PositiveIntegerField()
-
-    valor_unitario = models.DecimalField(
-        max_digits=12,
-        decimal_places=2,
-        help_text="Precio sin IGV",
-        null=True,
-        blank=True
-    )
-
     moneda = models.CharField(
         max_length=3,
         choices=Moneda.choices,
         default=Moneda.PEN
     )
     fecha = models.DateField(default=timezone.localdate)
-    client_uid = models.UUIDField(default=uuid.uuid4, null=True, blank=True, unique=True, editable=False)
+    
+    class Meta:
+        unique_together = ("tipo_comprobante", "codigo_comprobante")
 
-    # ====== CAMPOS CALCULADOS ======
+class CompraDetalle(models.Model):
+    IGV = Decimal("1.18")
+
+    compra = models.ForeignKey(
+        Compra,
+        related_name="detalles",
+        on_delete=models.CASCADE
+    )
+
+    item = models.ForeignKey(Item, on_delete=models.PROTECT)
+    cantidad = models.PositiveIntegerField()
+
+    moneda = models.CharField(
+        max_length=3,
+        choices=Compra.Moneda.choices,
+        default=Compra.Moneda.PEN
+    )
+
+    valor_unitario = models.DecimalField(
+        max_digits=12,
+        decimal_places=2,
+        help_text="Precio sin IGV"
+    )
+
+    class Meta:
+        unique_together = ("compra", "item")
+
     @property
     def valor_total(self):
         return self.cantidad * self.valor_unitario
@@ -417,9 +433,6 @@ class Compra(models.Model):
     @property
     def costo_total(self):
         return self.valor_total * self.IGV
-
-    class Meta:
-        unique_together = ("tipo_comprobante", "codigo_comprobante")
 
 # =========================
 # AUDITORÍA

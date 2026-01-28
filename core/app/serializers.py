@@ -5,11 +5,13 @@ from django.contrib.contenttypes.models import ContentType
 from decimal import Decimal
 from django.db import transaction
 from django.utils import timezone
+from rest_framework.exceptions import ValidationError
 
 from .models import (
     Item,
     Maquinaria,
     Compra,
+    CompraDetalle,
     Almacen,
     Trabajador,
     PerfilUsuario,
@@ -104,7 +106,7 @@ class MaquinariaSerializer(serializers.ModelSerializer):
 
     def get_centro_costos(self, obj):
         return round(obj.calcular_centro_costos(), 2)
-
+"""
 class CompraSerializer(serializers.ModelSerializer):
     # ===== CAMPOS DE ENTRADA OPCIONALES =====
     item_nombre = serializers.CharField(source="item.nombre", read_only=True)
@@ -192,6 +194,7 @@ class CompraSerializer(serializers.ModelSerializer):
             raise serializers.ValidationError("Tipo de registro inválido")
 
         data["valor_unitario"] = valor_unitario.quantize(Decimal("0.01"))
+
         return data
 
     # ===== GETTERS =====
@@ -236,6 +239,128 @@ class CompraSerializer(serializers.ModelSerializer):
                 h.save()
 
         return compra
+"""
+class CompraCreateItemSerializer(serializers.Serializer):
+    item = serializers.PrimaryKeyRelatedField(queryset=Item.objects.all())
+    cantidad = serializers.IntegerField(min_value=1)
+    tipo_registro = serializers.ChoiceField(
+        choices=["VALOR_UNITARIO", "COSTO_UNITARIO", "VALOR_TOTAL", "COSTO_TOTAL"]
+    )
+    monto = serializers.DecimalField(max_digits=12, decimal_places=2)
+    moneda = serializers.CharField(max_length=3)
+
+class CompraCreateSerializer(serializers.ModelSerializer):
+    items = CompraCreateItemSerializer(many=True, write_only=True)
+    IGV_FACTOR = Decimal("1.18")
+
+    class Meta:
+        model = Compra
+        fields = ["fecha", "proveedor", "tipo_comprobante", "codigo_comprobante", "moneda", "items"]
+
+    def create(self, validated_data):
+        items_data = validated_data.pop("items")
+        with transaction.atomic():
+            # 1. Crear la cabecera de Compra
+            compra = Compra.objects.create(**validated_data)
+            
+            # 2. Obtener almacén por defecto para el ingreso
+            almacen_principal, _ = Almacen.objects.get_or_create(nombre="Almacén Central")
+
+            for data in items_data:
+                cantidad = data["cantidad"]
+                monto = data["monto"]
+                tipo = data["tipo_registro"]
+                
+                # 3. Lógica de cálculo de Valor Unitario (Base Imponible)
+                if tipo == "VALOR_UNITARIO":
+                    valor_unitario = monto
+                elif tipo == "COSTO_UNITARIO":
+                    valor_unitario = monto / self.IGV_FACTOR
+                elif tipo == "VALOR_TOTAL":
+                    valor_unitario = monto / cantidad
+                else: # COSTO_TOTAL
+                    valor_unitario = (monto / self.IGV_FACTOR) / cantidad
+
+                # 4. Crear el detalle
+                detalle = CompraDetalle.objects.create(
+                    compra=compra,
+                    item=data["item"],
+                    cantidad=cantidad,
+                    moneda=data["moneda"],
+                    valor_unitario=valor_unitario.quantize(Decimal("0.01"))
+                )
+
+                # 5. Generar unidades físicas en inventario e historial inicial
+                for _ in range(cantidad):
+                    unidad = ItemUnidad.objects.create(
+                        item=data["item"],
+                        compra_detalle=detalle,
+                        estado=ItemUnidad.Estado.NUEVO
+                    )
+                    HistorialUbicacionItem.objects.create(
+                        item_unidad=unidad,
+                        almacen=almacen_principal,
+                        estado=unidad.estado,
+                        fecha_inicio=compra.fecha
+                    )
+            return compra
+
+class CompraDetalleListSerializer(serializers.ModelSerializer):
+    # Item
+    item_nombre = serializers.CharField(source="item.nombre", read_only=True)
+    item_codigo = serializers.CharField(source="item.codigo", read_only=True)
+    item_volvo = serializers.BooleanField(source="item.volvo", read_only=True)
+
+    # Proveedor
+    proveedor_nombre = serializers.CharField(
+        source="compra.proveedor.nombre",
+        read_only=True,
+        default=None
+    )
+
+    # Cabecera
+    fecha = serializers.DateField(source="compra.fecha", read_only=True)
+    tipo_comprobante = serializers.CharField(
+        source="compra.tipo_comprobante",
+        read_only=True
+    )
+    codigo_comprobante = serializers.CharField(
+        source="compra.codigo_comprobante",
+        read_only=True
+    )
+
+    # Cálculos (idénticos a los que usabas)
+    valor_total = serializers.SerializerMethodField()
+    costo_unitario = serializers.SerializerMethodField()
+    costo_total = serializers.SerializerMethodField()
+
+    class Meta:
+        model = CompraDetalle
+        fields = [
+            "id",
+            "fecha",
+            "item_nombre",
+            "item_codigo",
+            "item_volvo",
+            "proveedor_nombre",
+            "cantidad",
+            "valor_unitario",
+            "valor_total",
+            "costo_unitario",
+            "costo_total",
+            "moneda",
+            "tipo_comprobante",
+            "codigo_comprobante",
+        ]
+
+    def get_valor_total(self, obj):
+        return obj.valor_unitario * obj.cantidad
+
+    def get_costo_unitario(self, obj):
+        return obj.valor_unitario * Decimal("1.18")
+
+    def get_costo_total(self, obj):
+        return self.get_costo_unitario(obj) * obj.cantidad
 
 
 class AlmacenSerializer(serializers.ModelSerializer):
@@ -699,3 +824,6 @@ class KardexContableSerializer(serializers.Serializer):
     inventario_final_cantidad = serializers.IntegerField()
     inventario_final_costo = serializers.DecimalField(max_digits=14, decimal_places=2)
     maquinaria = serializers.DictField(required=False, allow_null=True)
+
+
+
