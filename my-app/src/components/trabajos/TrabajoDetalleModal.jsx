@@ -84,31 +84,35 @@ export default function TrabajoDetalleModal({ open, trabajoId, onClose, onUpdate
   }, [open, trabajoId]);
 
   useEffect(() => {
-    if (!actividades.length) {
+    if (!actividades.length || !trabajoId) {
       setUnidadesPorActividad({});
       return;
     }
 
-    const loadUnidades = async () => {
-      const result = {};
-
-      for (const a of actividades) {
-        if (a.tipo_actividad !== "MANTENIMIENTO") continue;
-
-        const res = await movimientoRepuestoAPI.list({
-          actividad: a.id,
-        });
-
-        result[a.id] = res.data.filter(
-          (m) => m.estado !== "INOPERATIVO"
+    const loadUnidadesHistorial = async () => {
+      try {
+        const result = {};
+        
+        // Ejecutamos las peticiones para cada actividad
+        await Promise.all(
+          actividades.map(async (a) => {
+            // Usamos movimientoRepuestoAPI en lugar de 'api'
+            const res = await movimientoRepuestoAPI.list({ actividad: a.id });
+            
+            // Guardamos TODOS los movimientos (sin filtrar por estado INOPERATIVO)
+            // para que el historial sea permanente.
+            result[a.id] = res.data; 
+          })
         );
-      }
 
-      setUnidadesPorActividad(result);
+        setUnidadesPorActividad(result);
+      } catch (error) {
+        console.error("Error cargando historial de unidades", error);
+      }
     };
 
-    loadUnidades();
-  }, [actividades]);
+    loadUnidadesHistorial();
+  }, [actividades, trabajoId]);
 
   if (!open) return null;
 
@@ -669,38 +673,28 @@ function ActividadCard({ actividad, unidades, esFinalizado, onAgregarRepuesto })
         )}
       </div>
 
-      {/* Unidades asignadas */}
+      {/* REEMPLAZO: Unidades/Repuestos desde el historial de la actividad */}
       {unidades && unidades.length > 0 && (
         <div className="mt-3 border-t border-gray-100 pt-3">
           <p className="text-xs font-medium text-gray-700 mb-2">
-            Repuestos utilizados:
+            Unidades asignadas en esta actividad:
           </p>
-          <div className="overflow-x-auto">
-            <table className="w-full text-xs">
-              <thead className="bg-gray-50 border-b border-gray-200">
-                <tr className="text-left">
-                  <th className="py-2 px-3 font-medium text-gray-700">Item</th>
-                  <th className="py-2 px-3 font-medium text-gray-700">Unidad</th>
-                  <th className="py-2 px-3 font-medium text-gray-700">Estado</th>
-                </tr>
-              </thead>
-              <tbody>
-                {unidades.map((u, i) => (
-                  <tr key={i} className="border-b border-gray-100 last:border-0">
-                    <td className="py-2 px-3">
-                      <span className="font-medium text-gray-900">{u.item_codigo}</span>
-                      <span className="text-gray-600"> – {u.item_nombre}</span>
-                    </td>
-                    <td className="py-2 px-3 text-gray-700">{u.unidad_serie}</td>
-                    <td className="py-2 px-3">
-                      <span className="px-2 py-0.5 rounded text-xs font-medium bg-green-100 text-green-700">
-                        {u.estado}
-                      </span>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+          <div className="mt-2 space-y-1">
+            {unidades.map((mov) => (
+              <div key={mov.id} className="text-xs bg-gray-50 p-2 rounded border flex justify-between items-center">
+                <span className="flex flex-col">
+                  <span className="font-semibold text-gray-900">
+                    {mov.item_codigo} - {mov.item_nombre} {/* <--- MOSTRAR NOMBRE AQUÍ */}
+                  </span>
+                  <span className="text-gray-500">
+                    S/N: {mov.unidad_serie}
+                  </span>
+                </span>
+                <span className="text-gray-500 italic bg-white px-2 py-0.5 rounded border border-gray-100">
+                  Estado: {mov.estado}
+                </span>
+              </div>
+            ))}
           </div>
         </div>
       )}
