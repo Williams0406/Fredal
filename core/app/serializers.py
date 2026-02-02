@@ -589,6 +589,7 @@ class GroupSerializer(serializers.ModelSerializer):
 class HistorialUbicacionItemSerializer(serializers.ModelSerializer):
     tipo = serializers.SerializerMethodField()
     nombre = serializers.SerializerMethodField()
+    maquinaria = serializers.SerializerMethodField()
 
     class Meta:
         model = HistorialUbicacionItem
@@ -596,6 +597,7 @@ class HistorialUbicacionItemSerializer(serializers.ModelSerializer):
             "id",
             "tipo",
             "nombre",
+            "maquinaria",
             "orden_trabajo",
             "fecha_inicio",
             "fecha_fin",
@@ -611,6 +613,16 @@ class HistorialUbicacionItemSerializer(serializers.ModelSerializer):
 
     def get_nombre(self, obj):
         return str(obj.almacen or obj.maquinaria or obj.trabajador)
+    
+    def get_maquinaria(self, obj):
+        if not obj.maquinaria:
+            return None
+
+        return {
+            "id": obj.maquinaria.id,
+            "codigo": obj.maquinaria.codigo_maquina,
+            "nombre": obj.maquinaria.nombre,
+        }
 
 class ItemDetalleSerializer(serializers.ModelSerializer):
     unidades = serializers.SerializerMethodField()

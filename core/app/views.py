@@ -143,25 +143,31 @@ class ItemViewSet(viewsets.ModelViewSet):
         item = self.get_object()
 
         qs = (
-            Compra.objects
-            .filter(item=item, proveedor__isnull=False)
+            CompraDetalle.objects
+            .filter(
+                item=item,
+                compra__proveedor__isnull=False
+            )
             .values(
-                "proveedor_id",
-                "proveedor__nombre",
-                "proveedor__ruc",
-                "moneda"
+                "compra__proveedor_id",
+                "compra__proveedor__nombre",
+                "compra__proveedor__ruc",
+                "compra__moneda",
             )
             .annotate(
                 precio_promedio=Avg("valor_unitario")
             )
-            .order_by("proveedor__nombre", "moneda")
+            .order_by(
+                "compra__proveedor__nombre",
+                "compra__moneda"
+            )
         )
 
         data = [
             {
-                "proveedor_nombre": r["proveedor__nombre"],
-                "proveedor_ruc": r["proveedor__ruc"],
-                "moneda": r["moneda"],
+                "proveedor_nombre": r["compra__proveedor__nombre"],
+                "proveedor_ruc": r["compra__proveedor__ruc"],
+                "moneda": r["compra__moneda"],
                 "precio": round(r["precio_promedio"], 2),
             }
             for r in qs
@@ -220,7 +226,12 @@ class ItemViewSet(viewsets.ModelViewSet):
         item = self.get_object()
 
         # 📥 Compras
-        compras = CompraDetalle.objects.filter(item=item).select_related("compra").order_by("compra__fecha")
+        compras = (
+            CompraDetalle.objects
+            .filter(item=item)
+            .select_related("compra")
+            .order_by("compra__fecha")
+        )
 
         # 📤 Salidas
         salidas = (
@@ -232,25 +243,26 @@ class ItemViewSet(viewsets.ModelViewSet):
 
         eventos = []
 
+        # ===== COMPRAS =====
         for c in compras:
             eventos.append({
                 "fecha": timezone.make_aware(
-                    datetime.combine(c.fecha, time.min),
+                    datetime.combine(c.compra.fecha, time.min),
                     timezone.get_current_timezone()
                 ),
                 "tipo": "COMPRA",
                 "cantidad": c.cantidad,
                 "costo_unitario": c.costo_unitario,
-                "registro": f"{c.tipo_comprobante} {c.codigo_comprobante}",
+                "registro": f"{c.compra.tipo_comprobante} {c.compra.codigo_comprobante}",
             })
 
+        # ===== SALIDAS =====
         for s in salidas:
             unidad = s.item_unidad
-            compra = unidad.compra
-            orden = s.actividad.orden
+            detalle = unidad.compra_detalle
+            orden = s.actividad.orden if s.actividad else None
             maquinaria = orden.maquinaria if orden else None
 
-            # ⚠️ Seguridad: por si alguna unidad no tiene compra
             costo_unitario = detalle.costo_unitario if detalle else Decimal("0.00")
 
             eventos.append({
@@ -269,12 +281,13 @@ class ItemViewSet(viewsets.ModelViewSet):
                 ),
             })
 
+        # ===== ORDEN CRONOLÓGICO =====
         eventos.sort(key=lambda x: x["fecha"])
 
         kardex = []
         stock = 0
-        costo_promedio = Decimal("0.00")
         costo_total = Decimal("0.00")
+        costo_promedio = Decimal("0.00")
 
         for e in eventos:
             inv_inicial = stock
@@ -286,15 +299,13 @@ class ItemViewSet(viewsets.ModelViewSet):
                 total_entrada = e["cantidad"] * e["costo_unitario"]
                 costo_total += total_entrada
                 stock += entrada
-                costo_promedio = costo_total / stock
+                costo_promedio = costo_total / stock if stock > 0 else Decimal("0.00")
 
             else:
                 entrada = 0
                 salida = 1
 
-                costo_salida = e["costo_unitario"]
-
-                costo_total -= costo_salida
+                costo_total -= e["costo_unitario"]
                 stock -= 1
 
             kardex.append({
@@ -399,7 +410,8 @@ class MaquinariaViewSet(viewsets.ModelViewSet):
             HistorialUbicacionItem.objects
             .select_related(
                 "item_unidad__item",
-                "item_unidad__compra"
+                "item_unidad__compra_detalle",
+                "item_unidad__compra_detalle__compra",
             )
             .filter(
                 maquinaria=maquinaria,
@@ -417,8 +429,8 @@ class MaquinariaViewSet(viewsets.ModelViewSet):
             compra = detalle.compra if detalle else None
 
             costo = (
-                compra.costo_unitario
-                if compra and compra.valor_unitario
+                detalle.costo_unitario
+                if detalle
                 else Decimal("0.00")
             )
 

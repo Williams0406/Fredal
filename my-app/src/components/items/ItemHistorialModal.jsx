@@ -141,7 +141,14 @@ export default function ItemHistorialModal({ itemId, open, onClose }) {
                             <td className="px-4 py-3 text-sm">
                               <div>
                                 <span className="font-medium text-gray-900">{h.tipo}</span>
-                                <span className="text-gray-600"> – {h.nombre}</span>
+                                {h.tipo === "MAQUINARIA" && h.maquinaria ? (
+                                  <span className="text-gray-600">
+                                    {" "}
+                                    – {h.maquinaria.codigo} · {h.maquinaria.nombre}
+                                  </span>
+                                ) : (
+                                  <span className="text-gray-600"> – {h.nombre}</span>
+                                )}
                               </div>
                             </td>
                             <td className="px-4 py-3 text-sm text-gray-700">
