@@ -256,6 +256,14 @@ export const movimientoRepuestoAPI = {
     api.put(`/api/movimientos-repuesto/${id}/`, data),
 };
 
+export const movimientoConsumibleAPI = {
+  list: (params) =>
+    api.get("/api/movimientos-consumible/", { params }),
+
+  create: (data) =>
+    api.post("/api/movimientos-consumible/", data),
+};
+
 export const userAPI = {
   list: () => api.get("/api/users/"),
   roles: () => api.get("/api/users/roles/"),

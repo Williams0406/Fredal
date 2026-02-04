@@ -45,6 +45,7 @@ export default function TrabajoDetalleModal({ open, trabajoId, onClose, onUpdate
   const [editMode, setEditMode] = useState(false);
 
   const [showActividadModal, setShowActividadModal] = useState(false);
+  const [actividadModalPlanificada, setActividadModalPlanificada] = useState(false);
   const [showMovimientoModal, setShowMovimientoModal] = useState(false);
   const [actividadSeleccionada, setActividadSeleccionada] = useState(null);
   const [showFinalizarModal, setShowFinalizarModal] = useState(false);
@@ -58,6 +59,9 @@ export default function TrabajoDetalleModal({ open, trabajoId, onClose, onUpdate
   const esFinalizado = trabajo?.estatus === "FINALIZADO";
 
   const readOnly = esFinalizado || !editMode;
+
+  const actividadesPlanificadas = actividades.filter((a) => a.es_planificada);
+  const actividadesRegistradas = actividades.filter((a) => !a.es_planificada);
   
 
   /* =========================
@@ -195,6 +199,7 @@ export default function TrabajoDetalleModal({ open, trabajoId, onClose, onUpdate
     setEditMode(false);
 
     setShowActividadModal(false);
+    setActividadModalPlanificada(false);
     setShowMovimientoModal(false);
     setShowFinalizarModal(false);
 
@@ -445,62 +450,131 @@ export default function TrabajoDetalleModal({ open, trabajoId, onClose, onUpdate
             {/* SECCIÓN: Actividades (solo en proceso o finalizado) */}
             {(esEnProceso || esFinalizado) && (
               <section className="border-t border-gray-200 pt-6">
-                <div className="flex justify-between items-center mb-4">
-                  <h3 className="text-base font-semibold text-gray-900 flex items-center gap-2">
-                    <svg className="w-5 h-5 text-[#1e3a8a]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} 
-                            d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-6 9l2 2 4-4" />
-                    </svg>
-                    Actividades Registradas
-                    <span className="text-sm font-normal text-gray-500">
-                      ({actividades.length})
-                    </span>
-                  </h3>
-                  {!esFinalizado && (
-                    <button
-                      className="px-4 py-2 text-sm font-medium text-white bg-[#84cc16] 
-                               rounded-lg hover:bg-[#84cc16]/90 focus:outline-none 
-                               focus:ring-2 focus:ring-[#84cc16] focus:ring-offset-2
-                               transition-all duration-200 flex items-center gap-2"
-                      onClick={() => setShowActividadModal(true)}
-                    >
-                      <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
-                      </svg>
-                      Nueva Actividad
-                    </button>
-                  )}
-                </div>
+                <div className="space-y-8">
+                  <div>
+                    <div className="flex justify-between items-center mb-4">
+                      <h3 className="text-base font-semibold text-gray-900 flex items-center gap-2">
+                        <svg className="w-5 h-5 text-[#1e3a8a]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} 
+                                d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-6 9l2 2 4-4" />
+                        </svg>
+                        Actividades a Realizar
+                        <span className="text-sm font-normal text-gray-500">
+                          ({actividadesPlanificadas.length})
+                        </span>
+                      </h3>
+                      {!esFinalizado && (
+                        <button
+                          className="px-4 py-2 text-sm font-medium text-white bg-[#84cc16] 
+                                   rounded-lg hover:bg-[#84cc16]/90 focus:outline-none 
+                                   focus:ring-2 focus:ring-[#84cc16] focus:ring-offset-2
+                                   transition-all duration-200 flex items-center gap-2"
+                          onClick={() => {
+                            setActividadModalPlanificada(true);
+                            setShowActividadModal(true);
+                          }}
+                        >
+                          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
+                          </svg>
+                          Nueva Actividad
+                        </button>
+                      )}
+                    </div>
 
-                {actividades.length === 0 ? (
-                  <div className="text-center py-8 bg-gray-50 rounded-lg border border-gray-200">
-                    <svg className="w-12 h-12 text-gray-400 mx-auto mb-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} 
-                            d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
-                    </svg>
-                    <p className="text-sm text-gray-600 font-medium">
-                      No hay actividades registradas
-                    </p>
-                    <p className="text-xs text-gray-500 mt-1">
-                      Agrega actividades para documentar el trabajo realizado
-                    </p>
+                    {actividadesPlanificadas.length === 0 ? (
+                      <div className="text-center py-8 bg-gray-50 rounded-lg border border-gray-200">
+                        <svg className="w-12 h-12 text-gray-400 mx-auto mb-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} 
+                                d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                        </svg>
+                        <p className="text-sm text-gray-600 font-medium">
+                          No hay actividades planificadas
+                        </p>
+                        <p className="text-xs text-gray-500 mt-1">
+                          Define las actividades que el técnico debe realizar
+                        </p>
+                      </div>
+                    ) : (
+                      <div className="space-y-3">
+                        {actividadesPlanificadas.map((a) => (
+                          <ActividadCard
+                            key={a.id}
+                            actividad={a}
+                            unidades={unidadesPorActividad[a.id]}
+                            esFinalizado={esFinalizado}
+                            onAgregarRepuesto={() => {
+                              setActividadSeleccionada(a);
+                              setShowMovimientoModal(true);
+                            }}
+                          />
+                        ))}
+                      </div>
+                    )}
                   </div>
-                ) : (
-                  <div className="space-y-3">
-                    {actividades.map((a) => (
-                      <ActividadCard
-                        key={a.id}
-                        actividad={a}
-                        unidades={unidadesPorActividad[a.id]}
-                        esFinalizado={esFinalizado}
-                        onAgregarRepuesto={() => {
-                          setActividadSeleccionada(a);
-                          setShowMovimientoModal(true);
-                        }}
-                      />
-                    ))}
+
+                  <div>
+                    <div className="flex justify-between items-center mb-4">
+                      <h3 className="text-base font-semibold text-gray-900 flex items-center gap-2">
+                        <svg className="w-5 h-5 text-[#1e3a8a]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} 
+                                d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-6 9l2 2 4-4" />
+                        </svg>
+                        Actividades Registradas
+                        <span className="text-sm font-normal text-gray-500">
+                          ({actividadesRegistradas.length})
+                        </span>
+                      </h3>
+                      {!esFinalizado && (
+                        <button
+                          className="px-4 py-2 text-sm font-medium text-white bg-[#1e3a8a] 
+                                   rounded-lg hover:bg-[#1e3a8a]/90 focus:outline-none 
+                                   focus:ring-2 focus:ring-[#1e3a8a] focus:ring-offset-2
+                                   transition-all duration-200 flex items-center gap-2"
+                          onClick={() => {
+                            setActividadModalPlanificada(false);
+                            setShowActividadModal(true);
+                          }}
+                        >
+                          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
+                          </svg>
+                          Nueva Actividad
+                        </button>
+                      )}
+                    </div>
+
+                    {actividadesRegistradas.length === 0 ? (
+                      <div className="text-center py-8 bg-gray-50 rounded-lg border border-gray-200">
+                        <svg className="w-12 h-12 text-gray-400 mx-auto mb-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} 
+                                d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                        </svg>
+                        <p className="text-sm text-gray-600 font-medium">
+                          No hay actividades registradas
+                        </p>
+                        <p className="text-xs text-gray-500 mt-1">
+                          Agrega actividades para documentar el trabajo realizado
+                        </p>
+                      </div>
+                    ) : (
+                      <div className="space-y-3">
+                        {actividadesRegistradas.map((a) => (
+                          <ActividadCard
+                            key={a.id}
+                            actividad={a}
+                            unidades={unidadesPorActividad[a.id]}
+                            esFinalizado={esFinalizado}
+                            onAgregarRepuesto={() => {
+                              setActividadSeleccionada(a);
+                              setShowMovimientoModal(true);
+                            }}
+                          />
+                        ))}
+                      </div>
+                    )}
                   </div>
-                )}
+                </div>
               </section>
             )}
           </div>
@@ -586,7 +660,11 @@ export default function TrabajoDetalleModal({ open, trabajoId, onClose, onUpdate
       {showActividadModal && (
         <ActividadTrabajoModal
           trabajoId={trabajoId}
-          onClose={() => setShowActividadModal(false)}
+          esPlanificada={actividadModalPlanificada}
+          onClose={() => {
+            setShowActividadModal(false);
+            setActividadModalPlanificada(false);
+          }}
           onSaved={async () => {
             const res = await actividadTrabajoAPI.listByTrabajo(trabajoId);
             setActividades(res.data);
