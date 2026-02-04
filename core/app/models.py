@@ -323,6 +323,7 @@ class ActividadTrabajo(models.Model):
     )
 
     descripcion = models.TextField(blank=True)
+    es_planificada = models.BooleanField(default=False)
 
     def clean(self):
         # REVISION: no debe tener mantenimiento
@@ -365,8 +366,25 @@ class MovimientoRepuesto(models.Model):
                 "La unidad no puede estar en estado INOPERATIVO"
             )
         
-    
 
+class MovimientoConsumible(models.Model):
+
+    actividad = models.ForeignKey(
+        ActividadTrabajo,
+        on_delete=models.CASCADE,
+        related_name="consumibles"
+    )
+
+    item = models.ForeignKey(Item, on_delete=models.PROTECT)
+    cantidad = models.PositiveIntegerField()
+    fecha = models.DateTimeField(auto_now_add=True)
+
+    def clean(self):
+        if self.item.tipo_insumo != Item.TipoInsumo.CONSUMIBLE:
+            raise ValidationError(
+                "El item debe ser de tipo CONSUMIBLE"
+            )
+        
 # =========================
 # COMPRAS
 # =========================
@@ -548,4 +566,5 @@ class HistorialUbicacionItem(models.Model):
             )
 
         self.full_clean()
+        
         super().save(*args, **kwargs)

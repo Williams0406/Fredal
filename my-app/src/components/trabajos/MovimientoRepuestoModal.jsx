@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { itemAPI, movimientoRepuestoAPI } from "@/lib/api";
+import { itemAPI, movimientoConsumibleAPI, movimientoRepuestoAPI } from "@/lib/api";
 
 export default function MovimientoRepuestoModal({
   open,
@@ -22,7 +22,8 @@ export default function MovimientoRepuestoModal({
 
   const [form, setForm] = useState({
     item: "",
-    item_unidad: "",
+    estado_unidad: "",
+    cantidad: 1,
   });
   
   const movimientos = [
@@ -31,14 +32,14 @@ export default function MovimientoRepuestoModal({
   ];
 
   const movimientosFiltrados = movimientos.filter(
-    (m) => m.estado !== "INOPERATIVO"
+    (m) => m.tipo === "CONSUMIBLE" || m.estado !== "INOPERATIVO"
   );
 
   /* ================== DATA ================== */
 
   useEffect(() => {
     if (open) {
-      setForm({ item: "", item_unidad: "" });
+      setForm({ item: "", estado_unidad: "", cantidad: 1 });
       setUnidades([]);
       setMovimientosNew([]);
     }
@@ -54,6 +55,16 @@ export default function MovimientoRepuestoModal({
       return;
     }
 
+    const selectedItem = items.find(
+      (i) => String(i.id) === String(form.item)
+    );
+
+    if (selectedItem?.tipo_insumo === "CONSUMIBLE") {
+      setUnidades([]);
+      setLoading(false);
+      return;
+    }
+
     setLoading(true);
     itemAPI.unidadesAsignables(form.item, {
       actividad: actividad.id,
@@ -66,20 +77,32 @@ export default function MovimientoRepuestoModal({
   useEffect(() => {
     if (!actividad?.id) return;
 
-    movimientoRepuestoAPI.list({
-      actividad: actividad.id,
-    }).then((res) => {
-      setMovimientosDB(
-        res.data.map((m) => ({
-          id: m.id,
-          item_id: m.item_id,
-          item_codigo: m.item_codigo,
-          item_nombre: m.item_nombre,
-          unidad_id: m.item_unidad,
-          unidad_serie: m.unidad_serie,
-          estado: m.estado,
-        }))
-      );
+    Promise.all([
+      movimientoRepuestoAPI.list({ actividad: actividad.id }),
+      movimientoConsumibleAPI.list({ actividad: actividad.id }),
+    ]).then(([repuestoRes, consumibleRes]) => {
+      const repuestos = repuestoRes.data.map((m) => ({
+        id: m.id,
+        tipo: "REPUESTO",
+        item_id: m.item_id,
+        item_codigo: m.item_codigo,
+        item_nombre: m.item_nombre,
+        unidad_id: m.item_unidad,
+        unidad_serie: m.unidad_serie,
+        estado: m.estado,
+      }));
+
+      const consumibles = consumibleRes.data.map((m) => ({
+        id: m.id,
+        tipo: "CONSUMIBLE",
+        item_id: m.item_id,
+        item_codigo: m.item_codigo,
+        item_nombre: m.item_nombre,
+        cantidad: m.cantidad,
+        unidad_medida: m.unidad_medida || "",
+      }));
+
+      setMovimientosDB([...repuestos, ...consumibles]);
     });
   }, [actividad]);
 
@@ -88,7 +111,8 @@ export default function MovimientoRepuestoModal({
 
     setForm({
       item: "",
-      item_unidad: "",
+      estado_unidad: "",
+      cantidad: 1,
     });
 
     setUnidades([]);
@@ -149,40 +173,78 @@ export default function MovimientoRepuestoModal({
   /* ================== HELPERS ================== */
 
   const handleAddUnidad = () => {
-    if (!form.item || !form.item_unidad) return;
+    if (!form.item || !form.cantidad) return;
 
     const item = items.find(
       (i) => String(i.id) === String(form.item)
     );
 
-    const unidad = unidades.find(
-      (u) => String(u.id) === String(form.item_unidad)
+    const cantidad = Number(form.cantidad) || 0;
+
+    if (!item || cantidad <= 0) return;
+
+    if (item.tipo_insumo === "CONSUMIBLE") {
+      if (cantidad > (item.unidades_disponibles || 0)) {
+        alert("La cantidad excede el stock disponible");
+        return;
+      }
+
+      setMovimientosNew((prev) => [
+        ...prev,
+        {
+          tipo: "CONSUMIBLE",
+          item_id: item.id,
+          item_codigo: item.codigo,
+          item_nombre: item.nombre,
+          cantidad,
+          unidad_medida: item.unidad_medida,
+        },
+      ]);
+
+      setForm({
+        item: "",
+        estado_unidad: "",
+        cantidad: 1,
+      });
+
+      setUnidades([]);
+      return;
+    }
+
+    if (!form.estado_unidad) return;
+
+    const unidadesDisponibles = unidades.filter(
+      (u) =>
+        u.estado === form.estado_unidad &&
+        !movimientos.some((m) => String(m.unidad_id) === String(u.id))
     );
 
-    if (!item || !unidad) return;
+    if (unidadesDisponibles.length < cantidad) {
+      alert("No hay suficientes unidades disponibles con ese estado");
+      return;
+    }
+
+    const unidadesSeleccionadas = unidadesDisponibles.slice(0, cantidad);
 
     setMovimientosNew((prev) => {
-      // evitar duplicar el mismo item
-      const filtrados = prev.filter(
-        (m) => m.item_id !== item.id
-      );
-
       return [
-        ...filtrados,
-        {
+        ...prev,
+        ...unidadesSeleccionadas.map((unidad) => ({
+          tipo: "REPUESTO",
           item_id: item.id,
           item_codigo: item.codigo,
           item_nombre: item.nombre,
           unidad_id: unidad.id,
           unidad_serie: unidad.serie || `Unidad #${unidad.id}`,
           estado: unidad.estado,
-        },
+        })),
       ];
     });
 
     setForm({
       item: "",
-      item_unidad: "",
+      estado_unidad: "",
+      cantidad: 1,
     });
 
     setUnidades([]);
@@ -200,10 +262,18 @@ export default function MovimientoRepuestoModal({
       const nuevos = movimientos.filter((m) => !m.id);
 
       for (const m of nuevos) {
-        await movimientoRepuestoAPI.create({
-          actividad: actividad.id,
-          item_unidad: m.unidad_id,
-        });
+        if (m.tipo === "CONSUMIBLE") {
+          await movimientoConsumibleAPI.create({
+            actividad: actividad.id,
+            item: m.item_id,
+            cantidad: m.cantidad,
+          });
+        } else {
+          await movimientoRepuestoAPI.create({
+            actividad: actividad.id,
+            item_unidad: m.unidad_id,
+          });
+        }
       }
 
       onSaved?.();
@@ -221,6 +291,16 @@ export default function MovimientoRepuestoModal({
       .toLowerCase()
       .includes(itemSearch.toLowerCase())
   );
+
+  const selectedItem = items.find(
+    (i) => String(i.id) === String(form.item)
+  );
+
+  const unidadesDisponiblesCount = unidades.filter(
+    (u) => u.estado === form.estado_unidad
+  ).length;
+
+  const esConsumible = selectedItem?.tipo_insumo === "CONSUMIBLE";
 
   /* ================== UI ================== */
 
@@ -283,7 +363,12 @@ export default function MovimientoRepuestoModal({
                       onChange={(e) => {
                         setItemSearch(e.target.value);
                         setShowItemDropdown(true);
-                        setForm((p) => ({ ...p, item: "", item_unidad: "" }));
+                        setForm((p) => ({
+                          ...p,
+                          item: "",
+                          estado_unidad: "",
+                          cantidad: 1,
+                        }));
                       }}
                       onFocus={() => setShowItemDropdown(true)}
                       className="w-full px-4 py-3 border border-gray-300 rounded-lg text-sm
@@ -304,7 +389,8 @@ export default function MovimientoRepuestoModal({
                                 setForm((p) => ({
                                   ...p,
                                   item: String(i.id),
-                                  item_unidad: "",
+                                  estado_unidad: "",
+                                  cantidad: 1,
                                 }));
                                 setItemSearch(`${i.codigo} - ${i.nombre}`);
                                 setShowItemDropdown(false);
@@ -326,15 +412,17 @@ export default function MovimientoRepuestoModal({
                   </div>
                 </div>
 
-                {/* Unidad */}
+                {/* Cantidad */}
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-2">
-                    Unidad disponible
+                    Cantidad
                   </label>
-                  <select
-                    value={form.item_unidad}
+                  <input
+                    type="number"
+                    min="1"
+                    value={form.cantidad}
                     onChange={(e) =>
-                      setForm((p) => ({ ...p, item_unidad: e.target.value }))
+                      setForm((p) => ({ ...p, cantidad: e.target.value }))
                     }
                     disabled={!form.item || loading}
                     className={`
@@ -343,17 +431,59 @@ export default function MovimientoRepuestoModal({
                       transition-all duration-200
                       ${!form.item || loading ? "bg-gray-50 cursor-not-allowed" : ""}
                     `}
+                  />
+                  {selectedItem && (
+                    <p className="text-xs text-gray-500 mt-2">
+                      Unidades: {selectedItem.unidad_medida}
+                    </p>
+                  )}
+                </div>
+
+                {/* Unidad */}
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    Unidad
+                  </label>
+                  <input
+                    type="text"
+                    value={selectedItem?.unidad_medida || ""}
+                    readOnly
+                    disabled
+                    className="w-full px-4 py-3 border border-gray-300 rounded-lg text-sm bg-gray-50 text-gray-600 cursor-not-allowed"
+                  />
+                </div>
+
+                {/* Estado disponible */}
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    Unidad disponible
+                  </label>
+                  <select
+                    value={form.estado_unidad}
+                    onChange={(e) =>
+                      setForm((p) => ({ ...p, estado_unidad: e.target.value }))
+                    }
+                    disabled={!form.item || loading || esConsumible}
+                    className={`
+                      w-full px-4 py-3 border border-gray-300 rounded-lg text-sm
+                      focus:outline-none focus:ring-2 focus:ring-[#1e3a8a] focus:border-transparent
+                      transition-all duration-200
+                      ${!form.item || loading || esConsumible ? "bg-gray-50 cursor-not-allowed" : ""}
+                    `}
                   >
                     <option value="">
-                      {loading ? "Cargando..." : "Seleccione unidad"}
+                      {loading ? "Cargando..." : "Seleccione estado"}
                     </option>
-                    {unidades.map((u) => (
-                      <option key={u.id} value={String(u.id)}>
-                        {u.serie || `Unidad #${u.id}`} ({u.estado})
-                      </option>
-                    ))}
+                    <option value="NUEVO">NUEVO</option>
+                    <option value="USADO">USADO</option>
+                    <option value="REPARADO">REPARADO</option>
                   </select>
-                  {form.item && unidades.length === 0 && !loading && (
+                  {form.item && form.estado_unidad && !esConsumible && (
+                    <p className="text-xs text-gray-500 mt-2">
+                      Disponibles: {unidadesDisponiblesCount}
+                    </p>
+                  )}
+                  {form.item && unidades.length === 0 && !loading && !esConsumible && (
                     <p className="text-xs text-gray-500 mt-2">
                       No hay unidades disponibles para este item
                     </p>
@@ -364,7 +494,7 @@ export default function MovimientoRepuestoModal({
                 <div className="flex items-end">
                   <button
                     onClick={handleAddUnidad}
-                    disabled={!form.item || !form.item_unidad || loading}
+                    disabled={!form.item || loading || (!form.estado_unidad && !esConsumible)}
                     className="w-full px-5 py-3 text-sm font-medium text-white bg-[#84cc16]
                              rounded-lg hover:bg-[#84cc16]/90 focus:outline-none 
                              focus:ring-2 focus:ring-[#84cc16] focus:ring-offset-2
@@ -427,12 +557,20 @@ export default function MovimientoRepuestoModal({
                             {m.item_nombre}
                           </td>
                           <td className="px-5 py-4 text-sm text-gray-700">
-                            {m.unidad_serie}
+                            {m.tipo === "CONSUMIBLE"
+                              ? `${m.cantidad} ${m.unidad_medida || ""}`
+                              : m.unidad_serie}
                           </td>
                           <td className="px-5 py-4 text-sm">
-                            <span className="px-2.5 py-1 rounded-full text-xs font-medium bg-green-100 text-green-700">
-                              {m.estado}
-                            </span>
+                            {m.tipo === "CONSUMIBLE" ? (
+                              <span className="px-2.5 py-1 rounded-full text-xs font-medium bg-blue-100 text-blue-700">
+                                CONSUMIBLE
+                              </span>
+                            ) : (
+                              <span className="px-2.5 py-1 rounded-full text-xs font-medium bg-green-100 text-green-700">
+                                {m.estado}
+                              </span>
+                            )}
                           </td>
                           <td className="px-5 py-4 text-sm text-right">
                             {!m.id && (

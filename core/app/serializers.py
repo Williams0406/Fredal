@@ -4,6 +4,7 @@ from rest_framework import serializers
 from django.contrib.contenttypes.models import ContentType
 from decimal import Decimal
 from django.db import transaction
+from django.db.models import Sum
 from django.utils import timezone
 from rest_framework.exceptions import ValidationError
 
@@ -17,6 +18,7 @@ from .models import (
     PerfilUsuario,
     ActividadTrabajo,
     MovimientoRepuesto,
+    MovimientoConsumible,
     OrdenTrabajo,
     CodigoRegistro,
     HistorialUbicacionItem,
@@ -81,6 +83,23 @@ class ItemSerializer(serializers.ModelSerializer):
         ]
 
     def get_unidades_disponibles(self, obj):
+        if obj.tipo_insumo == Item.TipoInsumo.CONSUMIBLE:
+            total_compras = (
+                CompraDetalle.objects
+                .filter(item=obj)
+                .aggregate(total=Sum("cantidad"))
+                .get("total")
+                or 0
+            )
+            total_salidas = (
+                MovimientoConsumible.objects
+                .filter(item=obj, actividad__es_planificada=False)
+                .aggregate(total=Sum("cantidad"))
+                .get("total")
+                or 0
+            )
+            return max(total_compras - total_salidas, 0)
+        
         return (
             obj.unidades
             .filter(
@@ -158,18 +177,19 @@ class CompraCreateSerializer(serializers.ModelSerializer):
                 )
 
                 # 5. Generar unidades físicas en inventario e historial inicial
-                for _ in range(cantidad):
-                    unidad = ItemUnidad.objects.create(
-                        item=data["item"],
-                        compra_detalle=detalle,
-                        estado=ItemUnidad.Estado.NUEVO
-                    )
-                    HistorialUbicacionItem.objects.create(
-                        item_unidad=unidad,
-                        almacen=almacen_principal,
-                        estado=unidad.estado,
-                        fecha_inicio=compra.fecha
-                    )
+                if data["item"].tipo_insumo == Item.TipoInsumo.REPUESTO:
+                    for _ in range(cantidad):
+                        unidad = ItemUnidad.objects.create(
+                            item=data["item"],
+                            compra_detalle=detalle,
+                            estado=ItemUnidad.Estado.NUEVO
+                        )
+                        HistorialUbicacionItem.objects.create(
+                            item_unidad=unidad,
+                            almacen=almacen_principal,
+                            estado=unidad.estado,
+                            fecha_inicio=compra.fecha
+                        )
             return compra
 
 class CompraDetalleListSerializer(serializers.ModelSerializer):
@@ -325,9 +345,18 @@ class MovimientoRepuestoSerializer(serializers.ModelSerializer):
                 "No se pueden agregar repuestos a una orden finalizada"
             )
 
-        if unidad.estado != ItemUnidad.Estado.NUEVO:
+        if unidad.estado not in [
+            ItemUnidad.Estado.NUEVO,
+            ItemUnidad.Estado.USADO,
+            ItemUnidad.Estado.REPARADO,
+        ]:
             raise serializers.ValidationError(
-                "Solo se pueden asignar unidades NUEVAS"
+                "Solo se pueden asignar unidades NUEVAS, USADAS o REPARADAS"
+            )
+
+        if unidad.item.tipo_insumo != Item.TipoInsumo.REPUESTO:
+            raise serializers.ValidationError(
+                "Solo se pueden asignar unidades de items REPUESTO"
             )
 
         return data
@@ -340,8 +369,16 @@ class MovimientoRepuestoSerializer(serializers.ModelSerializer):
 
         with transaction.atomic():
 
-            # 🔎 1️⃣ Buscar unidad ACTUAL del mismo item en la maquinaria
-            historial_actual = (
+            if actividad.es_planificada:
+                return super().create(validated_data)
+
+            # 🔎 1️⃣ Buscar unidad(es) ACTUAL(ES) del mismo item en la maquinaria
+            unidades_en_actividad = (
+                MovimientoRepuesto.objects
+                .filter(actividad=actividad)
+                .values_list("item_unidad_id", flat=True)
+            )
+            historiales_actuales = (
                 HistorialUbicacionItem.objects
                 .select_related("item_unidad")
                 .filter(
@@ -349,10 +386,12 @@ class MovimientoRepuestoSerializer(serializers.ModelSerializer):
                     fecha_fin__isnull=True,
                     item_unidad__item=item,
                 )
-                .first()
+                .exclude(item_unidad_id__in=unidades_en_actividad)
+                .order_by("fecha_inicio")
             )
 
-            # 🔁 2️⃣ Si existe, marcar como INOPERATIVO
+            # 🔁 2️⃣ Si existe, marcar UNA como INOPERATIVO
+            historial_actual = historiales_actuales.first()
             if historial_actual:
                 unidad_anterior = historial_actual.item_unidad
                 unidad_anterior.estado = ItemUnidad.Estado.INOPERATIVO
@@ -367,14 +406,15 @@ class MovimientoRepuestoSerializer(serializers.ModelSerializer):
 
 
             # ✅ 3️⃣ Asignar nueva unidad
-            unidad_nueva.estado = ItemUnidad.Estado.USADO
-            unidad_nueva.save(update_fields=["estado"])
+            if unidad_nueva.estado == ItemUnidad.Estado.NUEVO:
+                unidad_nueva.estado = ItemUnidad.Estado.USADO
+                unidad_nueva.save(update_fields=["estado"])
 
             HistorialUbicacionItem.objects.create(
                 item_unidad=unidad_nueva,
                 maquinaria=maquinaria,
                 orden_trabajo=actividad.orden,
-                estado=ItemUnidad.Estado.USADO   # estado en ese momento
+                estado=unidad_nueva.estado   # estado en ese momento
             )
 
             # 📦 4️⃣ Registrar movimiento
@@ -382,8 +422,51 @@ class MovimientoRepuestoSerializer(serializers.ModelSerializer):
 
         return movimiento
 
+class MovimientoConsumibleSerializer(serializers.ModelSerializer):
+    item_id = serializers.IntegerField(source="item.id", read_only=True)
+    item_codigo = serializers.CharField(source="item.codigo", read_only=True)
+    item_nombre = serializers.CharField(source="item.nombre", read_only=True)
+    unidad_medida = serializers.CharField(source="item.unidad_medida", read_only=True)
+
+    class Meta:
+        model = MovimientoConsumible
+        fields = [
+            "id",
+            "actividad",
+            "item",
+            "cantidad",
+            "fecha",
+            "item_id",
+            "item_codigo",
+            "item_nombre",
+            "unidad_medida",
+        ]
+        read_only_fields = ["fecha"]
+
+    def validate(self, data):
+        actividad = data["actividad"]
+        item = data["item"]
+
+        if actividad.orden.estatus == OrdenTrabajo.Estatus.FINALIZADO:
+            raise serializers.ValidationError(
+                "No se pueden agregar consumibles a una orden finalizada"
+            )
+
+        if item.tipo_insumo != Item.TipoInsumo.CONSUMIBLE:
+            raise serializers.ValidationError(
+                "Solo se pueden registrar items CONSUMIBLE"
+            )
+
+        if data.get("cantidad", 0) <= 0:
+            raise serializers.ValidationError(
+                "La cantidad debe ser mayor a 0"
+            )
+
+        return data
+
 class ActividadTrabajoSerializer(serializers.ModelSerializer):
     repuestos = MovimientoRepuestoSerializer(many=True, read_only=True)
+    consumibles = MovimientoConsumibleSerializer(many=True, read_only=True)
 
     class Meta:
         model = ActividadTrabajo
@@ -462,6 +545,7 @@ class OrdenTrabajoSerializer(serializers.ModelSerializer):
 class MaquinariaDetalleSerializer(serializers.ModelSerializer):
     ordenes = serializers.SerializerMethodField()
     repuestos = serializers.SerializerMethodField()
+    consumibles = serializers.SerializerMethodField()
 
     class Meta:
         model = Maquinaria
@@ -472,6 +556,7 @@ class MaquinariaDetalleSerializer(serializers.ModelSerializer):
             "gasto",
             "ordenes",
             "repuestos",
+            "consumibles",
         ]
 
     def get_ordenes(self, obj):
@@ -480,7 +565,8 @@ class MaquinariaDetalleSerializer(serializers.ModelSerializer):
 
     def get_repuestos(self, obj):
         movimientos = MovimientoRepuesto.objects.filter(
-            actividad__orden__maquinaria=obj
+            actividad__orden__maquinaria=obj,
+            actividad__es_planificada=False,
         ).select_related("item_unidad__item")
 
         return [
@@ -489,6 +575,22 @@ class MaquinariaDetalleSerializer(serializers.ModelSerializer):
                 "codigo": m.item_unidad.item.codigo,
                 "serie": m.item_unidad.serie,
                 "estado": m.item_unidad.estado,
+                "fecha": m.fecha,
+            }
+            for m in movimientos
+        ]
+    
+    def get_consumibles(self, obj):
+        movimientos = MovimientoConsumible.objects.filter(
+            actividad__orden__maquinaria=obj,
+            actividad__es_planificada=False,
+        ).select_related("item")
+
+        return [
+            {
+                "item": m.item.nombre,
+                "codigo": m.item.codigo,
+                "cantidad": m.cantidad,
                 "fecha": m.fecha,
             }
             for m in movimientos
@@ -632,6 +734,9 @@ class ItemDetalleSerializer(serializers.ModelSerializer):
         fields = "__all__"
 
     def get_unidades(self, obj):
+        if obj.tipo_insumo == Item.TipoInsumo.CONSUMIBLE:
+            return []
+        
         data = []
 
         for u in obj.unidades.all():
@@ -703,6 +808,3 @@ class KardexContableSerializer(serializers.Serializer):
     inventario_final_cantidad = serializers.IntegerField()
     inventario_final_costo = serializers.DecimalField(max_digits=14, decimal_places=2)
     maquinaria = serializers.DictField(required=False, allow_null=True)
-
-
-

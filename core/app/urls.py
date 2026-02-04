@@ -9,6 +9,7 @@ from .views import (
     OrdenTrabajoViewSet,
     ActividadTrabajoViewSet,
     MovimientoRepuestoViewSet,
+    MovimientoConsumibleViewSet,
     TrabajadorViewSet,
     MeView,
     RegistroUsuarioView,
@@ -27,6 +28,7 @@ router.register(r"users", UserViewSet)
 router.register(r"trabajos", OrdenTrabajoViewSet)
 router.register(r"actividades", ActividadTrabajoViewSet)
 router.register(r"movimientos-repuesto", MovimientoRepuestoViewSet)
+router.register(r"movimientos-consumible", MovimientoConsumibleViewSet)
 router.register(r"trabajadores-registro",TrabajadorRegistroViewSet,basename="trabajador-registro")
 router.register(r"proveedores", ProveedorViewSet)
 router.register(r"almacenes", AlmacenViewSet)

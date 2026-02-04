@@ -29,6 +29,7 @@ export default function ActividadTrabajoModal({
   trabajoId,
   onClose,
   onSaved,
+  esPlanificada = false,
 }) {
   const [form, setForm] = useState({
     tipo_actividad: "",
@@ -105,6 +106,7 @@ export default function ActividadTrabajoModal({
         tipo_actividad: form.tipo_actividad,
         descripcion: form.descripcion,
         orden: trabajoId,
+        es_planificada: esPlanificada,
       };
 
       if (form.tipo_actividad === "MANTENIMIENTO") {
@@ -143,7 +145,7 @@ export default function ActividadTrabajoModal({
         <div className="border-b border-gray-200 px-6 py-4">
           <div className="flex items-center justify-between">
             <h3 className="text-xl font-semibold text-[#1e3a8a]">
-              Nueva Actividad
+              {esPlanificada ? "Nueva Actividad a Realizar" : "Nueva Actividad Registrada"}
             </h3>
             <button
               onClick={onClose}
