@@ -71,6 +71,39 @@ class Almacen(models.Model):
         return self.nombre
 
 
+class Cliente(models.Model):
+    nombre = models.CharField(max_length=150)
+    ruc = models.CharField(max_length=20, unique=True)
+
+    def __str__(self):
+        return self.nombre
+
+
+class UbicacionCliente(models.Model):
+    cliente = models.ForeignKey(
+        Cliente,
+        on_delete=models.CASCADE,
+        related_name="ubicaciones"
+    )
+    nombre = models.CharField(max_length=150)
+    direccion = models.CharField(max_length=255, blank=True, default="")
+
+    class Meta:
+        unique_together = ("cliente", "nombre")
+
+    def __str__(self):
+        return f"{self.cliente.nombre} - {self.nombre}"
+
+
+class UnidadEquivalencia(models.Model):
+    nombre = models.CharField(max_length=30, unique=True)
+    factor_a_unidad = models.DecimalField(max_digits=12, decimal_places=4)
+    activo = models.BooleanField(default=True)
+
+    def __str__(self):
+        return f"{self.nombre} ({self.factor_a_unidad})"
+    
+    
 class Item(TimeStampedModel):
 
     class TipoInsumo(models.TextChoices):

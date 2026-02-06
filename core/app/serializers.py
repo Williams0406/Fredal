@@ -25,6 +25,9 @@ from .models import (
     ItemUnidad,
     ItemProveedor,
     Proveedor,
+    Cliente,
+    UbicacionCliente,
+    UnidadEquivalencia,
 )
 
 class UserSerializer(serializers.ModelSerializer):
@@ -129,6 +132,11 @@ class MaquinariaSerializer(serializers.ModelSerializer):
 class CompraCreateItemSerializer(serializers.Serializer):
     item = serializers.PrimaryKeyRelatedField(queryset=Item.objects.all())
     cantidad = serializers.IntegerField(min_value=1)
+    unidad_equivalencia = serializers.PrimaryKeyRelatedField(
+        queryset=UnidadEquivalencia.objects.filter(activo=True),
+        required=False,
+        allow_null=True,
+    )
     tipo_registro = serializers.ChoiceField(
         choices=["VALOR_UNITARIO", "COSTO_UNITARIO", "VALOR_TOTAL", "COSTO_TOTAL"]
     )
@@ -153,7 +161,18 @@ class CompraCreateSerializer(serializers.ModelSerializer):
             almacen_principal, _ = Almacen.objects.get_or_create(nombre="Almacén Central")
 
             for data in items_data:
-                cantidad = data["cantidad"]
+                cantidad_original = data["cantidad"]
+                unidad_equivalencia = data.get("unidad_equivalencia")
+                cantidad = cantidad_original
+
+                if data["item"].tipo_insumo == Item.TipoInsumo.CONSUMIBLE and unidad_equivalencia:
+                    cantidad_decimal = Decimal(cantidad_original) * unidad_equivalencia.factor_a_unidad
+                    if cantidad_decimal != cantidad_decimal.to_integral_value():
+                        raise serializers.ValidationError(
+                            f"La cantidad convertida a UNIDAD debe ser entera para {data['item'].codigo}"
+                        )
+                    cantidad = int(cantidad_decimal)
+                    
                 monto = data["monto"]
                 tipo = data["tipo_registro"]
                 
@@ -321,6 +340,7 @@ class MovimientoRepuestoSerializer(serializers.ModelSerializer):
     estado = serializers.CharField(
         source="item_unidad.estado", read_only=True
     )
+    estado_previo = serializers.SerializerMethodField()
 
     class Meta:
         model = MovimientoRepuesto
@@ -334,8 +354,19 @@ class MovimientoRepuestoSerializer(serializers.ModelSerializer):
             "item_nombre",
             "unidad_serie",
             "estado",
+            "estado_previo",
         ]
 
+    def get_estado_previo(self, obj):
+        historial_previo = (
+            HistorialUbicacionItem.objects
+            .filter(item_unidad=obj.item_unidad, fecha_inicio__lt=obj.fecha)
+            .order_by("-fecha_inicio")
+            .first()
+        )
+        if historial_previo:
+            return historial_previo.estado
+        return obj.item_unidad.estado
     def validate(self, data):
         unidad = data["item_unidad"]
         actividad = data["actividad"]
@@ -427,6 +458,18 @@ class MovimientoConsumibleSerializer(serializers.ModelSerializer):
     item_codigo = serializers.CharField(source="item.codigo", read_only=True)
     item_nombre = serializers.CharField(source="item.nombre", read_only=True)
     unidad_medida = serializers.CharField(source="item.unidad_medida", read_only=True)
+    unidad_equivalencia = serializers.PrimaryKeyRelatedField(
+        queryset=UnidadEquivalencia.objects.filter(activo=True),
+        required=False,
+        allow_null=True,
+        write_only=True,
+    )
+    cantidad_equivalente = serializers.DecimalField(
+        max_digits=12,
+        decimal_places=2,
+        required=False,
+        write_only=True,
+    )
 
     class Meta:
         model = MovimientoConsumible
@@ -440,6 +483,8 @@ class MovimientoConsumibleSerializer(serializers.ModelSerializer):
             "item_codigo",
             "item_nombre",
             "unidad_medida",
+            "unidad_equivalencia",
+            "cantidad_equivalente",
         ]
         read_only_fields = ["fecha"]
 
@@ -457,9 +502,25 @@ class MovimientoConsumibleSerializer(serializers.ModelSerializer):
                 "Solo se pueden registrar items CONSUMIBLE"
             )
 
-        if data.get("cantidad", 0) <= 0:
+        cantidad = data.get("cantidad", 0)
+        if cantidad <= 0:
             raise serializers.ValidationError(
                 "La cantidad debe ser mayor a 0"
+            )
+
+        unidad_equivalencia = data.get("unidad_equivalencia")
+        cantidad_equivalente = data.get("cantidad_equivalente")
+
+        if unidad_equivalencia and cantidad_equivalente:
+            cantidad_decimal = Decimal(cantidad_equivalente) * unidad_equivalencia.factor_a_unidad
+            if cantidad_decimal != cantidad_decimal.to_integral_value():
+                raise serializers.ValidationError(
+                    "La cantidad equivalente convertida a UNIDAD debe ser entera"
+                )
+            data["cantidad"] = int(cantidad_decimal)
+        elif unidad_equivalencia or cantidad_equivalente:
+            raise serializers.ValidationError(
+                "Debe enviar unidad_equivalencia y cantidad_equivalente juntos"
             )
 
         return data
@@ -798,6 +859,26 @@ class ProveedorSerializer(serializers.ModelSerializer):
         model = Proveedor
         fields = ["id", "nombre", "ruc", "direccion"]
 
+
+class ClienteSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Cliente
+        fields = ["id", "nombre", "ruc"]
+
+
+class UbicacionClienteSerializer(serializers.ModelSerializer):
+    cliente_nombre = serializers.CharField(source="cliente.nombre", read_only=True)
+
+    class Meta:
+        model = UbicacionCliente
+        fields = ["id", "cliente", "cliente_nombre", "nombre", "direccion"]
+
+
+class UnidadEquivalenciaSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = UnidadEquivalencia
+        fields = ["id", "nombre", "factor_a_unidad", "activo"]
+        
 class KardexContableSerializer(serializers.Serializer):
     fecha = serializers.DateTimeField()
     registro = serializers.CharField()

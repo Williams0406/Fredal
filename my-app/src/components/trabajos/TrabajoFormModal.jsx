@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { maquinariaAPI, trabajoAPI } from "@/lib/api";
+import { maquinariaAPI, trabajoAPI, ubicacionClienteAPI } from "@/lib/api";
 
 const ESTADOS = ["PENDIENTE", "EN_PROCESO", "FINALIZADO"];
 
@@ -12,6 +12,8 @@ export default function TrabajoFormModal({
   trabajo,
 }) {
   const isEdit = Boolean(trabajo);
+  const getToday = () => new Date().toISOString().split("T")[0];
+  const getCurrentTime = () => new Date().toTimeString().slice(0, 5);
 
   const [form, setForm] = useState({
     maquinaria: null,
@@ -28,6 +30,7 @@ export default function TrabajoFormModal({
   });
 
   const [maquinarias, setMaquinarias] = useState([]);
+  const [ubicacionesCliente, setUbicacionesCliente] = useState([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
 
@@ -36,12 +39,12 @@ export default function TrabajoFormModal({
     if (open && !trabajo) {
       setForm({
         maquinaria: null,
-        fecha: "",
+        fecha: getToday(),
         lugar: "TALLER",
         ubicacion_detalle: "",
         prioridad: "REGULAR",
         estatus: "PENDIENTE",
-        hora_inicio: "",
+        hora_inicio: getCurrentTime(),
         hora_fin: "",
         horometro: "",
         estado_equipo: "",
@@ -54,7 +57,10 @@ export default function TrabajoFormModal({
   // Cargar maquinarias
   useEffect(() => {
     if (open) {
-      maquinariaAPI.list().then((res) => setMaquinarias(res.data));
+      Promise.all([maquinariaAPI.list(), ubicacionClienteAPI.list()]).then(([maqRes, ubiRes]) => {
+        setMaquinarias(maqRes.data);
+        setUbicacionesCliente(ubiRes.data);
+      });
     }
   }, [open]);
 
@@ -63,12 +69,12 @@ export default function TrabajoFormModal({
     if (trabajo) {
       setForm({
         maquinaria: trabajo.maquinaria || "",
-        fecha: trabajo.fecha || "",
+        fecha: trabajo.fecha || getToday(),
         lugar: trabajo.lugar || "TALLER",
         ubicacion_detalle: trabajo.ubicacion_detalle || "",
         prioridad: trabajo.prioridad || "REGULAR",
         estatus: trabajo.estatus || "PENDIENTE",
-        hora_inicio: trabajo.hora_inicio || "",
+        hora_inicio: trabajo.hora_inicio || getCurrentTime(),
         hora_fin: trabajo.hora_fin || "",
         horometro: trabajo.horometro || "",
         estado_equipo: trabajo.estado_equipo || "",

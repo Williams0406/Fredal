@@ -17,6 +17,9 @@ from .views import (
     ProveedorViewSet,
     CatalogosView,
     AlmacenViewSet,
+    ClienteViewSet,
+    UbicacionClienteViewSet,
+    UnidadEquivalenciaViewSet,
 )
 
 router = DefaultRouter()
@@ -32,6 +35,9 @@ router.register(r"movimientos-consumible", MovimientoConsumibleViewSet)
 router.register(r"trabajadores-registro",TrabajadorRegistroViewSet,basename="trabajador-registro")
 router.register(r"proveedores", ProveedorViewSet)
 router.register(r"almacenes", AlmacenViewSet)
+router.register(r"clientes", ClienteViewSet)
+router.register(r"ubicaciones-cliente", UbicacionClienteViewSet)
+router.register(r"unidades-equivalencia", UnidadEquivalenciaViewSet)
 
 urlpatterns = [
     path("api/", include(router.urls)),

@@ -234,6 +234,12 @@ export const actividadTrabajoAPI = {
 
   create: (data) =>
     api.post("/api/actividades/", data),
+
+  update: (id, data) =>
+    api.put(`/api/actividades/${id}/`, data),
+
+  delete: (id) =>
+    api.delete(`/api/actividades/${id}/`),
 };
 
 export const compraAPI = {
@@ -270,6 +276,28 @@ export const userAPI = {
   setRoles: (id, roles) =>
     api.post(`/api/users/${id}/set_roles/`, { roles }),
   create: (data) => api.post("/api/users/", data),
+};
+
+
+export const clienteAPI = {
+  list: () => api.get("/api/clientes/"),
+  create: (data) => api.post("/api/clientes/", data),
+  update: (id, data) => api.put(`/api/clientes/${id}/`, data),
+  delete: (id) => api.delete(`/api/clientes/${id}/`),
+};
+
+export const ubicacionClienteAPI = {
+  list: (params) => api.get("/api/ubicaciones-cliente/", { params }),
+  create: (data) => api.post("/api/ubicaciones-cliente/", data),
+  update: (id, data) => api.put(`/api/ubicaciones-cliente/${id}/`, data),
+  delete: (id) => api.delete(`/api/ubicaciones-cliente/${id}/`),
+};
+
+export const unidadEquivalenciaAPI = {
+  list: () => api.get("/api/unidades-equivalencia/"),
+  create: (data) => api.post("/api/unidades-equivalencia/", data),
+  update: (id, data) => api.put(`/api/unidades-equivalencia/${id}/`, data),
+  delete: (id) => api.delete(`/api/unidades-equivalencia/${id}/`),
 };
 
 export const proveedorAPI = {

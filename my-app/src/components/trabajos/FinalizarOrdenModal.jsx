@@ -8,8 +8,9 @@ export default function FinalizarOrdenModal({
   onClose,
   onFinalizado,
 }) {
+  const getCurrentTime = () => new Date().toTimeString().slice(0, 5);
   const [form, setForm] = useState({
-    hora_inicio: trabajo.hora_inicio || "",
+    hora_inicio: trabajo.hora_inicio || getCurrentTime(),
     hora_fin: trabajo.hora_fin || "",
     horometro: trabajo.horometro || "",
     estado_equipo: trabajo.estado_equipo || "",

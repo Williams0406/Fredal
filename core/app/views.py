@@ -31,7 +31,10 @@ from .models import (
     ItemProveedor,
     Proveedor,
     ItemUnidad,
-    Almacen
+    Almacen,
+    Cliente,
+    UbicacionCliente,
+    UnidadEquivalencia
 )
 from .serializers import (
     UserSerializer,
@@ -56,7 +59,10 @@ from .serializers import (
     ItemProveedorSerializer,
     ProveedorSerializer,
     KardexContableSerializer,
-    AlmacenSerializer
+    AlmacenSerializer,
+    ClienteSerializer,
+    UbicacionClienteSerializer,
+    UnidadEquivalenciaSerializer
 )
 from .permissions import (
     IsAdmin,
@@ -558,6 +564,20 @@ class OrdenTrabajoViewSet(viewsets.ModelViewSet):
     serializer_class = OrdenTrabajoSerializer
     permission_classes = [TrabajoPermission]
 
+    def get_queryset(self):
+        queryset = super().get_queryset()
+        user = self.request.user
+
+        if user.groups.filter(name="Tecnico").exists():
+            try:
+                trabajador = user.perfil.trabajador
+            except PerfilUsuario.DoesNotExist:
+                return OrdenTrabajo.objects.none()
+
+            return queryset.filter(tecnicos=trabajador)
+
+        return queryset
+
 class ActividadTrabajoViewSet(viewsets.ModelViewSet):
     queryset = ActividadTrabajo.objects.all()
     serializer_class = ActividadTrabajoSerializer
@@ -619,6 +639,25 @@ class ProveedorViewSet(viewsets.ModelViewSet):
     serializer_class = ProveedorSerializer
     permission_classes = [CatalogoPermission]
 
+
+
+class ClienteViewSet(viewsets.ModelViewSet):
+    queryset = Cliente.objects.all().order_by("nombre")
+    serializer_class = ClienteSerializer
+    permission_classes = [CatalogoPermission]
+
+
+class UbicacionClienteViewSet(viewsets.ModelViewSet):
+    queryset = UbicacionCliente.objects.select_related("cliente").all().order_by("cliente__nombre", "nombre")
+    serializer_class = UbicacionClienteSerializer
+    permission_classes = [CatalogoPermission]
+
+
+class UnidadEquivalenciaViewSet(viewsets.ModelViewSet):
+    queryset = UnidadEquivalencia.objects.all().order_by("nombre")
+    serializer_class = UnidadEquivalenciaSerializer
+    permission_classes = [CatalogoPermission]
+
 class CatalogosView(APIView):
     permission_classes = [IsAuthenticated]
 
@@ -637,7 +676,11 @@ class CatalogosView(APIView):
             },
             "item_unidad": {
                 "estado": ItemUnidad.Estado.choices,
-            }
+            },
+            "unidad_equivalencia": UnidadEquivalenciaSerializer(
+                UnidadEquivalencia.objects.filter(activo=True),
+                many=True
+            ).data,
         })
 
 class AlmacenViewSet(viewsets.ModelViewSet):
