@@ -1,7 +1,7 @@
 "use client";
 
-import { useState } from "react";
-import { itemAPI } from "@/lib/api";
+import { useEffect, useMemo, useState } from "react";
+import { itemAPI, unidadEquivalenciaAPI } from "@/lib/api";
 
 export default function ItemFormModal({ open, onClose, onCreated }) {
   const [autoCode, setAutoCode] = useState(true);
@@ -13,8 +13,29 @@ export default function ItemFormModal({ open, onClose, onCreated }) {
     nombre: "",
     tipo_insumo: "REPUESTO",
     unidad_medida: "UNIDAD",
+    unidad_equivalencia: "",
     volvo: false,
   });
+  const [unidadesBase, setUnidadesBase] = useState([]);
+
+  useEffect(() => {
+    if (!open) return;
+    unidadEquivalenciaAPI
+      .list()
+      .then((res) =>
+        setUnidadesBase(res.data.filter((u) => u.activo && u.unidad_base))
+      );
+  }, [open]);
+
+  const dimensionesDisponibles = useMemo(() => {
+    const categorias = new Map();
+    unidadesBase.forEach((unidad) => {
+      if (!categorias.has(unidad.categoria)) {
+        categorias.set(unidad.categoria, unidad);
+      }
+    });
+    return Array.from(categorias.values());
+  }, [unidadesBase]);
 
   if (!open) return null;
 
@@ -38,8 +59,8 @@ export default function ItemFormModal({ open, onClose, onCreated }) {
       return;
     }
 
-    if (!form.unidad_medida.trim()) {
-      setError("La unidad de medida es obligatoria");
+    if (form.tipo_insumo === "CONSUMIBLE" && !form.unidad_equivalencia) {
+      setError("Selecciona la dimensión para el consumible");
       return;
     }
 
@@ -47,6 +68,9 @@ export default function ItemFormModal({ open, onClose, onCreated }) {
 
     const payload = {
       ...form,
+      unidad_equivalencia: form.unidad_equivalencia
+        ? Number(form.unidad_equivalencia)
+        : null,
       codigo: autoCode ? generateCode() : form.codigo.trim(),
     };
 
@@ -61,6 +85,7 @@ export default function ItemFormModal({ open, onClose, onCreated }) {
         nombre: "",
         tipo_insumo: "REPUESTO",
         unidad_medida: "UNIDAD",
+        unidad_equivalencia: "",
         volvo: false,
       });
       setAutoCode(true);
@@ -173,7 +198,7 @@ export default function ItemFormModal({ open, onClose, onCreated }) {
             />
           </div>
 
-          {/* Tipo de insumo y Unidad de medida en grid */}
+          {/* Tipo de insumo y Dimensión */}
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-2">
@@ -182,7 +207,12 @@ export default function ItemFormModal({ open, onClose, onCreated }) {
               <select
                 value={form.tipo_insumo}
                 onChange={(e) =>
-                  setForm({ ...form, tipo_insumo: e.target.value })
+                  setForm((prev) => ({
+                    ...prev,
+                    tipo_insumo: e.target.value,
+                    unidad_medida: e.target.value === "REPUESTO" ? "UNIDAD" : prev.unidad_medida,
+                    unidad_equivalencia: e.target.value === "REPUESTO" ? "" : prev.unidad_equivalencia,
+                  }))
                 }
                 className="w-full px-4 py-3 border border-gray-300 rounded-lg text-sm
                          focus:outline-none focus:ring-2 focus:ring-[#1e3a8a] focus:border-transparent
@@ -195,22 +225,42 @@ export default function ItemFormModal({ open, onClose, onCreated }) {
 
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-2">
-                Unidad de medida <span className="text-red-500">*</span>
+                Dimensión (solo consumibles)
               </label>
-              <input
-                type="text"
-                placeholder="Ej: UNIDAD, KG, LITRO"
-                required
-                value={form.unidad_medida}
+              <select
+                value={form.unidad_equivalencia}
                 onChange={(e) => {
-                  setForm({ ...form, unidad_medida: e.target.value });
+                  setForm({
+                    ...form,
+                    unidad_equivalencia: e.target.value,
+                    unidad_medida:
+                      unidadesBase.find(
+                        (u) => String(u.id) === String(e.target.value)
+                      )?.nombre || form.unidad_medida,
+                  });
                   if (error) setError("");
                 }}
+                disabled={form.tipo_insumo === "REPUESTO"}
                 className="w-full px-4 py-3 border border-gray-300 rounded-lg text-sm
                          focus:outline-none focus:ring-2 focus:ring-[#1e3a8a] focus:border-transparent
                          transition-all duration-200 placeholder:text-gray-400"
-              />
+              >
+                <option value="">Selecciona dimensión</option>
+                {dimensionesDisponibles.map((unidad) => (
+                  <option key={unidad.id} value={unidad.id}>
+                    {unidad.categoria} · {unidad.nombre}
+                  </option>
+                ))}
+              </select>
             </div>
+          </div>
+
+          <div className="rounded-lg border border-gray-200 bg-gray-50 px-4 py-3 text-xs text-gray-600">
+            <p className="font-semibold text-gray-700">Reglas</p>
+            <ul className="mt-1 list-disc space-y-1 pl-4">
+              <li>Los consumibles deben elegir una dimensión.</li>
+              <li>Los repuestos usan la dimensión CANTIDAD y la unidad UNIDAD por defecto.</li>
+            </ul>
           </div>
 
           {/* Repuesto Volvo */}

@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { itemAPI } from "@/lib/api";
+import { itemAPI, unidadEquivalenciaAPI } from "@/lib/api";
 import ItemFormModal from "./ItemFormModal";
 import ItemHistorialModal from "./ItemHistorialModal";
 import ItemUbicacionModal from "./ItemUbicacionModal";
@@ -12,6 +12,8 @@ export default function ItemTable() {
   const [items, setItems] = useState([]);
   const [loading, setLoading] = useState(true);
   const [open, setOpen] = useState(false);
+  const [unidades, setUnidades] = useState([]);
+  const [displayUnitId, setDisplayUnitId] = useState("");
 
   const [selectedItem, setSelectedItem] = useState(null);
   const [openHistorial, setOpenHistorial] = useState(false);
@@ -33,7 +35,55 @@ export default function ItemTable() {
 
   useEffect(() => {
     loadItems();
+    unidadEquivalenciaAPI.list().then((res) => setUnidades(res.data));
+    const savedUnitId = window.localStorage.getItem("stock_display_unit_id");
+    if (savedUnitId) setDisplayUnitId(savedUnitId);
   }, []);
+
+  useEffect(() => {
+    const handleStorage = (event) => {
+      if (event.key === "stock_display_unit_id") {
+        setDisplayUnitId(event.newValue || "");
+      }
+    };
+    window.addEventListener("storage", handleStorage);
+    return () => window.removeEventListener("storage", handleStorage);
+  }, []);
+
+  useEffect(() => {
+    const handleDisplayChange = () => {
+      const savedUnitId = window.localStorage.getItem("stock_display_unit_id");
+      setDisplayUnitId(savedUnitId || "");
+    };
+    window.addEventListener("stockDisplayChange", handleDisplayChange);
+    return () =>
+      window.removeEventListener("stockDisplayChange", handleDisplayChange);
+  }, []);
+
+  const displayUnit = unidades.find((u) => String(u.id) === String(displayUnitId));
+
+  const formatStock = (item) => {
+    if (item.tipo_insumo !== "CONSUMIBLE") {
+      return {
+        valor: item.unidades_disponibles || 0,
+        unidad: "UNIDAD",
+      };
+    }
+
+    const baseCategoria = item.unidad_equivalencia_detalle?.categoria;
+    if (displayUnit && displayUnit.categoria === baseCategoria) {
+      const valor = (item.unidades_disponibles || 0) / Number(displayUnit.factor_a_unidad || 1);
+      return {
+        valor: Number.isFinite(valor) ? valor.toFixed(2) : item.unidades_disponibles || 0,
+        unidad: displayUnit.simbolo || displayUnit.nombre,
+      };
+    }
+
+    return {
+      valor: item.unidades_disponibles || 0,
+      unidad: item.unidad_equivalencia_detalle?.simbolo || item.unidad_medida || "UNIDAD",
+    };
+  };
 
   // Estadísticas del inventario
   const stats = {
@@ -257,11 +307,21 @@ export default function ItemTable() {
 
                     {/* Stock Disponible */}
                     <td className="px-6 py-4 text-center">
+                      {(() => {
+                        const stock = formatStock(item);
+                        return (
+                          <>
                       <div className="inline-flex items-center justify-center min-w-[56px] px-3 py-2 rounded-lg bg-blue-50 border border-blue-200">
                         <span className="text-[16px] font-bold text-[#1e3a5f]">
-                          {item.unidades_disponibles || 0}
+                          {stock.valor}
                         </span>
                       </div>
+                      <p className="mt-1 text-[11px] text-gray-500">
+                        {stock.unidad}
+                      </p>
+                          </>
+                        );
+                      })()}
                     </td>
 
                     {/* Tipo */}

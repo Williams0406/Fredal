@@ -117,6 +117,15 @@ export default function CompraForm({ onCreated }) {
     };
   };
 
+  const unidadesPorItem = (itemSel) => {
+    if (!itemSel?.unidad_equivalencia_detalle?.categoria) return [];
+    return unidadesEquivalencia.filter(
+      (u) =>
+        u.categoria === itemSel.unidad_equivalencia_detalle.categoria &&
+        u.activo
+    );
+  };
+
   /* =========================
       SUBMIT
   ========================= */
@@ -425,6 +434,7 @@ export default function CompraForm({ onCreated }) {
                               {(() => {
                                 const itemSel = items.find((it) => it.id.toString() === d.item);
                                 const isConsumible = itemSel?.tipo_insumo === "CONSUMIBLE";
+                                const unidadesDisponibles = unidadesPorItem(itemSel);
                                 if (!isConsumible) {
                                   return (
                                     <input
@@ -441,9 +451,16 @@ export default function CompraForm({ onCreated }) {
                                     onChange={(e) => updateDetalle(i, "unidad_equivalencia", e.target.value)}
                                     className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-[#1e3a8a]"
                                   >
-                                    <option value="">UNIDAD base</option>
-                                    {unidadesEquivalencia.map((u) => (
-                                      <option key={u.id} value={u.id}>{u.nombre}</option>
+                                    <option value="">
+                                      {itemSel?.unidad_equivalencia_detalle?.nombre
+                                        ? `Base: ${itemSel.unidad_equivalencia_detalle.nombre}`
+                                        : "Selecciona unidad"}
+                                    </option>
+                                    {unidadesDisponibles.map((u) => (
+                                      <option key={u.id} value={u.id}>
+                                        {u.nombre}
+                                        {u.simbolo ? ` (${u.simbolo})` : ""}
+                                      </option>
                                     ))}
                                   </select>
                                 );

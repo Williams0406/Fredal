@@ -96,9 +96,30 @@ class UbicacionCliente(models.Model):
 
 
 class UnidadEquivalencia(models.Model):
+
+    class Categoria(models.TextChoices):
+        VOLUMEN = "VOLUMEN", "Volumen"
+        LONGITUD = "LONGITUD", "Longitud"
+        MASA = "MASA", "Masa"
+        AREA = "AREA", "Área"
+        TIEMPO = "TIEMPO", "Tiempo"
+        OTRO = "OTRO", "Otro"
+        
     nombre = models.CharField(max_length=30, unique=True)
-    factor_a_unidad = models.DecimalField(max_digits=12, decimal_places=4)
+    simbolo = models.CharField(max_length=10, blank=True, default="")
+    categoria = models.CharField(max_length=15, choices=Categoria.choices, default=Categoria.OTRO)
+    factor_a_unidad = models.DecimalField(max_digits=16, decimal_places=6)
+    unidad_base = models.BooleanField(default=False)
     activo = models.BooleanField(default=True)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                fields=["categoria"],
+                condition=models.Q(unidad_base=True),
+                name="unique_unidad_base_por_categoria",
+            )
+        ]
 
     def __str__(self):
         return f"{self.nombre} ({self.factor_a_unidad})"
@@ -115,6 +136,13 @@ class Item(TimeStampedModel):
     tipo_insumo = models.CharField(max_length=15, choices=TipoInsumo.choices)
 
     unidad_medida = models.CharField(max_length=20, default="UNIDAD")
+    unidad_equivalencia = models.ForeignKey(
+        UnidadEquivalencia,
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name="items",
+    )
     volvo = models.BooleanField(default=False)
     ultimo_correlativo = models.PositiveIntegerField(default=0)
 

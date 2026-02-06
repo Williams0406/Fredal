@@ -108,6 +108,11 @@ export default function MovimientoRepuestoModal({ open, onClose, actividad, onSa
 
   const selectedItem = items.find((i) => String(i.id) === String(form.item));
   const esConsumible = selectedItem?.tipo_insumo === "CONSUMIBLE";
+  const unidadesConsumible = unidadesEquivalencia.filter(
+    (u) =>
+      u.activo &&
+      u.categoria === selectedItem?.unidad_equivalencia_detalle?.categoria
+  );
 
   const unidadesDisponiblesCount = useMemo(
     () => unidades.filter((u) => u.estado === form.estado_unidad).length,
@@ -209,7 +214,7 @@ export default function MovimientoRepuestoModal({ open, onClose, actividad, onSa
             <div><label className="block text-sm mb-2">Cantidad</label><input type="number" min="1" className="w-full px-3 py-2 border rounded" value={form.cantidad} onChange={(e)=>setForm((p)=>({...p,cantidad:e.target.value}))} /></div>
             <div><label className="block text-sm mb-2">Unidad</label><input disabled className="w-full px-3 py-2 border rounded bg-gray-50" value={selectedItem?.unidad_medida || ""} /></div>
             <div>
-              {esConsumible ? <><label className="block text-sm mb-2">Unidad equivalente</label><select className="w-full px-3 py-2 border rounded" value={form.unidad_equivalencia} onChange={(e)=>setForm((p)=>({...p,unidad_equivalencia:e.target.value}))}><option value="">UNIDAD base</option>{unidadesEquivalencia.map((u)=><option key={u.id} value={u.id}>{u.nombre}</option>)}</select></> : <><label className="block text-sm mb-2">Estado</label><select className="w-full px-3 py-2 border rounded" value={form.estado_unidad} onChange={(e)=>setForm((p)=>({...p,estado_unidad:e.target.value}))}><option value="">Seleccione estado</option><option value="NUEVO">NUEVO</option><option value="USADO">USADO</option><option value="REPARADO">REPARADO</option></select><p className="text-xs text-gray-500 mt-1">Disponibles: {unidadesDisponiblesCount}</p></>}
+              {esConsumible ? <><label className="block text-sm mb-2">Unidad equivalente</label><select className="w-full px-3 py-2 border rounded" value={form.unidad_equivalencia} onChange={(e)=>setForm((p)=>({...p,unidad_equivalencia:e.target.value}))}><option value="">{selectedItem?.unidad_equivalencia_detalle?.nombre ? `Base: ${selectedItem.unidad_equivalencia_detalle.nombre}` : "Selecciona unidad"}</option>{unidadesConsumible.map((u)=><option key={u.id} value={u.id}>{u.nombre}{u.simbolo ? ` (${u.simbolo})` : ""}</option>)}</select></> : <><label className="block text-sm mb-2">Estado</label><select className="w-full px-3 py-2 border rounded" value={form.estado_unidad} onChange={(e)=>setForm((p)=>({...p,estado_unidad:e.target.value}))}><option value="">Seleccione estado</option><option value="NUEVO">NUEVO</option><option value="USADO">USADO</option><option value="REPARADO">REPARADO</option></select><p className="text-xs text-gray-500 mt-1">Disponibles: {unidadesDisponiblesCount}</p></>}
             </div>
 
             <div className="flex items-end"><button className="w-full px-4 py-2 bg-[#84cc16] text-white rounded" onClick={handleAddUnidad}>Agregar</button></div>

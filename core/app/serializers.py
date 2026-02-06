@@ -72,6 +72,7 @@ class UserSerializer(serializers.ModelSerializer):
 
 class ItemSerializer(serializers.ModelSerializer):
     unidades_disponibles = serializers.SerializerMethodField()
+    unidad_equivalencia_detalle = serializers.SerializerMethodField()
 
     class Meta:
         model = Item
@@ -81,10 +82,36 @@ class ItemSerializer(serializers.ModelSerializer):
             "nombre",
             "tipo_insumo",
             "unidad_medida",
+            "unidad_equivalencia",
+            "unidad_equivalencia_detalle",
             "volvo",
             "unidades_disponibles",
         ]
 
+    def get_unidad_equivalencia_detalle(self, obj):
+        if not obj.unidad_equivalencia:
+            return None
+        return UnidadEquivalenciaSerializer(obj.unidad_equivalencia).data
+
+    def validate(self, data):
+        tipo_insumo = data.get("tipo_insumo", getattr(self.instance, "tipo_insumo", None))
+        unidad_equivalencia = data.get(
+            "unidad_equivalencia",
+            getattr(self.instance, "unidad_equivalencia", None),
+        )
+
+        if unidad_equivalencia and tipo_insumo != Item.TipoInsumo.CONSUMIBLE:
+            raise serializers.ValidationError(
+                "La unidad de equivalencia solo aplica a items CONSUMIBLE"
+            )
+
+        if unidad_equivalencia and not unidad_equivalencia.unidad_base:
+            raise serializers.ValidationError(
+                "La unidad de equivalencia del item debe ser la unidad base de su categoría"
+            )
+
+        return data
+    
     def get_unidades_disponibles(self, obj):
         if obj.tipo_insumo == Item.TipoInsumo.CONSUMIBLE:
             total_compras = (
@@ -165,7 +192,20 @@ class CompraCreateSerializer(serializers.ModelSerializer):
                 unidad_equivalencia = data.get("unidad_equivalencia")
                 cantidad = cantidad_original
 
+                if unidad_equivalencia and data["item"].tipo_insumo != Item.TipoInsumo.CONSUMIBLE:
+                    raise serializers.ValidationError(
+                        f"El item {data['item'].codigo} no es CONSUMIBLE y no permite equivalencias"
+                    )
+                
                 if data["item"].tipo_insumo == Item.TipoInsumo.CONSUMIBLE and unidad_equivalencia:
+                    if not data["item"].unidad_equivalencia:
+                        raise serializers.ValidationError(
+                            f"El item {data['item'].codigo} no tiene unidad base configurada"
+                        )
+                    if unidad_equivalencia.categoria != data["item"].unidad_equivalencia.categoria:
+                        raise serializers.ValidationError(
+                            "La unidad de equivalencia no coincide con la categoría del item"
+                        )
                     cantidad_decimal = Decimal(cantidad_original) * unidad_equivalencia.factor_a_unidad
                     if cantidad_decimal != cantidad_decimal.to_integral_value():
                         raise serializers.ValidationError(
@@ -512,6 +552,14 @@ class MovimientoConsumibleSerializer(serializers.ModelSerializer):
         cantidad_equivalente = data.get("cantidad_equivalente")
 
         if unidad_equivalencia and cantidad_equivalente:
+            if not item.unidad_equivalencia:
+                raise serializers.ValidationError(
+                    "El item no tiene unidad base configurada"
+                )
+            if unidad_equivalencia.categoria != item.unidad_equivalencia.categoria:
+                raise serializers.ValidationError(
+                    "La unidad de equivalencia no coincide con la categoría del item"
+                )
             cantidad_decimal = Decimal(cantidad_equivalente) * unidad_equivalencia.factor_a_unidad
             if cantidad_decimal != cantidad_decimal.to_integral_value():
                 raise serializers.ValidationError(
@@ -877,7 +925,15 @@ class UbicacionClienteSerializer(serializers.ModelSerializer):
 class UnidadEquivalenciaSerializer(serializers.ModelSerializer):
     class Meta:
         model = UnidadEquivalencia
-        fields = ["id", "nombre", "factor_a_unidad", "activo"]
+        fields = [
+            "id",
+            "nombre",
+            "simbolo",
+            "categoria",
+            "factor_a_unidad",
+            "unidad_base",
+            "activo",
+        ]
         
 class KardexContableSerializer(serializers.Serializer):
     fecha = serializers.DateTimeField()
