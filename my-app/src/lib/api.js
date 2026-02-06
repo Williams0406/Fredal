@@ -234,6 +234,12 @@ export const actividadTrabajoAPI = {
 
   create: (data) =>
     api.post("/api/actividades/", data),
+
+  update: (id, data) =>
+    api.put(`/api/actividades/${id}/`, data),
+
+  delete: (id) =>
+    api.delete(`/api/actividades/${id}/`),
 };
 
 export const compraAPI = {

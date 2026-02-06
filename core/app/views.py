@@ -558,6 +558,20 @@ class OrdenTrabajoViewSet(viewsets.ModelViewSet):
     serializer_class = OrdenTrabajoSerializer
     permission_classes = [TrabajoPermission]
 
+    def get_queryset(self):
+        queryset = super().get_queryset()
+        user = self.request.user
+
+        if user.groups.filter(name="Tecnico").exists():
+            try:
+                trabajador = user.perfil.trabajador
+            except PerfilUsuario.DoesNotExist:
+                return OrdenTrabajo.objects.none()
+
+            return queryset.filter(tecnicos=trabajador)
+
+        return queryset
+
 class ActividadTrabajoViewSet(viewsets.ModelViewSet):
     queryset = ActividadTrabajo.objects.all()
     serializer_class = ActividadTrabajoSerializer

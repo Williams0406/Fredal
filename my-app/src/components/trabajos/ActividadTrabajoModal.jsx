@@ -30,6 +30,7 @@ export default function ActividadTrabajoModal({
   onClose,
   onSaved,
   esPlanificada = false,
+  actividad = null,
 }) {
   const [form, setForm] = useState({
     tipo_actividad: "",
@@ -43,6 +44,18 @@ export default function ActividadTrabajoModal({
 
   const esRevision = form.tipo_actividad === "REVISION";
   const esMantenimiento = form.tipo_actividad === "MANTENIMIENTO";
+  const isEdit = Boolean(actividad);
+
+  useEffect(() => {
+    if (actividad) {
+      setForm({
+        tipo_actividad: actividad.tipo_actividad || "",
+        tipo_mantenimiento: actividad.tipo_mantenimiento || "",
+        subtipo: actividad.subtipo || "",
+        descripcion: actividad.descripcion || "",
+      });
+    }
+  }, [actividad]);
 
   /* =========================
      SUBTIPOS DINÁMICOS
@@ -106,7 +119,7 @@ export default function ActividadTrabajoModal({
         tipo_actividad: form.tipo_actividad,
         descripcion: form.descripcion,
         orden: trabajoId,
-        es_planificada: esPlanificada,
+        es_planificada: actividad?.es_planificada ?? esPlanificada,
       };
 
       if (form.tipo_actividad === "MANTENIMIENTO") {
@@ -114,7 +127,11 @@ export default function ActividadTrabajoModal({
         payload.subtipo = form.subtipo;
       }
 
-      await actividadTrabajoAPI.create(payload);
+      if (isEdit) {
+        await actividadTrabajoAPI.update(actividad.id, payload);
+      } else {
+        await actividadTrabajoAPI.create(payload);
+      }
 
       onSaved();
       onClose();
@@ -145,7 +162,11 @@ export default function ActividadTrabajoModal({
         <div className="border-b border-gray-200 px-6 py-4">
           <div className="flex items-center justify-between">
             <h3 className="text-xl font-semibold text-[#1e3a8a]">
-              {esPlanificada ? "Nueva Actividad a Realizar" : "Nueva Actividad Registrada"}
+              {isEdit
+                ? "Editar Actividad"
+                : esPlanificada
+                  ? "Nueva Actividad a Realizar"
+                  : "Nueva Actividad Registrada"}
             </h3>
             <button
               onClick={onClose}

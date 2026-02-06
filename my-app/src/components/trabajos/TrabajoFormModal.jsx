@@ -12,6 +12,8 @@ export default function TrabajoFormModal({
   trabajo,
 }) {
   const isEdit = Boolean(trabajo);
+  const getToday = () => new Date().toISOString().split("T")[0];
+  const getCurrentTime = () => new Date().toTimeString().slice(0, 5);
 
   const [form, setForm] = useState({
     maquinaria: null,
@@ -36,12 +38,12 @@ export default function TrabajoFormModal({
     if (open && !trabajo) {
       setForm({
         maquinaria: null,
-        fecha: "",
+        fecha: getToday(),
         lugar: "TALLER",
         ubicacion_detalle: "",
         prioridad: "REGULAR",
         estatus: "PENDIENTE",
-        hora_inicio: "",
+        hora_inicio: getCurrentTime(),
         hora_fin: "",
         horometro: "",
         estado_equipo: "",
@@ -63,12 +65,12 @@ export default function TrabajoFormModal({
     if (trabajo) {
       setForm({
         maquinaria: trabajo.maquinaria || "",
-        fecha: trabajo.fecha || "",
+        fecha: trabajo.fecha || getToday(),
         lugar: trabajo.lugar || "TALLER",
         ubicacion_detalle: trabajo.ubicacion_detalle || "",
         prioridad: trabajo.prioridad || "REGULAR",
         estatus: trabajo.estatus || "PENDIENTE",
-        hora_inicio: trabajo.hora_inicio || "",
+        hora_inicio: trabajo.hora_inicio || getCurrentTime(),
         hora_fin: trabajo.hora_fin || "",
         horometro: trabajo.horometro || "",
         estado_equipo: trabajo.estado_equipo || "",

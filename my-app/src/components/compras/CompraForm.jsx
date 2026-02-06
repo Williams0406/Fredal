@@ -14,6 +14,7 @@ const emptyDetalle = {
 };
 
 export default function CompraForm({ onCreated }) {
+  const getToday = () => new Date().toISOString().split("T")[0];
   const [open, setOpen] = useState(false);
   const [items, setItems] = useState([]);
   const [proveedores, setProveedores] = useState([]);
@@ -26,7 +27,7 @@ export default function CompraForm({ onCreated }) {
   ========================= */
 
   const [cabecera, setCabecera] = useState({
-    fecha: "",
+    fecha: getToday(),
     proveedor: "",
     tipo_comprobante: "",
     codigo_comprobante: "",
@@ -43,6 +44,10 @@ export default function CompraForm({ onCreated }) {
     if (open) {
       itemAPI.list().then((res) => setItems(res.data));
       proveedorAPI.list().then((res) => setProveedores(res.data));
+      setCabecera((prev) => ({
+        ...prev,
+        fecha: prev.fecha || getToday(),
+      }));
     }
   }, [open]);
 
