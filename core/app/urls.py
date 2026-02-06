@@ -9,6 +9,7 @@ from .views import (
     OrdenTrabajoViewSet,
     ActividadTrabajoViewSet,
     MovimientoRepuestoViewSet,
+    MovimientoConsumibleViewSet,
     TrabajadorViewSet,
     MeView,
     RegistroUsuarioView,
@@ -16,6 +17,9 @@ from .views import (
     ProveedorViewSet,
     CatalogosView,
     AlmacenViewSet,
+    ClienteViewSet,
+    UbicacionClienteViewSet,
+    UnidadEquivalenciaViewSet,
 )
 
 router = DefaultRouter()
@@ -27,9 +31,13 @@ router.register(r"users", UserViewSet)
 router.register(r"trabajos", OrdenTrabajoViewSet)
 router.register(r"actividades", ActividadTrabajoViewSet)
 router.register(r"movimientos-repuesto", MovimientoRepuestoViewSet)
+router.register(r"movimientos-consumible", MovimientoConsumibleViewSet)
 router.register(r"trabajadores-registro",TrabajadorRegistroViewSet,basename="trabajador-registro")
 router.register(r"proveedores", ProveedorViewSet)
 router.register(r"almacenes", AlmacenViewSet)
+router.register(r"clientes", ClienteViewSet)
+router.register(r"ubicaciones-cliente", UbicacionClienteViewSet)
+router.register(r"unidades-equivalencia", UnidadEquivalenciaViewSet)
 
 urlpatterns = [
     path("api/", include(router.urls)),

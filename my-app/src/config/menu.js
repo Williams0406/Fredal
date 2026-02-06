@@ -40,6 +40,18 @@ export const MENU_ITEMS = [
     ],
   },
 
+
+  {
+    label: "Clientes",
+    path: "/clientes",
+    roles: ["admin", "Jefe de Tecnicos", "ManageCompras"],
+  },
+
+  {
+    label: "Unidades",
+    path: "/unidades",
+    roles: ["admin", "Almacenero", "Jefe de Almaceneros", "ManageCompras"],
+  },
   {
     label: "Maquinarias",
     path: "/maquinaria",

@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState, useMemo } from "react";
-import { compraAPI, itemAPI, proveedorAPI } from "@/lib/api";
+import { compraAPI, itemAPI, proveedorAPI, unidadEquivalenciaAPI } from "@/lib/api";
 
 const IGV = 1.18;
 
@@ -9,14 +9,17 @@ const IGV = 1.18;
 const emptyDetalle = {
   item: "",
   cantidad: 1,
+  unidad_equivalencia: "",
   tipo_registro: "VALOR_UNITARIO",
   monto: "",
 };
 
 export default function CompraForm({ onCreated }) {
+  const getToday = () => new Date().toISOString().split("T")[0];
   const [open, setOpen] = useState(false);
   const [items, setItems] = useState([]);
   const [proveedores, setProveedores] = useState([]);
+  const [unidadesEquivalencia, setUnidadesEquivalencia] = useState([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [searchTerm, setSearchTerm] = useState("");
@@ -26,7 +29,7 @@ export default function CompraForm({ onCreated }) {
   ========================= */
 
   const [cabecera, setCabecera] = useState({
-    fecha: "",
+    fecha: getToday(),
     proveedor: "",
     tipo_comprobante: "",
     codigo_comprobante: "",
@@ -43,6 +46,11 @@ export default function CompraForm({ onCreated }) {
     if (open) {
       itemAPI.list().then((res) => setItems(res.data));
       proveedorAPI.list().then((res) => setProveedores(res.data));
+      unidadEquivalenciaAPI.list().then((res) => setUnidadesEquivalencia(res.data.filter((u) => u.activo)));
+      setCabecera((prev) => ({
+        ...prev,
+        fecha: prev.fecha || getToday(),
+      }));
     }
   }, [open]);
 
@@ -144,6 +152,7 @@ export default function CompraForm({ onCreated }) {
         items: detalles.map((d) => ({
           item: Number(d.item),
           cantidad: Number(d.cantidad),
+          unidad_equivalencia: d.unidad_equivalencia ? Number(d.unidad_equivalencia) : null,
           moneda: cabecera.moneda, // Todos los items heredan la moneda del comprobante
           tipo_registro: d.tipo_registro,
           monto: Number(d.monto),
@@ -352,7 +361,7 @@ export default function CompraForm({ onCreated }) {
                             )}
                           </div>
 
-                          <div className="grid grid-cols-1 md:grid-cols-4 gap-3 mb-3">
+                          <div className="grid grid-cols-1 md:grid-cols-5 gap-3 mb-3">
                             <div className="md:col-span-2">
                               <label className="block text-xs font-medium text-gray-700 mb-1">Item</label>
                               <div className="relative">
@@ -409,6 +418,36 @@ export default function CompraForm({ onCreated }) {
                                 onChange={(e) => updateDetalle(i, "cantidad", e.target.value)}
                                 className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-[#1e3a8a]"
                               />
+                            </div>
+
+                            <div>
+                              <label className="block text-xs font-medium text-gray-700 mb-1">Unidad</label>
+                              {(() => {
+                                const itemSel = items.find((it) => it.id.toString() === d.item);
+                                const isConsumible = itemSel?.tipo_insumo === "CONSUMIBLE";
+                                if (!isConsumible) {
+                                  return (
+                                    <input
+                                      type="text"
+                                      disabled
+                                      value={itemSel?.unidad_medida || "UNIDAD"}
+                                      className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm bg-gray-50"
+                                    />
+                                  );
+                                }
+                                return (
+                                  <select
+                                    value={d.unidad_equivalencia}
+                                    onChange={(e) => updateDetalle(i, "unidad_equivalencia", e.target.value)}
+                                    className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-[#1e3a8a]"
+                                  >
+                                    <option value="">UNIDAD base</option>
+                                    {unidadesEquivalencia.map((u) => (
+                                      <option key={u.id} value={u.id}>{u.nombre}</option>
+                                    ))}
+                                  </select>
+                                );
+                              })()}
                             </div>
 
                             <div>

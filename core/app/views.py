@@ -24,13 +24,17 @@ from .models import (
     OrdenTrabajo,
     ActividadTrabajo,
     MovimientoRepuesto,
+    MovimientoConsumible,
     CodigoRegistro,
     PerfilUsuario,
     HistorialUbicacionItem,
     ItemProveedor,
     Proveedor,
     ItemUnidad,
-    Almacen
+    Almacen,
+    Cliente,
+    UbicacionCliente,
+    UnidadEquivalencia
 )
 from .serializers import (
     UserSerializer,
@@ -43,6 +47,7 @@ from .serializers import (
     OrdenTrabajoSerializer,
     ActividadTrabajoSerializer,
     MovimientoRepuestoSerializer,
+    MovimientoConsumibleSerializer,
     MaquinariaDetalleSerializer,
     TrabajadorConCodigoSerializer,
     RegistroUsuarioSerializer,
@@ -54,7 +59,10 @@ from .serializers import (
     ItemProveedorSerializer,
     ProveedorSerializer,
     KardexContableSerializer,
-    AlmacenSerializer
+    AlmacenSerializer,
+    ClienteSerializer,
+    UbicacionClienteSerializer,
+    UnidadEquivalenciaSerializer
 )
 from .permissions import (
     IsAdmin,
@@ -198,11 +206,18 @@ class ItemViewSet(viewsets.ModelViewSet):
         if not actividad_id:
             return Response([])
 
+        if item.tipo_insumo == Item.TipoInsumo.CONSUMIBLE:
+            return Response([])
+
         unidades = (
             ItemUnidad.objects
             .filter(
                 item=item,
-                estado=ItemUnidad.Estado.NUEVO,
+                estado__in=[
+                    ItemUnidad.Estado.NUEVO,
+                    ItemUnidad.Estado.USADO,
+                    ItemUnidad.Estado.REPARADO,
+                ],
                 historial__almacen__isnull=False,
                 historial__fecha_fin__isnull=True,
             )
@@ -237,6 +252,14 @@ class ItemViewSet(viewsets.ModelViewSet):
         salidas = (
             MovimientoRepuesto.objects
             .filter(item_unidad__item=item)
+            .filter(actividad__es_planificada=False)
+            .select_related("actividad__orden")
+            .order_by("fecha")
+        )
+
+        salidas_consumible = (
+            MovimientoConsumible.objects
+            .filter(item=item, actividad__es_planificada=False)
             .select_related("actividad__orden")
             .order_by("fecha")
         )
@@ -267,9 +290,29 @@ class ItemViewSet(viewsets.ModelViewSet):
 
             eventos.append({
                 "fecha": s.fecha,
-                "tipo": "SALIDA",
+                "tipo": "SALIDA_REPUESTO",
                 "cantidad": 1,
                 "costo_unitario": costo_unitario,
+                "registro": orden.codigo_orden if orden else "OT",
+                "maquinaria": (
+                    {
+                        "id": maquinaria.id,
+                        "codigo": maquinaria.codigo_maquina,
+                        "nombre": maquinaria.nombre,
+                    }
+                    if maquinaria else None
+                ),
+            })
+
+        for s in salidas_consumible:
+            orden = s.actividad.orden if s.actividad else None
+            maquinaria = orden.maquinaria if orden else None
+
+            eventos.append({
+                "fecha": s.fecha,
+                "tipo": "SALIDA_CONSUMIBLE",
+                "cantidad": s.cantidad,
+                "costo_unitario": None,
                 "registro": orden.codigo_orden if orden else "OT",
                 "maquinaria": (
                     {
@@ -303,10 +346,15 @@ class ItemViewSet(viewsets.ModelViewSet):
 
             else:
                 entrada = 0
-                salida = 1
+                salida = e["cantidad"]
+                costo_salida = (
+                    e["costo_unitario"]
+                    if e["costo_unitario"] is not None
+                    else costo_promedio
+                )
 
-                costo_total -= e["costo_unitario"]
-                stock -= 1
+                costo_total -= costo_salida * salida
+                stock -= salida
 
             kardex.append({
                 "fecha": e["fecha"],
@@ -315,7 +363,9 @@ class ItemViewSet(viewsets.ModelViewSet):
                 "entrada": entrada,
                 "salida": salida,
                 "costo_unitario": round(
-                    e["costo_unitario"] if e["tipo"] == "SALIDA" else costo_promedio,
+                    e["costo_unitario"]
+                    if e["tipo"] == "SALIDA_REPUESTO"
+                    else costo_promedio,
                     2
                 ),
                 "inventario_final_cantidad": stock,
@@ -514,6 +564,20 @@ class OrdenTrabajoViewSet(viewsets.ModelViewSet):
     serializer_class = OrdenTrabajoSerializer
     permission_classes = [TrabajoPermission]
 
+    def get_queryset(self):
+        queryset = super().get_queryset()
+        user = self.request.user
+
+        if user.groups.filter(name="Tecnico").exists():
+            try:
+                trabajador = user.perfil.trabajador
+            except PerfilUsuario.DoesNotExist:
+                return OrdenTrabajo.objects.none()
+
+            return queryset.filter(tecnicos=trabajador)
+
+        return queryset
+
 class ActividadTrabajoViewSet(viewsets.ModelViewSet):
     queryset = ActividadTrabajo.objects.all()
     serializer_class = ActividadTrabajoSerializer
@@ -528,6 +592,20 @@ class MovimientoRepuestoViewSet(viewsets.ModelViewSet):
 
     def get_queryset(self):
         queryset = MovimientoRepuesto.objects.all()
+        actividad_id = self.request.query_params.get("actividad")
+
+        if actividad_id:
+            queryset = queryset.filter(actividad_id=actividad_id)
+
+        return queryset
+
+class MovimientoConsumibleViewSet(viewsets.ModelViewSet):
+    queryset = MovimientoConsumible.objects.all()
+    serializer_class = MovimientoConsumibleSerializer
+    permission_classes = [CambioEquipoPermission]
+
+    def get_queryset(self):
+        queryset = MovimientoConsumible.objects.all()
         actividad_id = self.request.query_params.get("actividad")
 
         if actividad_id:
@@ -561,6 +639,25 @@ class ProveedorViewSet(viewsets.ModelViewSet):
     serializer_class = ProveedorSerializer
     permission_classes = [CatalogoPermission]
 
+
+
+class ClienteViewSet(viewsets.ModelViewSet):
+    queryset = Cliente.objects.all().order_by("nombre")
+    serializer_class = ClienteSerializer
+    permission_classes = [CatalogoPermission]
+
+
+class UbicacionClienteViewSet(viewsets.ModelViewSet):
+    queryset = UbicacionCliente.objects.select_related("cliente").all().order_by("cliente__nombre", "nombre")
+    serializer_class = UbicacionClienteSerializer
+    permission_classes = [CatalogoPermission]
+
+
+class UnidadEquivalenciaViewSet(viewsets.ModelViewSet):
+    queryset = UnidadEquivalencia.objects.all().order_by("nombre")
+    serializer_class = UnidadEquivalenciaSerializer
+    permission_classes = [CatalogoPermission]
+
 class CatalogosView(APIView):
     permission_classes = [IsAuthenticated]
 
@@ -579,11 +676,14 @@ class CatalogosView(APIView):
             },
             "item_unidad": {
                 "estado": ItemUnidad.Estado.choices,
-            }
+            },
+            "unidad_equivalencia": UnidadEquivalenciaSerializer(
+                UnidadEquivalencia.objects.filter(activo=True),
+                many=True
+            ).data,
         })
 
 class AlmacenViewSet(viewsets.ModelViewSet):
     queryset = Almacen.objects.all().order_by("nombre")
     serializer_class = AlmacenSerializer
     permission_classes = [IsAuthenticated]
-

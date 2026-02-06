@@ -6,10 +6,11 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 
 export default function CompraForm({ onSuccess }) {
+  const getToday = () => new Date().toISOString().split("T")[0];
   const [form, setForm] = useState({
     codigo: "",
     codigo_comprobante: "",
-    fecha: "",
+    fecha: getToday(),
   });
 
   const handleChange = (e) =>
@@ -20,7 +21,7 @@ export default function CompraForm({ onSuccess }) {
     try {
       await compraAPI.create(form);
       onSuccess?.();
-      setForm({ codigo: "", codigo_comprobante: "", fecha: "" });
+      setForm({ codigo: "", codigo_comprobante: "", fecha: getToday() });
     } catch (err) {
       console.error("Error registrando compra", err);
     }
@@ -38,7 +39,7 @@ export default function CompraForm({ onSuccess }) {
         placeholder="Comprobante"
         onChange={handleChange}
       />
-      <Input type="date" name="fecha" onChange={handleChange} />
+      <Input type="date" name="fecha" value={form.fecha} onChange={handleChange} />
 
       <Button type="submit">Registrar Compra</Button>
     </form>

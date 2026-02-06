@@ -6,7 +6,9 @@ import {
   trabajadorAPI,
   maquinariaAPI,
   movimientoRepuestoAPI,
+  movimientoConsumibleAPI,
   actividadTrabajoAPI,
+  ubicacionClienteAPI,
 } from "@/lib/api";
 import ActividadTrabajoModal from "./ActividadTrabajoModal";
 import MovimientoRepuestoModal from "./MovimientoRepuestoModal";
@@ -39,12 +41,14 @@ export default function TrabajoDetalleModal({ open, trabajoId, onClose, onUpdate
   const [tecnicos, setTecnicos] = useState([]);
   const [maquinarias, setMaquinarias] = useState([]);
   const [actividades, setActividades] = useState([]);
+  const [ubicacionesCliente, setUbicacionesCliente] = useState([]);
 
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [editMode, setEditMode] = useState(false);
 
   const [showActividadModal, setShowActividadModal] = useState(false);
+  const [actividadModalPlanificada, setActividadModalPlanificada] = useState(false);
   const [showMovimientoModal, setShowMovimientoModal] = useState(false);
   const [actividadSeleccionada, setActividadSeleccionada] = useState(null);
   const [showFinalizarModal, setShowFinalizarModal] = useState(false);
@@ -58,6 +62,16 @@ export default function TrabajoDetalleModal({ open, trabajoId, onClose, onUpdate
   const esFinalizado = trabajo?.estatus === "FINALIZADO";
 
   const readOnly = esFinalizado || !editMode;
+
+  const actividadesPlanificadas = actividades.filter((a) => a.es_planificada);
+  const actividadesRegistradas = actividades.filter((a) => !a.es_planificada);
+
+  const tecnicosFiltrados = tecnicos.filter((t) =>
+    ["TECNICO", "JEFE DE TECNICOS"].includes((t.puesto || "").toUpperCase())
+  );
+
+  const getToday = () => new Date().toISOString().split("T")[0];
+  const getCurrentTime = () => new Date().toTimeString().slice(0, 5);
   
 
   /* =========================
@@ -73,12 +87,20 @@ export default function TrabajoDetalleModal({ open, trabajoId, onClose, onUpdate
       actividadTrabajoAPI.listByTrabajo(trabajoId),
       trabajadorAPI.list(),
       maquinariaAPI.list(),
-    ]).then(([tRes, actRes, tecRes, maqRes]) => {
+      ubicacionClienteAPI.list(),
+    ]).then(([tRes, actRes, tecRes, maqRes, ubiRes]) => {
+      const fechaDefault = tRes.data.fecha || getToday();
+      const horaInicioDefault = tRes.data.hora_inicio || getCurrentTime();
       setTrabajo(tRes.data);
-      setForm(tRes.data);
+      setForm({
+        ...tRes.data,
+        fecha: fechaDefault,
+        hora_inicio: horaInicioDefault,
+      });
       setActividades(actRes.data);
       setTecnicos(tecRes.data);
       setMaquinarias(maqRes.data);
+      setUbicacionesCliente(ubiRes.data);
       setLoading(false);
     });
   }, [open, trabajoId]);
@@ -96,12 +118,22 @@ export default function TrabajoDetalleModal({ open, trabajoId, onClose, onUpdate
         // Ejecutamos las peticiones para cada actividad
         await Promise.all(
           actividades.map(async (a) => {
-            // Usamos movimientoRepuestoAPI en lugar de 'api'
-            const res = await movimientoRepuestoAPI.list({ actividad: a.id });
-            
-            // Guardamos TODOS los movimientos (sin filtrar por estado INOPERATIVO)
-            // para que el historial sea permanente.
-            result[a.id] = res.data; 
+            const [repuestoRes, consumibleRes] = await Promise.all([
+              movimientoRepuestoAPI.list({ actividad: a.id }),
+              movimientoConsumibleAPI.list({ actividad: a.id }),
+            ]);
+
+            const repuestos = repuestoRes.data.map((m) => ({
+              ...m,
+              tipo: "REPUESTO",
+            }));
+
+            const consumibles = consumibleRes.data.map((m) => ({
+              ...m,
+              tipo: "CONSUMIBLE",
+            }));
+
+            result[a.id] = [...repuestos, ...consumibles];
           })
         );
 
@@ -173,6 +205,10 @@ export default function TrabajoDetalleModal({ open, trabajoId, onClose, onUpdate
   };
 
   const handleIniciarTrabajo = async () => {
+    if (!form.tecnicos || form.tecnicos.length === 0) {
+      alert("Selecciona al menos un técnico asignado");
+      return;
+    }
     setSaving(true);
     try {
       const res = await trabajoAPI.patch(trabajoId, {
@@ -195,6 +231,7 @@ export default function TrabajoDetalleModal({ open, trabajoId, onClose, onUpdate
     setEditMode(false);
 
     setShowActividadModal(false);
+    setActividadModalPlanificada(false);
     setShowMovimientoModal(false);
     setShowFinalizarModal(false);
 
@@ -246,16 +283,20 @@ export default function TrabajoDetalleModal({ open, trabajoId, onClose, onUpdate
                     Editar
                   </button>
                 ) : (
-                  <button
-                    className="text-sm font-medium text-gray-600 hover:text-gray-800 
+                    <button
+                      className="text-sm font-medium text-gray-600 hover:text-gray-800 
                              transition-colors duration-200"
-                    onClick={() => {
-                      setForm(trabajo);
+                      onClick={() => {
+                      setForm({
+                        ...trabajo,
+                        fecha: trabajo.fecha || getToday(),
+                        hora_inicio: trabajo.hora_inicio || getCurrentTime(),
+                      });
                       setEditMode(false);
                     }}
-                  >
-                    Cancelar edición
-                  </button>
+                    >
+                      Cancelar edición
+                    </button>
                 )
               )}
 
@@ -327,19 +368,22 @@ export default function TrabajoDetalleModal({ open, trabajoId, onClose, onUpdate
               </div>
 
               <div className="mt-4">
-                <Input
-                  label="Ubicación detallada"
+                <Select
+                  label="Ubicación"
                   name="ubicacion_detalle"
                   value={form.ubicacion_detalle || ""}
                   onChange={handleChange}
                   disabled={readOnly}
-                  placeholder="Ubicación exacta del trabajo"
+                  options={ubicacionesCliente.map((u) => ({
+                    value: `${u.cliente_nombre} - ${u.nombre}`,
+                    label: `${u.cliente_nombre} - ${u.nombre}`,
+                  }))}
                 />
               </div>
             </section>
 
-            {/* SECCIÓN: Información Técnica (solo en proceso o finalizado) */}
-            {(esEnProceso || esFinalizado) && (
+            {/* SECCIÓN: Información Técnica (solo en finalizado) */}
+            {esFinalizado && (
               <section className="border-t border-gray-200 pt-6">
                 <h3 className="text-base font-semibold text-gray-900 mb-4 flex items-center gap-2">
                   <svg className="w-5 h-5 text-[#1e3a8a]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -387,21 +431,20 @@ export default function TrabajoDetalleModal({ open, trabajoId, onClose, onUpdate
                     disabled={readOnly}
                   />
                 </div>
+
+                <div className="mt-4">
+                  <Textarea
+                    label="Observaciones"
+                    name="observaciones"
+                    value={form.observaciones || ""}
+                    onChange={handleChange}
+                    disabled={readOnly}
+                    placeholder="Detalles adicionales sobre el trabajo..."
+                    rows={4}
+                  />
+                </div>
               </section>
             )}
-
-            {/* SECCIÓN: Observaciones */}
-            <section className="border-t border-gray-200 pt-6">
-              <Textarea
-                label="Observaciones"
-                name="observaciones"
-                value={form.observaciones || ""}
-                onChange={handleChange}
-                disabled={readOnly}
-                placeholder="Detalles adicionales sobre el trabajo..."
-                rows={4}
-              />
-            </section>
 
             {/* SECCIÓN: Técnicos */}
             <section className="border-t border-gray-200 pt-6">
@@ -413,7 +456,7 @@ export default function TrabajoDetalleModal({ open, trabajoId, onClose, onUpdate
                 Técnicos Asignados
               </h3>
               <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3">
-                {tecnicos.map((t) => (
+                {tecnicosFiltrados.map((t) => (
                   <label 
                     key={t.id} 
                     className={`
@@ -442,65 +485,160 @@ export default function TrabajoDetalleModal({ open, trabajoId, onClose, onUpdate
               </div>
             </section>
 
-            {/* SECCIÓN: Actividades (solo en proceso o finalizado) */}
-            {(esEnProceso || esFinalizado) && (
+            {/* SECCIÓN: Actividades */}
+            {(esPendiente || esEnProceso || esFinalizado) && (
               <section className="border-t border-gray-200 pt-6">
-                <div className="flex justify-between items-center mb-4">
-                  <h3 className="text-base font-semibold text-gray-900 flex items-center gap-2">
-                    <svg className="w-5 h-5 text-[#1e3a8a]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} 
-                            d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-6 9l2 2 4-4" />
-                    </svg>
-                    Actividades Registradas
-                    <span className="text-sm font-normal text-gray-500">
-                      ({actividades.length})
-                    </span>
-                  </h3>
-                  {!esFinalizado && (
-                    <button
-                      className="px-4 py-2 text-sm font-medium text-white bg-[#84cc16] 
-                               rounded-lg hover:bg-[#84cc16]/90 focus:outline-none 
-                               focus:ring-2 focus:ring-[#84cc16] focus:ring-offset-2
-                               transition-all duration-200 flex items-center gap-2"
-                      onClick={() => setShowActividadModal(true)}
-                    >
-                      <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
-                      </svg>
-                      Nueva Actividad
-                    </button>
+                <div className="space-y-8">
+                  <div>
+                    <div className="flex justify-between items-center mb-4">
+                      <h3 className="text-base font-semibold text-gray-900 flex items-center gap-2">
+                        <svg className="w-5 h-5 text-[#1e3a8a]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} 
+                                d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-6 9l2 2 4-4" />
+                        </svg>
+                        Actividades a Realizar
+                        <span className="text-sm font-normal text-gray-500">
+                          ({actividadesPlanificadas.length})
+                        </span>
+                      </h3>
+                      {!esFinalizado && (
+                        <button
+                          className="px-4 py-2 text-sm font-medium text-white bg-[#84cc16] 
+                                   rounded-lg hover:bg-[#84cc16]/90 focus:outline-none 
+                                   focus:ring-2 focus:ring-[#84cc16] focus:ring-offset-2
+                                   transition-all duration-200 flex items-center gap-2"
+                          onClick={() => {
+                            setActividadModalPlanificada(true);
+                            setActividadSeleccionada(null);
+                            setShowActividadModal(true);
+                          }}
+                        >
+                          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
+                          </svg>
+                          Nueva Actividad
+                        </button>
+                      )}
+                    </div>
+
+                    {actividadesPlanificadas.length === 0 ? (
+                      <div className="text-center py-8 bg-gray-50 rounded-lg border border-gray-200">
+                        <svg className="w-12 h-12 text-gray-400 mx-auto mb-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} 
+                                d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                        </svg>
+                        <p className="text-sm text-gray-600 font-medium">
+                          No hay actividades planificadas
+                        </p>
+                        <p className="text-xs text-gray-500 mt-1">
+                          Define las actividades que el técnico debe realizar
+                        </p>
+                      </div>
+                    ) : (
+                      <div className="space-y-3">
+                        {actividadesPlanificadas.map((a) => (
+                          <ActividadCard
+                            key={a.id}
+                            actividad={a}
+                            unidades={unidadesPorActividad[a.id]}
+                            esFinalizado={esFinalizado}
+                            onEditar={() => {
+                              setActividadSeleccionada(a);
+                              setActividadModalPlanificada(true);
+                              setShowActividadModal(true);
+                            }}
+                            onEliminar={async () => {
+                              if (!confirm("¿Eliminar esta actividad?")) return;
+                              await actividadTrabajoAPI.delete(a.id);
+                              const res = await actividadTrabajoAPI.listByTrabajo(trabajoId);
+                              setActividades(res.data);
+                            }}
+                            onAgregarRepuesto={() => {
+                              setActividadSeleccionada(a);
+                              setShowMovimientoModal(true);
+                            }}
+                          />
+                        ))}
+                      </div>
+                    )}
+                  </div>
+
+                  {!esPendiente && (
+                    <div>
+                      <div className="flex justify-between items-center mb-4">
+                        <h3 className="text-base font-semibold text-gray-900 flex items-center gap-2">
+                          <svg className="w-5 h-5 text-[#1e3a8a]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} 
+                                  d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-6 9l2 2 4-4" />
+                          </svg>
+                          Actividades Registradas
+                          <span className="text-sm font-normal text-gray-500">
+                            ({actividadesRegistradas.length})
+                          </span>
+                        </h3>
+                        {!esFinalizado && (
+                          <button
+                            className="px-4 py-2 text-sm font-medium text-white bg-[#1e3a8a] 
+                                     rounded-lg hover:bg-[#1e3a8a]/90 focus:outline-none 
+                                     focus:ring-2 focus:ring-[#1e3a8a] focus:ring-offset-2
+                                     transition-all duration-200 flex items-center gap-2"
+                            onClick={() => {
+                              setActividadModalPlanificada(false);
+                              setActividadSeleccionada(null);
+                              setShowActividadModal(true);
+                            }}
+                          >
+                            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
+                            </svg>
+                            Nueva Actividad
+                          </button>
+                        )}
+                      </div>
+
+                      {actividadesRegistradas.length === 0 ? (
+                        <div className="text-center py-8 bg-gray-50 rounded-lg border border-gray-200">
+                          <svg className="w-12 h-12 text-gray-400 mx-auto mb-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} 
+                                  d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                          </svg>
+                          <p className="text-sm text-gray-600 font-medium">
+                            No hay actividades registradas
+                          </p>
+                          <p className="text-xs text-gray-500 mt-1">
+                            Agrega actividades para documentar el trabajo realizado
+                          </p>
+                        </div>
+                      ) : (
+                        <div className="space-y-3">
+                          {actividadesRegistradas.map((a) => (
+                            <ActividadCard
+                              key={a.id}
+                              actividad={a}
+                              unidades={unidadesPorActividad[a.id]}
+                              esFinalizado={esFinalizado}
+                              onEditar={() => {
+                                setActividadSeleccionada(a);
+                                setActividadModalPlanificada(false);
+                                setShowActividadModal(true);
+                              }}
+                              onEliminar={async () => {
+                                if (!confirm("¿Eliminar esta actividad?")) return;
+                                await actividadTrabajoAPI.delete(a.id);
+                                const res = await actividadTrabajoAPI.listByTrabajo(trabajoId);
+                                setActividades(res.data);
+                              }}
+                              onAgregarRepuesto={() => {
+                                setActividadSeleccionada(a);
+                                setShowMovimientoModal(true);
+                              }}
+                            />
+                          ))}
+                        </div>
+                      )}
+                    </div>
                   )}
                 </div>
-
-                {actividades.length === 0 ? (
-                  <div className="text-center py-8 bg-gray-50 rounded-lg border border-gray-200">
-                    <svg className="w-12 h-12 text-gray-400 mx-auto mb-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} 
-                            d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
-                    </svg>
-                    <p className="text-sm text-gray-600 font-medium">
-                      No hay actividades registradas
-                    </p>
-                    <p className="text-xs text-gray-500 mt-1">
-                      Agrega actividades para documentar el trabajo realizado
-                    </p>
-                  </div>
-                ) : (
-                  <div className="space-y-3">
-                    {actividades.map((a) => (
-                      <ActividadCard
-                        key={a.id}
-                        actividad={a}
-                        unidades={unidadesPorActividad[a.id]}
-                        esFinalizado={esFinalizado}
-                        onAgregarRepuesto={() => {
-                          setActividadSeleccionada(a);
-                          setShowMovimientoModal(true);
-                        }}
-                      />
-                    ))}
-                  </div>
-                )}
               </section>
             )}
           </div>
@@ -509,7 +647,7 @@ export default function TrabajoDetalleModal({ open, trabajoId, onClose, onUpdate
         {/* FOOTER STICKY CON ACCIONES */}
         <div className="sticky bottom-0 bg-gray-50 border-t border-gray-200 px-6 py-4 rounded-b-xl flex-shrink-0">
           <div className="flex justify-end gap-3">
-            {esPendiente && (
+            {esPendiente && !editMode && (
               <button
                 className="px-5 py-2.5 text-sm font-medium text-white bg-[#84cc16]
                          rounded-lg hover:bg-[#84cc16]/90 focus:outline-none 
@@ -527,7 +665,7 @@ export default function TrabajoDetalleModal({ open, trabajoId, onClose, onUpdate
               </button>
             )}
 
-            {esEnProceso && (
+            {esEnProceso && !editMode && (
               <button
                 className="px-5 py-2.5 text-sm font-medium text-white bg-red-600
                          rounded-lg hover:bg-red-700 focus:outline-none 
@@ -586,7 +724,13 @@ export default function TrabajoDetalleModal({ open, trabajoId, onClose, onUpdate
       {showActividadModal && (
         <ActividadTrabajoModal
           trabajoId={trabajoId}
-          onClose={() => setShowActividadModal(false)}
+          esPlanificada={actividadModalPlanificada}
+          actividad={actividadSeleccionada}
+          onClose={() => {
+            setShowActividadModal(false);
+            setActividadModalPlanificada(false);
+            setActividadSeleccionada(null);
+          }}
           onSaved={async () => {
             const res = await actividadTrabajoAPI.listByTrabajo(trabajoId);
             setActividades(res.data);
@@ -643,7 +787,14 @@ function StatusBadge({ estatus }) {
   );
 }
 
-function ActividadCard({ actividad, unidades, esFinalizado, onAgregarRepuesto }) {
+function ActividadCard({
+  actividad,
+  unidades,
+  esFinalizado,
+  onAgregarRepuesto,
+  onEditar,
+  onEliminar,
+}) {
   return (
     <div className="border border-gray-200 rounded-lg p-4 bg-white hover:shadow-sm transition-shadow duration-200">
       <div className="flex justify-between items-start mb-3">
@@ -658,41 +809,89 @@ function ActividadCard({ actividad, unidades, esFinalizado, onAgregarRepuesto })
           )}
         </div>
 
-        {actividad.tipo_actividad === "MANTENIMIENTO" && !esFinalizado && (
-          <button
-            className="px-3 py-1.5 text-xs font-medium text-[#84cc16] bg-green-50 
-                     border border-green-200 rounded-lg hover:bg-green-100 
-                     transition-all duration-200 flex items-center gap-1"
-            onClick={onAgregarRepuesto}
-          >
-            <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
-            </svg>
-            Agregar Repuesto
-          </button>
-        )}
+        <div className="flex flex-wrap gap-2">
+          {!esFinalizado && (
+            <>
+              <button
+                className="px-3 py-1.5 text-xs font-medium text-gray-700 bg-gray-100 
+                         border border-gray-200 rounded-lg hover:bg-gray-200 
+                         transition-all duration-200 flex items-center gap-1"
+                onClick={onEditar}
+              >
+                <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} 
+                        d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
+                </svg>
+                Editar
+              </button>
+              <button
+                className="px-3 py-1.5 text-xs font-medium text-red-600 bg-red-50 
+                         border border-red-200 rounded-lg hover:bg-red-100 
+                         transition-all duration-200 flex items-center gap-1"
+                onClick={onEliminar}
+              >
+                <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} 
+                        d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                </svg>
+                Borrar
+              </button>
+            </>
+          )}
+          {actividad.tipo_actividad === "MANTENIMIENTO" && !esFinalizado && (
+            <button
+              className="px-3 py-1.5 text-xs font-medium text-[#84cc16] bg-green-50 
+                       border border-green-200 rounded-lg hover:bg-green-100 
+                       transition-all duration-200 flex items-center gap-1"
+              onClick={onAgregarRepuesto}
+            >
+              <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
+              </svg>
+              Agregar Repuesto
+            </button>
+          )}
+        </div>
       </div>
 
       {/* REEMPLAZO: Unidades/Repuestos desde el historial de la actividad */}
       {unidades && unidades.length > 0 && (
         <div className="mt-3 border-t border-gray-100 pt-3">
           <p className="text-xs font-medium text-gray-700 mb-2">
-            Unidades asignadas en esta actividad:
+            Items asignados en esta actividad:
           </p>
           <div className="mt-2 space-y-1">
             {unidades.map((mov) => (
               <div key={mov.id} className="text-xs bg-gray-50 p-2 rounded border flex justify-between items-center">
-                <span className="flex flex-col">
-                  <span className="font-semibold text-gray-900">
-                    {mov.item_codigo} - {mov.item_nombre} {/* <--- MOSTRAR NOMBRE AQUÍ */}
-                  </span>
-                  <span className="text-gray-500">
-                    S/N: {mov.unidad_serie}
-                  </span>
-                </span>
-                <span className="text-gray-500 italic bg-white px-2 py-0.5 rounded border border-gray-100">
-                  Estado: {mov.estado}
-                </span>
+                {mov.tipo === "CONSUMIBLE" ? (
+                  <>
+                    <span className="flex flex-col">
+                      <span className="font-semibold text-gray-900">
+                        {mov.item_codigo} - {mov.item_nombre}
+                      </span>
+                      <span className="text-gray-500">
+                        Cantidad: {mov.cantidad} {mov.unidad_medida || ""}
+                      </span>
+                    </span>
+                    <span className="text-gray-500 italic bg-white px-2 py-0.5 rounded border border-gray-100">
+                      Tipo: Consumible
+                    </span>
+                  </>
+                ) : (
+                  <>
+                    <span className="flex flex-col">
+                      <span className="font-semibold text-gray-900">
+                        {mov.item_codigo} - {mov.item_nombre}
+                      </span>
+                      <span className="text-gray-500">
+                        S/N: {mov.unidad_serie}
+                      </span>
+                    </span>
+                    <span className="text-gray-500 italic bg-white px-2 py-0.5 rounded border border-gray-100">
+                      Estado: {mov.estado_previo || mov.estado}
+                    </span>
+                  </>
+                )}
               </div>
             ))}
           </div>
