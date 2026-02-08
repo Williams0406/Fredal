@@ -272,17 +272,26 @@ export default function TrabajoFormModal({
             <label htmlFor="ubicacion_detalle" className="block text-sm font-medium text-gray-700 mb-2">
               Ubicación exacta <span className="text-red-500">*</span>
             </label>
-            <input
+            <select
               id="ubicacion_detalle"
               name="ubicacion_detalle"
-              placeholder="Ej: Zona A, Sector 3, Cliente XYZ"
               value={form.ubicacion_detalle}
               onChange={handleChange}
               required
               className="w-full px-4 py-3 border border-gray-300 rounded-lg text-sm
                        focus:outline-none focus:ring-2 focus:ring-[#1e3a8a] focus:border-transparent
-                       transition-all duration-200 placeholder:text-gray-400"
-            />
+                       transition-all duration-200"
+            >
+              <option value="">Seleccione una ubicación</option>
+              {ubicacionesCliente.map((ubicacion) => {
+                const label = `${ubicacion.cliente_nombre} - ${ubicacion.nombre}`;
+                return (
+                  <option key={ubicacion.id ?? label} value={label}>
+                    {label}
+                  </option>
+                );
+              })}
+            </select>
           </div>
 
           {/* Campos técnicos solo al finalizar */}

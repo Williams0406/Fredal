@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { trabajoAPI } from "@/lib/api";
+import { useAuth } from "@/context/AuthContext";
 
 import KanbanBoard from "@/components/trabajos/KanbanBoard";
 import TrabajoFormModal from "@/components/trabajos/TrabajoFormModal";
@@ -15,6 +16,7 @@ import {
 } from "lucide-react";
 
 export default function TrabajosPage() {
+  const { roles, trabajador } = useAuth();
   const [trabajos, setTrabajos] = useState([]);
   const [modalOpen, setModalOpen] = useState(false);
   const [selected, setSelected] = useState(null);
@@ -42,7 +44,21 @@ export default function TrabajosPage() {
     loadTrabajos();
   }, []);
 
+  const normalizeRole = (role) => {
+    if (!role) return "";
+    if (typeof role === "string") return role.toLowerCase();
+    return (role.name || role.nombre || "").toLowerCase();
+  };
+
+  const isTecnico = roles.map((role) => normalizeRole(role)).includes("tecnico");
+  const trabajadorId = trabajador?.id ?? trabajador;
+  const isTrabajoAsignado = (trabajo) =>
+    Array.isArray(trabajo?.tecnicos) && trabajadorId
+      ? trabajo.tecnicos.includes(trabajadorId)
+      : false;
+
   const handleStatusChange = async (id, nuevoEstatus) => {
+    if (isTecnico && !isTrabajoAsignado(trabajos.find((t) => t.id === id))) return;
     // Actualización optimista
     setTrabajos((prev) =>
       prev.map((t) =>
@@ -59,6 +75,7 @@ export default function TrabajosPage() {
   };
 
   const handleDelete = async (id) => {
+    if (isTecnico && !isTrabajoAsignado(trabajos.find((t) => t.id === id))) return;
     if (!confirm("¿Estás seguro de eliminar esta orden de trabajo?")) return;
     
     try {
@@ -71,17 +88,20 @@ export default function TrabajosPage() {
   };
 
   const handleEdit = (trabajo) => {
+    if (isTecnico && !isTrabajoAsignado(trabajo)) return;
     setSelected(trabajo);
     setModalOpen(true);
   };
 
   const handleView = (trabajo) => {
+    if (isTecnico && !isTrabajoAsignado(trabajo)) return;
     setDetalleId(trabajo.id);
     setDetalleOpen(true);
   };
 
   // Filtrar trabajos
   const trabajosFiltrados = trabajos.filter((t) => {
+    if (isTecnico && !isTrabajoAsignado(t)) return false;
     if (filtros.prioridad && t.prioridad !== filtros.prioridad) return false;
     if (filtros.lugar && t.lugar !== filtros.lugar) return false;
     return true;
@@ -113,8 +133,11 @@ export default function TrabajosPage() {
         <button
           className="bg-[#1e3a8a] text-white px-5 py-2.5 rounded-lg text-sm font-medium
                    hover:bg-[#1e3a8a]/90 focus:outline-none focus:ring-2 focus:ring-[#1e3a8a] 
-                   focus:ring-offset-2 transition-all duration-200 flex items-center gap-2"
+                   focus:ring-offset-2 transition-all duration-200 flex items-center gap-2
+                   disabled:opacity-60 disabled:cursor-not-allowed"
+          disabled={isTecnico}
           onClick={() => {
+            if (isTecnico) return;
             setSelected(null);
             setModalOpen(true);
           }}
@@ -125,6 +148,11 @@ export default function TrabajosPage() {
           Nueva Orden
         </button>
       </div>
+      {isTecnico && (
+        <p className="text-sm text-gray-500">
+          Los técnicos solo pueden visualizar e interactuar con órdenes asignadas.
+        </p>
+      )}
 
       {/* KPIs Cards */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4">

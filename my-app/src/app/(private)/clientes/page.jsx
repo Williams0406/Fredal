@@ -2,12 +2,17 @@
 
 import { useEffect, useState } from "react";
 import { clienteAPI, ubicacionClienteAPI } from "@/lib/api";
+import ClienteModal from "@/components/clientes/ClienteModal";
+import UbicacionModal from "@/components/clientes/UbicacionModal";
+import ClientesAccordion from "@/components/clientes/ClientesAccordion";
 
 export default function ClientesPage() {
   const [clientes, setClientes] = useState([]);
   const [ubicaciones, setUbicaciones] = useState([]);
   const [formCliente, setFormCliente] = useState({ nombre: "", ruc: "" });
   const [formUbicacion, setFormUbicacion] = useState({ cliente: "", nombre: "", direccion: "" });
+  const [showClienteModal, setShowClienteModal] = useState(false);
+  const [showUbicacionModal, setShowUbicacionModal] = useState(false);
 
   const loadData = async () => {
     const [cRes, uRes] = await Promise.all([clienteAPI.list(), ubicacionClienteAPI.list()]);
@@ -23,6 +28,7 @@ export default function ClientesPage() {
     if (!formCliente.nombre || !formCliente.ruc) return;
     await clienteAPI.create(formCliente);
     setFormCliente({ nombre: "", ruc: "" });
+    setShowClienteModal(false);
     loadData();
   };
 
@@ -33,52 +39,53 @@ export default function ClientesPage() {
       cliente: Number(formUbicacion.cliente),
     });
     setFormUbicacion({ cliente: "", nombre: "", direccion: "" });
+    setShowUbicacionModal(false);
     loadData();
   };
 
   return (
     <div className="space-y-6">
-      <h1 className="text-2xl font-semibold text-[#1e3a8a]">Clientes y Ubicaciones</h1>
-
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-        <div className="bg-white border rounded-lg p-4 space-y-3">
-          <h2 className="font-semibold">Registrar Cliente</h2>
-          <input className="w-full border rounded px-3 py-2" placeholder="Nombre" value={formCliente.nombre} onChange={(e) => setFormCliente({ ...formCliente, nombre: e.target.value })} />
-          <input className="w-full border rounded px-3 py-2" placeholder="RUC" value={formCliente.ruc} onChange={(e) => setFormCliente({ ...formCliente, ruc: e.target.value })} />
-          <button className="px-4 py-2 bg-[#1e3a8a] text-white rounded" onClick={saveCliente}>Guardar Cliente</button>
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+        <div>
+          <h1 className="text-2xl font-semibold text-[#1e3a8a]">Clientes y Ubicaciones</h1>
+          <p className="text-sm text-gray-500">
+            Gestiona clientes y visualiza sus ubicaciones registradas.
+          </p>
         </div>
-
-        <div className="bg-white border rounded-lg p-4 space-y-3">
-          <h2 className="font-semibold">Registrar Ubicación</h2>
-          <select className="w-full border rounded px-3 py-2" value={formUbicacion.cliente} onChange={(e) => setFormUbicacion({ ...formUbicacion, cliente: e.target.value })}>
-            <option value="">Seleccione cliente</option>
-            {clientes.map((c) => <option key={c.id} value={c.id}>{c.nombre}</option>)}
-          </select>
-          <input className="w-full border rounded px-3 py-2" placeholder="Nombre ubicación" value={formUbicacion.nombre} onChange={(e) => setFormUbicacion({ ...formUbicacion, nombre: e.target.value })} />
-          <input className="w-full border rounded px-3 py-2" placeholder="Dirección" value={formUbicacion.direccion} onChange={(e) => setFormUbicacion({ ...formUbicacion, direccion: e.target.value })} />
-          <button className="px-4 py-2 bg-[#1e3a8a] text-white rounded" onClick={saveUbicacion}>Guardar Ubicación</button>
+        <div className="flex flex-wrap gap-2">
+          <button
+            className="rounded bg-[#1e3a8a] px-4 py-2 text-sm text-white"
+            onClick={() => setShowClienteModal(true)}
+          >
+            Nuevo cliente
+          </button>
+          <button
+            className="rounded border border-[#1e3a8a] px-4 py-2 text-sm text-[#1e3a8a]"
+            onClick={() => setShowUbicacionModal(true)}
+          >
+            Nueva ubicación
+          </button>
         </div>
       </div>
 
-      <div className="bg-white border rounded-lg p-4">
-        <h2 className="font-semibold mb-3">Clientes</h2>
-        <table className="w-full text-sm">
-          <thead><tr className="text-left"><th>Nombre</th><th>RUC</th></tr></thead>
-          <tbody>
-            {clientes.map((c) => <tr key={c.id}><td>{c.nombre}</td><td>{c.ruc}</td></tr>)}
-          </tbody>
-        </table>
-      </div>
+      <ClientesAccordion clientes={clientes} ubicaciones={ubicaciones} />
 
-      <div className="bg-white border rounded-lg p-4">
-        <h2 className="font-semibold mb-3">Ubicaciones</h2>
-        <table className="w-full text-sm">
-          <thead><tr className="text-left"><th>Cliente</th><th>Ubicación</th><th>Dirección</th></tr></thead>
-          <tbody>
-            {ubicaciones.map((u) => <tr key={u.id}><td>{u.cliente_nombre}</td><td>{u.nombre}</td><td>{u.direccion}</td></tr>)}
-          </tbody>
-        </table>
-      </div>
+      <ClienteModal
+        open={showClienteModal}
+        onClose={() => setShowClienteModal(false)}
+        formCliente={formCliente}
+        onChange={setFormCliente}
+        onSave={saveCliente}
+      />
+
+      <UbicacionModal
+        open={showUbicacionModal}
+        onClose={() => setShowUbicacionModal(false)}
+        clientes={clientes}
+        formUbicacion={formUbicacion}
+        onChange={setFormUbicacion}
+        onSave={saveUbicacion}
+      />
     </div>
   );
 }

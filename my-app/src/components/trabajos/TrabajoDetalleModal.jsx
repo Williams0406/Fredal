@@ -4,12 +4,14 @@ import { useEffect, useState } from "react";
 import {
   trabajoAPI,
   trabajadorAPI,
+  userAPI,
   maquinariaAPI,
   movimientoRepuestoAPI,
   movimientoConsumibleAPI,
   actividadTrabajoAPI,
   ubicacionClienteAPI,
 } from "@/lib/api";
+import { useAuth } from "@/context/AuthContext";
 import ActividadTrabajoModal from "./ActividadTrabajoModal";
 import MovimientoRepuestoModal from "./MovimientoRepuestoModal";
 import FinalizarOrdenModal from "./FinalizarOrdenModal";
@@ -35,6 +37,7 @@ const ESTADOS_EQUIPO = [
 ];
 
 export default function TrabajoDetalleModal({ open, trabajoId, onClose, onUpdated }) {
+  const { roles: currentUserRoles } = useAuth();
 
   const [trabajo, setTrabajo] = useState(null);
   const [form, setForm] = useState(null);
@@ -42,6 +45,7 @@ export default function TrabajoDetalleModal({ open, trabajoId, onClose, onUpdate
   const [maquinarias, setMaquinarias] = useState([]);
   const [actividades, setActividades] = useState([]);
   const [ubicacionesCliente, setUbicacionesCliente] = useState([]);
+  const [rolesPorTrabajador, setRolesPorTrabajador] = useState({});
 
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -66,9 +70,25 @@ export default function TrabajoDetalleModal({ open, trabajoId, onClose, onUpdate
   const actividadesPlanificadas = actividades.filter((a) => a.es_planificada);
   const actividadesRegistradas = actividades.filter((a) => !a.es_planificada);
 
-  const tecnicosFiltrados = tecnicos.filter((t) =>
-    ["TECNICO", "JEFE DE TECNICOS"].includes((t.puesto || "").toUpperCase())
-  );
+  const normalizeRole = (role) => {
+    if (!role) return "";
+    return String(role.name || role.nombre || role).toLowerCase().trim();
+  };
+
+  const tecnicosFiltrados = tecnicos.filter((t) => {
+    // Intentamos obtener roles de varias fuentes posibles que vienen de tu serializador
+    const rolesData = t.usuario?.roles || t.roles || rolesPorTrabajador[t.id] || [];
+    const rolesArray = Array.isArray(rolesData) ? rolesData : [rolesData];
+    
+    const rolesNormalizados = rolesArray.map(normalizeRole);
+    
+    // Verifica si tiene el rol o si al menos es un trabajador activo
+    return rolesNormalizados.some(r => r === "tecnico" || r === "jefe de tecnicos") || rolesNormalizados.length === 0;
+  });
+
+  const canAssignTecnicos = currentUserRoles
+    .map((role) => normalizeRole(role))
+    .some((role) => role === "admin" || role === "jefe de almaceneros" || role === "jefe de tecnicos");
 
   const getToday = () => new Date().toISOString().split("T")[0];
   const getCurrentTime = () => new Date().toTimeString().slice(0, 5);
@@ -86,9 +106,17 @@ export default function TrabajoDetalleModal({ open, trabajoId, onClose, onUpdate
       trabajoAPI.retrieve(trabajoId),
       actividadTrabajoAPI.listByTrabajo(trabajoId),
       trabajadorAPI.list(),
+      userAPI.list(),
       maquinariaAPI.list(),
       ubicacionClienteAPI.list(),
-    ]).then(([tRes, actRes, tecRes, maqRes, ubiRes]) => {
+    ]).then(([tRes, actRes, tecRes, userRes, maqRes, ubiRes]) => {
+      const rolesMap = (userRes.data || []).reduce((acc, user) => {
+        const trabajadorId = user.trabajador?.id ?? user.trabajador_id ?? user.trabajador;
+        if (!trabajadorId) return acc;
+        const roles = Array.isArray(user.roles) ? user.roles : [];
+        acc[trabajadorId] = roles.map(normalizeRole).filter(Boolean);
+        return acc;
+      }, {});
       const fechaDefault = tRes.data.fecha || getToday();
       const horaInicioDefault = tRes.data.hora_inicio || getCurrentTime();
       setTrabajo(tRes.data);
@@ -99,6 +127,7 @@ export default function TrabajoDetalleModal({ open, trabajoId, onClose, onUpdate
       });
       setActividades(actRes.data);
       setTecnicos(tecRes.data);
+      setRolesPorTrabajador(rolesMap);
       setMaquinarias(maqRes.data);
       setUbicacionesCliente(ubiRes.data);
       setLoading(false);
@@ -168,6 +197,7 @@ export default function TrabajoDetalleModal({ open, trabajoId, onClose, onUpdate
   };
 
   const toggleTecnico = (id) => {
+    if (!canAssignTecnicos || readOnly) return;
     setForm((prev) => {
       const actuales = prev.tecnicos || [];
       return {
@@ -455,6 +485,11 @@ export default function TrabajoDetalleModal({ open, trabajoId, onClose, onUpdate
                 </svg>
                 Técnicos Asignados
               </h3>
+              {!canAssignTecnicos && (
+                <p className="mb-3 text-sm text-gray-500">
+                  Solo admin, Jefe de Almaceneros o Jefe de Técnicos pueden asignar técnicos.
+                </p>
+              )}
               <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3">
                 {tecnicosFiltrados.map((t) => (
                   <label 
@@ -466,12 +501,12 @@ export default function TrabajoDetalleModal({ open, trabajoId, onClose, onUpdate
                         ? "border-[#1e3a8a] bg-blue-50" 
                         : "border-gray-300 hover:border-gray-400 bg-white"
                       }
-                      ${readOnly ? "opacity-60 cursor-not-allowed" : ""}
+                      ${readOnly || !canAssignTecnicos ? "opacity-60 cursor-not-allowed" : ""}
                     `}
                   >
                     <input
                       type="checkbox"
-                      disabled={readOnly}
+                      disabled={readOnly || !canAssignTecnicos}
                       checked={form.tecnicos?.includes(t.id)}
                       onChange={() => toggleTecnico(t.id)}
                       className="w-4 h-4 text-[#1e3a8a] border-gray-300 rounded 
