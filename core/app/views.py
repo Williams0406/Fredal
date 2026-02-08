@@ -34,7 +34,9 @@ from .models import (
     Almacen,
     Cliente,
     UbicacionCliente,
-    UnidadEquivalencia
+    Dimension,
+    UnidadMedida,
+    UnidadRelacion,
 )
 from .serializers import (
     UserSerializer,
@@ -62,7 +64,9 @@ from .serializers import (
     AlmacenSerializer,
     ClienteSerializer,
     UbicacionClienteSerializer,
-    UnidadEquivalenciaSerializer
+    DimensionSerializer,
+    UnidadMedidaSerializer,
+    UnidadRelacionSerializer,
 )
 from .permissions import (
     IsAdmin,
@@ -653,9 +657,25 @@ class UbicacionClienteViewSet(viewsets.ModelViewSet):
     permission_classes = [CatalogoPermission]
 
 
-class UnidadEquivalenciaViewSet(viewsets.ModelViewSet):
-    queryset = UnidadEquivalencia.objects.all().order_by("nombre")
-    serializer_class = UnidadEquivalenciaSerializer
+class DimensionViewSet(viewsets.ModelViewSet):
+    queryset = Dimension.objects.all().order_by("nombre")
+    serializer_class = DimensionSerializer
+    permission_classes = [CatalogoPermission]
+
+
+class UnidadMedidaViewSet(viewsets.ModelViewSet):
+    queryset = UnidadMedida.objects.select_related("dimension").all().order_by("nombre")
+    serializer_class = UnidadMedidaSerializer
+    permission_classes = [CatalogoPermission]
+
+
+class UnidadRelacionViewSet(viewsets.ModelViewSet):
+    queryset = UnidadRelacion.objects.select_related(
+        "dimension",
+        "unidad_base",
+        "unidad_relacionada",
+    ).all().order_by("dimension__nombre")
+    serializer_class = UnidadRelacionSerializer
     permission_classes = [CatalogoPermission]
 
 class CatalogosView(APIView):
@@ -677,8 +697,16 @@ class CatalogosView(APIView):
             "item_unidad": {
                 "estado": ItemUnidad.Estado.choices,
             },
-            "unidad_equivalencia": UnidadEquivalenciaSerializer(
-                UnidadEquivalencia.objects.filter(activo=True),
+            "dimensiones": DimensionSerializer(
+                Dimension.objects.filter(activo=True),
+                many=True
+            ).data,
+            "unidades_medida": UnidadMedidaSerializer(
+                UnidadMedida.objects.filter(activo=True),
+                many=True
+            ).data,
+            "relaciones_unidad": UnidadRelacionSerializer(
+                UnidadRelacion.objects.filter(activo=True),
                 many=True
             ).data,
         })

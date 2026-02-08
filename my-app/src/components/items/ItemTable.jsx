@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { itemAPI, unidadEquivalenciaAPI } from "@/lib/api";
+import { itemAPI, unidadMedidaAPI, unidadRelacionAPI } from "@/lib/api";
 import ItemFormModal from "./ItemFormModal";
 import ItemHistorialModal from "./ItemHistorialModal";
 import ItemUbicacionModal from "./ItemUbicacionModal";
@@ -13,6 +13,7 @@ export default function ItemTable() {
   const [loading, setLoading] = useState(true);
   const [open, setOpen] = useState(false);
   const [unidades, setUnidades] = useState([]);
+  const [relaciones, setRelaciones] = useState([]);
   const [displayUnitId, setDisplayUnitId] = useState("");
 
   const [selectedItem, setSelectedItem] = useState(null);
@@ -35,7 +36,8 @@ export default function ItemTable() {
 
   useEffect(() => {
     loadItems();
-    unidadEquivalenciaAPI.list().then((res) => setUnidades(res.data));
+    unidadMedidaAPI.list().then((res) => setUnidades(res.data));
+    unidadRelacionAPI.list().then((res) => setRelaciones(res.data));
     const savedUnitId = window.localStorage.getItem("stock_display_unit_id");
     if (savedUnitId) setDisplayUnitId(savedUnitId);
   }, []);
@@ -61,6 +63,14 @@ export default function ItemTable() {
   }, []);
 
   const displayUnit = unidades.find((u) => String(u.id) === String(displayUnitId));
+  const baseUnitForDimension = (dimensionId) =>
+    unidades.find((u) => u.dimension === dimensionId && u.es_base);
+  const relationForUnits = (baseUnitId, relatedUnitId) =>
+    relaciones.find(
+      (rel) =>
+        rel.unidad_base === baseUnitId &&
+        rel.unidad_relacionada === relatedUnitId
+    );
 
   const formatStock = (item) => {
     if (item.tipo_insumo !== "CONSUMIBLE") {
@@ -70,9 +80,15 @@ export default function ItemTable() {
       };
     }
 
-    const baseCategoria = item.unidad_equivalencia_detalle?.categoria;
-    if (displayUnit && displayUnit.categoria === baseCategoria) {
-      const valor = (item.unidades_disponibles || 0) / Number(displayUnit.factor_a_unidad || 1);
+    const baseUnit = baseUnitForDimension(item.dimension);
+    if (
+      displayUnit &&
+      baseUnit &&
+      displayUnit.dimension === item.dimension
+    ) {
+      const relacion = relationForUnits(baseUnit.id, displayUnit.id);
+      const factor = relacion ? Number(relacion.factor || 1) : 1;
+      const valor = (item.unidades_disponibles || 0) * factor;
       return {
         valor: Number.isFinite(valor) ? valor.toFixed(2) : item.unidades_disponibles || 0,
         unidad: displayUnit.simbolo || displayUnit.nombre,
@@ -81,7 +97,7 @@ export default function ItemTable() {
 
     return {
       valor: item.unidades_disponibles || 0,
-      unidad: item.unidad_equivalencia_detalle?.simbolo || item.unidad_medida || "UNIDAD",
+      unidad: item.unidad_medida_detalle?.simbolo || item.unidad_medida_detalle?.nombre || "UNIDAD",
     };
   };
 
@@ -300,7 +316,7 @@ export default function ItemTable() {
                           {item.nombre}
                         </p>
                         <p className="text-[13px] text-gray-500 mt-0.5">
-                          Unidad: {item.unidad_medida}
+                          Unidad: {item.unidad_medida_detalle?.nombre || "UNIDAD"}
                         </p>
                       </div>
                     </td>

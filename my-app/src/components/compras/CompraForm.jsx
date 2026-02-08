@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState, useMemo } from "react";
-import { compraAPI, itemAPI, proveedorAPI, unidadEquivalenciaAPI } from "@/lib/api";
+import { compraAPI, itemAPI, proveedorAPI, unidadMedidaAPI } from "@/lib/api";
 
 const IGV = 1.18;
 
@@ -9,7 +9,7 @@ const IGV = 1.18;
 const emptyDetalle = {
   item: "",
   cantidad: 1,
-  unidad_equivalencia: "",
+  unidad_medida: "",
   tipo_registro: "VALOR_UNITARIO",
   monto: "",
 };
@@ -19,7 +19,7 @@ export default function CompraForm({ onCreated }) {
   const [open, setOpen] = useState(false);
   const [items, setItems] = useState([]);
   const [proveedores, setProveedores] = useState([]);
-  const [unidadesEquivalencia, setUnidadesEquivalencia] = useState([]);
+  const [unidadesMedida, setUnidadesMedida] = useState([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [searchTerm, setSearchTerm] = useState("");
@@ -46,7 +46,9 @@ export default function CompraForm({ onCreated }) {
     if (open) {
       itemAPI.list().then((res) => setItems(res.data));
       proveedorAPI.list().then((res) => setProveedores(res.data));
-      unidadEquivalenciaAPI.list().then((res) => setUnidadesEquivalencia(res.data.filter((u) => u.activo)));
+      unidadMedidaAPI.list().then((res) =>
+        setUnidadesMedida(res.data.filter((u) => u.activo))
+      );
       setCabecera((prev) => ({
         ...prev,
         fecha: prev.fecha || getToday(),
@@ -118,11 +120,9 @@ export default function CompraForm({ onCreated }) {
   };
 
   const unidadesPorItem = (itemSel) => {
-    if (!itemSel?.unidad_equivalencia_detalle?.categoria) return [];
-    return unidadesEquivalencia.filter(
-      (u) =>
-        u.categoria === itemSel.unidad_equivalencia_detalle.categoria &&
-        u.activo
+    if (!itemSel?.dimension) return [];
+    return unidadesMedida.filter(
+      (u) => u.dimension === itemSel.dimension && u.activo
     );
   };
 
@@ -161,7 +161,7 @@ export default function CompraForm({ onCreated }) {
         items: detalles.map((d) => ({
           item: Number(d.item),
           cantidad: Number(d.cantidad),
-          unidad_equivalencia: d.unidad_equivalencia ? Number(d.unidad_equivalencia) : null,
+          unidad_medida: d.unidad_medida ? Number(d.unidad_medida) : null,
           moneda: cabecera.moneda, // Todos los items heredan la moneda del comprobante
           tipo_registro: d.tipo_registro,
           monto: Number(d.monto),
@@ -440,20 +440,22 @@ export default function CompraForm({ onCreated }) {
                                     <input
                                       type="text"
                                       disabled
-                                      value={itemSel?.unidad_medida || "UNIDAD"}
+                                      value={
+                                        itemSel?.unidad_medida_detalle?.nombre || "UNIDAD"
+                                      }
                                       className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm bg-gray-50"
                                     />
                                   );
                                 }
                                 return (
                                   <select
-                                    value={d.unidad_equivalencia}
-                                    onChange={(e) => updateDetalle(i, "unidad_equivalencia", e.target.value)}
+                                    value={d.unidad_medida}
+                                    onChange={(e) => updateDetalle(i, "unidad_medida", e.target.value)}
                                     className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-[#1e3a8a]"
                                   >
                                     <option value="">
-                                      {itemSel?.unidad_equivalencia_detalle?.nombre
-                                        ? `Base: ${itemSel.unidad_equivalencia_detalle.nombre}`
+                                      {itemSel?.unidad_medida_detalle?.nombre
+                                        ? `Unidad: ${itemSel.unidad_medida_detalle.nombre}`
                                         : "Selecciona unidad"}
                                     </option>
                                     {unidadesDisponibles.map((u) => (

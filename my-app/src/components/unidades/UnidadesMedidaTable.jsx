@@ -1,11 +1,7 @@
 "use client";
 
-const categoriaLabel = (value, categorias) =>
-  categorias.find((item) => item.value === value)?.label ?? value;
-
-export default function UnidadesTable({
+export default function UnidadesMedidaTable({
   unidades,
-  categorias,
   onEdit,
   onDelete,
 }) {
@@ -13,9 +9,9 @@ export default function UnidadesTable({
     <div className="rounded-lg border bg-white p-4">
       <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
         <div>
-          <h2 className="font-semibold">Unidades registradas</h2>
+          <h2 className="font-semibold">Unidades de medida</h2>
           <p className="text-xs text-gray-500">
-            Define la dimensión de cada unidad antes de crear equivalencias.
+            Asigna cada unidad a una dimensión específica.
           </p>
         </div>
         <span className="text-xs text-gray-400">
@@ -41,10 +37,10 @@ export default function UnidadesTable({
                 <td className="py-2 font-medium">{unidad.nombre}</td>
                 <td className="py-2">{unidad.simbolo || "-"}</td>
                 <td className="py-2">
-                  {categoriaLabel(unidad.categoria, categorias)}
+                  {unidad.dimension_detalle?.nombre || "-"}
                 </td>
                 <td className="py-2">
-                  {unidad.unidad_base ? "Sí" : "No"}
+                  {unidad.es_base ? "Sí" : "No"}
                 </td>
                 <td className="py-2">
                   {unidad.activo ? "Activo" : "Inactivo"}

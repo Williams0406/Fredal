@@ -27,8 +27,35 @@ from .models import (
     Proveedor,
     Cliente,
     UbicacionCliente,
-    UnidadEquivalencia,
+    Dimension,
+    UnidadMedida,
+    UnidadRelacion,
 )
+
+def obtener_unidad_base(dimension):
+    return UnidadMedida.objects.filter(
+        dimension=dimension,
+        es_base=True,
+        activo=True
+    ).first()
+
+
+def obtener_factor_a_base(unidad, unidad_base):
+    if unidad.id == unidad_base.id:
+        return Decimal("1")
+
+    relacion = UnidadRelacion.objects.filter(
+        unidad_base=unidad_base,
+        unidad_relacionada=unidad,
+        activo=True,
+    ).first()
+    if not relacion:
+        raise ValidationError(
+            "No existe relación entre la unidad seleccionada y la unidad base"
+        )
+    if relacion.factor == 0:
+        raise ValidationError("El factor de equivalencia no puede ser cero")
+    return Decimal("1") / Decimal(relacion.factor)
 
 class UserSerializer(serializers.ModelSerializer):
     password = serializers.CharField(write_only=True)
@@ -72,7 +99,8 @@ class UserSerializer(serializers.ModelSerializer):
 
 class ItemSerializer(serializers.ModelSerializer):
     unidades_disponibles = serializers.SerializerMethodField()
-    unidad_equivalencia_detalle = serializers.SerializerMethodField()
+    dimension_detalle = serializers.SerializerMethodField()
+    unidad_medida_detalle = serializers.SerializerMethodField()
 
     class Meta:
         model = Item
@@ -81,34 +109,74 @@ class ItemSerializer(serializers.ModelSerializer):
             "codigo",
             "nombre",
             "tipo_insumo",
+            "dimension",
+            "dimension_detalle",
             "unidad_medida",
-            "unidad_equivalencia",
-            "unidad_equivalencia_detalle",
+            "unidad_medida_detalle",
             "volvo",
             "unidades_disponibles",
         ]
 
-    def get_unidad_equivalencia_detalle(self, obj):
-        if not obj.unidad_equivalencia:
+    def get_dimension_detalle(self, obj):
+        if not obj.dimension:
             return None
-        return UnidadEquivalenciaSerializer(obj.unidad_equivalencia).data
+        return DimensionSerializer(obj.dimension).data
+
+    def get_unidad_medida_detalle(self, obj):
+        if not obj.unidad_medida:
+            return None
+        return UnidadMedidaSerializer(obj.unidad_medida).data
 
     def validate(self, data):
-        tipo_insumo = data.get("tipo_insumo", getattr(self.instance, "tipo_insumo", None))
-        unidad_equivalencia = data.get(
-            "unidad_equivalencia",
-            getattr(self.instance, "unidad_equivalencia", None),
+        tipo_insumo = data.get(
+            "tipo_insumo",
+            getattr(self.instance, "tipo_insumo", None),
+        )
+        dimension = data.get(
+            "dimension",
+            getattr(self.instance, "dimension", None),
+        )
+        unidad_medida = data.get(
+            "unidad_medida",
+            getattr(self.instance, "unidad_medida", None),
         )
 
-        if unidad_equivalencia and tipo_insumo != Item.TipoInsumo.CONSUMIBLE:
-            raise serializers.ValidationError(
-                "La unidad de equivalencia solo aplica a items CONSUMIBLE"
-            )
+        if tipo_insumo == Item.TipoInsumo.REPUESTO:
+            dimension_cantidad = Dimension.objects.filter(codigo="CANTIDAD").first()
+            if not dimension_cantidad:
+                raise serializers.ValidationError(
+                    "Debe existir la dimensión CANTIDAD para registrar repuestos"
+                )
+            unidad_base = obtener_unidad_base(dimension_cantidad)
+            if not unidad_base:
+                raise serializers.ValidationError(
+                    "Debe existir una unidad base para la dimensión CANTIDAD"
+                )
+            if dimension and dimension.id != dimension_cantidad.id:
+                raise serializers.ValidationError(
+                    "La dimensión de un REPUESTO debe ser CANTIDAD"
+                )
+            if unidad_medida and unidad_medida.id != unidad_base.id:
+                raise serializers.ValidationError(
+                    "La unidad de un REPUESTO debe ser la unidad base de CANTIDAD"
+                )
+            data["dimension"] = dimension_cantidad
+            data["unidad_medida"] = unidad_base
+            return data
 
-        if unidad_equivalencia and not unidad_equivalencia.unidad_base:
-            raise serializers.ValidationError(
-                "La unidad de equivalencia del item debe ser la unidad base de su categoría"
-            )
+        if tipo_insumo == Item.TipoInsumo.CONSUMIBLE:
+            if not dimension:
+                raise serializers.ValidationError(
+                    "El consumible debe tener una dimensión"
+                )
+            if not unidad_medida:
+                raise serializers.ValidationError(
+                    "El consumible debe tener una unidad de medida"
+                )
+            if unidad_medida.dimension_id != dimension.id:
+                raise serializers.ValidationError(
+                    "La unidad seleccionada no pertenece a la dimensión del item"
+                )
 
         return data
     
@@ -159,8 +227,8 @@ class MaquinariaSerializer(serializers.ModelSerializer):
 class CompraCreateItemSerializer(serializers.Serializer):
     item = serializers.PrimaryKeyRelatedField(queryset=Item.objects.all())
     cantidad = serializers.IntegerField(min_value=1)
-    unidad_equivalencia = serializers.PrimaryKeyRelatedField(
-        queryset=UnidadEquivalencia.objects.filter(activo=True),
+    unidad_medida = serializers.PrimaryKeyRelatedField(
+        queryset=UnidadMedida.objects.filter(activo=True),
         required=False,
         allow_null=True,
     )
@@ -189,24 +257,30 @@ class CompraCreateSerializer(serializers.ModelSerializer):
 
             for data in items_data:
                 cantidad_original = data["cantidad"]
-                unidad_equivalencia = data.get("unidad_equivalencia")
+                unidad_medida = data.get("unidad_medida")
                 cantidad = cantidad_original
 
-                if unidad_equivalencia and data["item"].tipo_insumo != Item.TipoInsumo.CONSUMIBLE:
+                if unidad_medida and data["item"].tipo_insumo != Item.TipoInsumo.CONSUMIBLE:
                     raise serializers.ValidationError(
                         f"El item {data['item'].codigo} no es CONSUMIBLE y no permite equivalencias"
                     )
                 
-                if data["item"].tipo_insumo == Item.TipoInsumo.CONSUMIBLE and unidad_equivalencia:
-                    if not data["item"].unidad_equivalencia:
+                if data["item"].tipo_insumo == Item.TipoInsumo.CONSUMIBLE and unidad_medida:
+                    if not data["item"].dimension:
                         raise serializers.ValidationError(
-                            f"El item {data['item'].codigo} no tiene unidad base configurada"
+                            f"El item {data['item'].codigo} no tiene dimensión configurada"
                         )
-                    if unidad_equivalencia.categoria != data["item"].unidad_equivalencia.categoria:
+                    if unidad_medida.dimension_id != data["item"].dimension_id:
                         raise serializers.ValidationError(
-                            "La unidad de equivalencia no coincide con la categoría del item"
+                            "La unidad de medida no coincide con la dimensión del item"
                         )
-                    cantidad_decimal = Decimal(cantidad_original) * unidad_equivalencia.factor_a_unidad
+                    unidad_base = obtener_unidad_base(data["item"].dimension)
+                    if not unidad_base:
+                        raise serializers.ValidationError(
+                            "No hay unidad base definida para la dimensión del item"
+                        )
+                    factor_a_base = obtener_factor_a_base(unidad_medida, unidad_base)
+                    cantidad_decimal = Decimal(cantidad_original) * factor_a_base
                     if cantidad_decimal != cantidad_decimal.to_integral_value():
                         raise serializers.ValidationError(
                             f"La cantidad convertida a UNIDAD debe ser entera para {data['item'].codigo}"
@@ -497,9 +571,9 @@ class MovimientoConsumibleSerializer(serializers.ModelSerializer):
     item_id = serializers.IntegerField(source="item.id", read_only=True)
     item_codigo = serializers.CharField(source="item.codigo", read_only=True)
     item_nombre = serializers.CharField(source="item.nombre", read_only=True)
-    unidad_medida = serializers.CharField(source="item.unidad_medida", read_only=True)
-    unidad_equivalencia = serializers.PrimaryKeyRelatedField(
-        queryset=UnidadEquivalencia.objects.filter(activo=True),
+    unidad_medida = serializers.CharField(source="item.unidad_medida.nombre", read_only=True)
+    unidad_conversion = serializers.PrimaryKeyRelatedField(
+        queryset=UnidadMedida.objects.filter(activo=True),
         required=False,
         allow_null=True,
         write_only=True,
@@ -523,7 +597,7 @@ class MovimientoConsumibleSerializer(serializers.ModelSerializer):
             "item_codigo",
             "item_nombre",
             "unidad_medida",
-            "unidad_equivalencia",
+            "unidad_conversion",
             "cantidad_equivalente",
         ]
         read_only_fields = ["fecha"]
@@ -548,25 +622,31 @@ class MovimientoConsumibleSerializer(serializers.ModelSerializer):
                 "La cantidad debe ser mayor a 0"
             )
 
-        unidad_equivalencia = data.get("unidad_equivalencia")
+        unidad_conversion = data.get("unidad_conversion")
         cantidad_equivalente = data.get("cantidad_equivalente")
 
-        if unidad_equivalencia and cantidad_equivalente:
-            if not item.unidad_equivalencia:
+        if unidad_conversion and cantidad_equivalente:
+            if not item.dimension:
                 raise serializers.ValidationError(
-                    "El item no tiene unidad base configurada"
+                    "El item no tiene dimensión configurada"
                 )
-            if unidad_equivalencia.categoria != item.unidad_equivalencia.categoria:
+            if unidad_conversion.dimension_id != item.dimension_id:
                 raise serializers.ValidationError(
-                    "La unidad de equivalencia no coincide con la categoría del item"
+                    "La unidad de conversión no coincide con la dimensión del item"
                 )
-            cantidad_decimal = Decimal(cantidad_equivalente) * unidad_equivalencia.factor_a_unidad
+            unidad_base = obtener_unidad_base(item.dimension)
+            if not unidad_base:
+                raise serializers.ValidationError(
+                    "No hay unidad base definida para la dimensión del item"
+                )
+            factor_a_base = obtener_factor_a_base(unidad_conversion, unidad_base)
+            cantidad_decimal = Decimal(cantidad_equivalente) * factor_a_base
             if cantidad_decimal != cantidad_decimal.to_integral_value():
                 raise serializers.ValidationError(
                     "La cantidad equivalente convertida a UNIDAD debe ser entera"
                 )
             data["cantidad"] = int(cantidad_decimal)
-        elif unidad_equivalencia or cantidad_equivalente:
+        elif unidad_conversion or cantidad_equivalente:
             raise serializers.ValidationError(
                 "Debe enviar unidad_equivalencia y cantidad_equivalente juntos"
             )
@@ -922,18 +1002,89 @@ class UbicacionClienteSerializer(serializers.ModelSerializer):
         fields = ["id", "cliente", "cliente_nombre", "nombre", "direccion"]
 
 
-class UnidadEquivalenciaSerializer(serializers.ModelSerializer):
+class DimensionSerializer(serializers.ModelSerializer):
     class Meta:
-        model = UnidadEquivalencia
+        model = Dimension
+        fields = [
+            "id",
+            "codigo",
+            "nombre",
+            "descripcion",
+            "activo",
+        ]
+
+
+class UnidadMedidaSerializer(serializers.ModelSerializer):
+    dimension_detalle = DimensionSerializer(source="dimension", read_only=True)
+
+    class Meta:
+        model = UnidadMedida
         fields = [
             "id",
             "nombre",
             "simbolo",
-            "categoria",
-            "factor_a_unidad",
-            "unidad_base",
+            "dimension",
+            "dimension_detalle",
+            "es_base",
             "activo",
         ]
+
+
+class UnidadRelacionSerializer(serializers.ModelSerializer):
+    unidad_base_detalle = UnidadMedidaSerializer(source="unidad_base", read_only=True)
+    unidad_relacionada_detalle = UnidadMedidaSerializer(
+        source="unidad_relacionada",
+        read_only=True,
+    )
+    dimension_detalle = DimensionSerializer(source="dimension", read_only=True)
+
+    class Meta:
+        model = UnidadRelacion
+        fields = [
+            "id",
+            "dimension",
+            "dimension_detalle",
+            "unidad_base",
+            "unidad_base_detalle",
+            "unidad_relacionada",
+            "unidad_relacionada_detalle",
+            "factor",
+            "activo",
+        ]
+
+    def validate(self, data):
+        unidad_base = data.get("unidad_base", getattr(self.instance, "unidad_base", None))
+        unidad_relacionada = data.get(
+            "unidad_relacionada",
+            getattr(self.instance, "unidad_relacionada", None),
+        )
+        dimension = data.get(
+            "dimension",
+            getattr(self.instance, "dimension", None),
+        )
+
+        if unidad_base and unidad_relacionada and unidad_base.id == unidad_relacionada.id:
+            raise serializers.ValidationError(
+                "La unidad base y la unidad relacionada deben ser distintas"
+            )
+        if unidad_base and unidad_relacionada and unidad_base.dimension_id != unidad_relacionada.dimension_id:
+            raise serializers.ValidationError(
+                "Las unidades deben pertenecer a la misma dimensión"
+            )
+        if unidad_base and not unidad_base.es_base:
+            raise serializers.ValidationError(
+                "La unidad base debe estar marcada como base"
+            )
+        if dimension and unidad_base and dimension.id != unidad_base.dimension_id:
+            raise serializers.ValidationError(
+                "La dimensión debe coincidir con la unidad base"
+            )
+        if dimension and unidad_relacionada and dimension.id != unidad_relacionada.dimension_id:
+            raise serializers.ValidationError(
+                "La dimensión debe coincidir con la unidad relacionada"
+            )
+
+        return data
         
 class KardexContableSerializer(serializers.Serializer):
     fecha = serializers.DateTimeField()

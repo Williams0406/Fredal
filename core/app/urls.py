@@ -19,7 +19,9 @@ from .views import (
     AlmacenViewSet,
     ClienteViewSet,
     UbicacionClienteViewSet,
-    UnidadEquivalenciaViewSet,
+    DimensionViewSet,
+    UnidadMedidaViewSet,
+    UnidadRelacionViewSet,
 )
 
 router = DefaultRouter()
@@ -37,7 +39,9 @@ router.register(r"proveedores", ProveedorViewSet)
 router.register(r"almacenes", AlmacenViewSet)
 router.register(r"clientes", ClienteViewSet)
 router.register(r"ubicaciones-cliente", UbicacionClienteViewSet)
-router.register(r"unidades-equivalencia", UnidadEquivalenciaViewSet)
+router.register(r"dimensiones", DimensionViewSet)
+router.register(r"unidades-medida", UnidadMedidaViewSet)
+router.register(r"relaciones-unidad", UnidadRelacionViewSet)
 
 urlpatterns = [
     path("api/", include(router.urls)),

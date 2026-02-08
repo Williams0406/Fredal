@@ -5,13 +5,13 @@ import {
   itemAPI,
   movimientoConsumibleAPI,
   movimientoRepuestoAPI,
-  unidadEquivalenciaAPI,
+  unidadMedidaAPI,
 } from "@/lib/api";
 
 export default function MovimientoRepuestoModal({ open, onClose, actividad, onSaved }) {
   const [items, setItems] = useState([]);
   const [unidades, setUnidades] = useState([]);
-  const [unidadesEquivalencia, setUnidadesEquivalencia] = useState([]);
+  const [unidadesMedida, setUnidadesMedida] = useState([]);
   const [movimientosDB, setMovimientosDB] = useState([]);
   const [movimientosNew, setMovimientosNew] = useState([]);
   const [loading, setLoading] = useState(false);
@@ -22,7 +22,7 @@ export default function MovimientoRepuestoModal({ open, onClose, actividad, onSa
     item: "",
     estado_unidad: "",
     cantidad: 1,
-    unidad_equivalencia: "",
+    unidad_conversion: "",
   });
 
   const movimientos = [...movimientosDB, ...movimientosNew];
@@ -30,7 +30,7 @@ export default function MovimientoRepuestoModal({ open, onClose, actividad, onSa
   
   useEffect(() => {
     if (open) {
-      setForm({ item: "", estado_unidad: "", cantidad: 1, unidad_equivalencia: "" });
+      setForm({ item: "", estado_unidad: "", cantidad: 1, unidad_conversion: "" });
       setUnidades([]);
       setMovimientosNew([]);
     }
@@ -38,7 +38,9 @@ export default function MovimientoRepuestoModal({ open, onClose, actividad, onSa
 
   useEffect(() => {
     itemAPI.list().then((res) => setItems(res.data));
-    unidadEquivalenciaAPI.list().then((res) => setUnidadesEquivalencia(res.data.filter((u) => u.activo)));
+    unidadMedidaAPI.list().then((res) =>
+      setUnidadesMedida(res.data.filter((u) => u.activo))
+    );
   }, []);
 
   useEffect(() => {
@@ -94,7 +96,7 @@ export default function MovimientoRepuestoModal({ open, onClose, actividad, onSa
 
   useEffect(() => {
     if (!actividad?.id) return;
-    setForm({ item: "", estado_unidad: "", cantidad: 1, unidad_equivalencia: "" });
+    setForm({ item: "", estado_unidad: "", cantidad: 1, unidad_conversion: "" });
     setUnidades([]);
     setMovimientosNew([]);
     setMovimientosDB([]);
@@ -108,10 +110,8 @@ export default function MovimientoRepuestoModal({ open, onClose, actividad, onSa
 
   const selectedItem = items.find((i) => String(i.id) === String(form.item));
   const esConsumible = selectedItem?.tipo_insumo === "CONSUMIBLE";
-  const unidadesConsumible = unidadesEquivalencia.filter(
-    (u) =>
-      u.activo &&
-      u.categoria === selectedItem?.unidad_equivalencia_detalle?.categoria
+  const unidadesConsumible = unidadesMedida.filter(
+    (u) => u.activo && u.dimension === selectedItem?.dimension
   );
 
   const unidadesDisponiblesCount = useMemo(
@@ -138,13 +138,13 @@ export default function MovimientoRepuestoModal({ open, onClose, actividad, onSa
           item_codigo: item.codigo,
           item_nombre: item.nombre,
           cantidad,
-          unidad_medida: form.unidad_equivalencia
-            ? (unidadesEquivalencia.find((u) => String(u.id) === String(form.unidad_equivalencia))?.nombre || item.unidad_medida)
-            : item.unidad_medida,
-          unidad_equivalencia: form.unidad_equivalencia || "",
+          unidad_medida: form.unidad_conversion
+            ? (unidadesMedida.find((u) => String(u.id) === String(form.unidad_conversion))?.nombre || item.unidad_medida_detalle?.nombre)
+            : item.unidad_medida_detalle?.nombre,
+          unidad_conversion: form.unidad_conversion || "",
         },
       ]);
-      setForm({ item: "", estado_unidad: "", cantidad: 1, unidad_equivalencia: "" });
+      setForm({ item: "", estado_unidad: "", cantidad: 1, unidad_conversion: "" });
       return;
     }
 
@@ -168,7 +168,7 @@ export default function MovimientoRepuestoModal({ open, onClose, actividad, onSa
         estado: u.estado,
       })),
     ]);
-    setForm({ item: "", estado_unidad: "", cantidad: 1, unidad_equivalencia: "" });
+    setForm({ item: "", estado_unidad: "", cantidad: 1, unidad_conversion: "" });
   };
 
   const handleSave = async () => {
@@ -181,8 +181,8 @@ export default function MovimientoRepuestoModal({ open, onClose, actividad, onSa
             actividad: actividad.id,
             item: m.item_id,
             cantidad: Number(m.cantidad),
-            unidad_equivalencia: m.unidad_equivalencia ? Number(m.unidad_equivalencia) : null,
-            cantidad_equivalente: m.unidad_equivalencia ? Number(m.cantidad) : null,
+            unidad_conversion: m.unidad_conversion ? Number(m.unidad_conversion) : null,
+            cantidad_equivalente: m.unidad_conversion ? Number(m.cantidad) : null,
           });
         } else {
           await movimientoRepuestoAPI.create({ actividad: actividad.id, item_unidad: m.unidad_id });
@@ -208,13 +208,13 @@ export default function MovimientoRepuestoModal({ open, onClose, actividad, onSa
           <div className="grid grid-cols-1 md:grid-cols-5 gap-4">
             <div>
               <label className="block text-sm mb-2">Item</label>
-              <input className="w-full px-3 py-2 border rounded" value={itemSearch} onChange={(e)=>{setItemSearch(e.target.value);setShowItemDropdown(true);setForm((p)=>({...p,item:"",estado_unidad:"",cantidad:1,unidad_equivalencia:""}));}} />
+              <input className="w-full px-3 py-2 border rounded" value={itemSearch} onChange={(e)=>{setItemSearch(e.target.value);setShowItemDropdown(true);setForm((p)=>({...p,item:"",estado_unidad:"",cantidad:1,unidad_conversion:""}));}} />
               {showItemDropdown && itemSearch && <div className="absolute z-30 bg-white border rounded mt-1 max-h-56 overflow-y-auto">{itemsFiltrados.map((i)=><button type="button" key={i.id} className="block w-full text-left px-3 py-2 hover:bg-blue-50" onClick={()=>{setForm((p)=>({...p,item:String(i.id)}));setItemSearch(`${i.codigo} - ${i.nombre}`);setShowItemDropdown(false);}}>{i.codigo} - {i.nombre}</button>)}</div>}
             </div>
             <div><label className="block text-sm mb-2">Cantidad</label><input type="number" min="1" className="w-full px-3 py-2 border rounded" value={form.cantidad} onChange={(e)=>setForm((p)=>({...p,cantidad:e.target.value}))} /></div>
-            <div><label className="block text-sm mb-2">Unidad</label><input disabled className="w-full px-3 py-2 border rounded bg-gray-50" value={selectedItem?.unidad_medida || ""} /></div>
+            <div><label className="block text-sm mb-2">Unidad</label><input disabled className="w-full px-3 py-2 border rounded bg-gray-50" value={selectedItem?.unidad_medida_detalle?.nombre || ""} /></div>
             <div>
-              {esConsumible ? <><label className="block text-sm mb-2">Unidad equivalente</label><select className="w-full px-3 py-2 border rounded" value={form.unidad_equivalencia} onChange={(e)=>setForm((p)=>({...p,unidad_equivalencia:e.target.value}))}><option value="">{selectedItem?.unidad_equivalencia_detalle?.nombre ? `Base: ${selectedItem.unidad_equivalencia_detalle.nombre}` : "Selecciona unidad"}</option>{unidadesConsumible.map((u)=><option key={u.id} value={u.id}>{u.nombre}{u.simbolo ? ` (${u.simbolo})` : ""}</option>)}</select></> : <><label className="block text-sm mb-2">Estado</label><select className="w-full px-3 py-2 border rounded" value={form.estado_unidad} onChange={(e)=>setForm((p)=>({...p,estado_unidad:e.target.value}))}><option value="">Seleccione estado</option><option value="NUEVO">NUEVO</option><option value="USADO">USADO</option><option value="REPARADO">REPARADO</option></select><p className="text-xs text-gray-500 mt-1">Disponibles: {unidadesDisponiblesCount}</p></>}
+              {esConsumible ? <><label className="block text-sm mb-2">Unidad equivalente</label><select className="w-full px-3 py-2 border rounded" value={form.unidad_conversion} onChange={(e)=>setForm((p)=>({...p,unidad_conversion:e.target.value}))}><option value="">{selectedItem?.unidad_medida_detalle?.nombre ? `Base: ${selectedItem.unidad_medida_detalle.nombre}` : "Selecciona unidad"}</option>{unidadesConsumible.map((u)=><option key={u.id} value={u.id}>{u.nombre}{u.simbolo ? ` (${u.simbolo})` : ""}</option>)}</select></> : <><label className="block text-sm mb-2">Estado</label><select className="w-full px-3 py-2 border rounded" value={form.estado_unidad} onChange={(e)=>setForm((p)=>({...p,estado_unidad:e.target.value}))}><option value="">Seleccione estado</option><option value="NUEVO">NUEVO</option><option value="USADO">USADO</option><option value="REPARADO">REPARADO</option></select><p className="text-xs text-gray-500 mt-1">Disponibles: {unidadesDisponiblesCount}</p></>}
             </div>
 
             <div className="flex items-end"><button className="w-full px-4 py-2 bg-[#84cc16] text-white rounded" onClick={handleAddUnidad}>Agregar</button></div>

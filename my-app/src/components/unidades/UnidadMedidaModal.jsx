@@ -1,9 +1,9 @@
 "use client";
 
-export default function UnidadModal({
+export default function UnidadMedidaModal({
   open,
   form,
-  categorias,
+  dimensiones,
   title,
   description,
   primaryLabel,
@@ -35,28 +35,38 @@ export default function UnidadModal({
         <div className="mt-4 space-y-3">
           <input
             className="w-full rounded-lg border px-3 py-2"
-            placeholder="Nombre (Ej: GALÓN)"
+            placeholder="Nombre (Ej: METRO)"
             value={form.nombre}
             onChange={(e) => onChange({ ...form, nombre: e.target.value })}
           />
           <input
             className="w-full rounded-lg border px-3 py-2"
-            placeholder="Símbolo (Ej: gal)"
+            placeholder="Símbolo (Ej: m)"
             value={form.simbolo}
             onChange={(e) => onChange({ ...form, simbolo: e.target.value })}
           />
           <select
             className="w-full rounded-lg border px-3 py-2"
-            value={form.categoria}
-            onChange={(e) => onChange({ ...form, categoria: e.target.value })}
+            value={form.dimension}
+            onChange={(e) => onChange({ ...form, dimension: e.target.value })}
           >
             <option value="">Seleccione dimensión</option>
-            {categorias.map((categoria) => (
-              <option key={categoria.value} value={categoria.value}>
-                {categoria.label}
+            {dimensiones.map((dimension) => (
+              <option key={dimension.id} value={dimension.id}>
+                {dimension.nombre} ({dimension.codigo})
               </option>
             ))}
           </select>
+          <label className="flex items-center gap-2 text-sm text-gray-600">
+            <input
+              type="checkbox"
+              checked={form.es_base}
+              onChange={(e) =>
+                onChange({ ...form, es_base: e.target.checked })
+              }
+            />
+            Marcar como unidad base de la dimensión
+          </label>
         </div>
 
         <div className="mt-6 flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">

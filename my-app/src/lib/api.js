@@ -293,11 +293,25 @@ export const ubicacionClienteAPI = {
   delete: (id) => api.delete(`/api/ubicaciones-cliente/${id}/`),
 };
 
-export const unidadEquivalenciaAPI = {
-  list: () => api.get("/api/unidades-equivalencia/"),
-  create: (data) => api.post("/api/unidades-equivalencia/", data),
-  update: (id, data) => api.put(`/api/unidades-equivalencia/${id}/`, data),
-  delete: (id) => api.delete(`/api/unidades-equivalencia/${id}/`),
+export const dimensionAPI = {
+  list: () => api.get("/api/dimensiones/"),
+  create: (data) => api.post("/api/dimensiones/", data),
+  update: (id, data) => api.put(`/api/dimensiones/${id}/`, data),
+  delete: (id) => api.delete(`/api/dimensiones/${id}/`),
+};
+
+export const unidadMedidaAPI = {
+  list: () => api.get("/api/unidades-medida/"),
+  create: (data) => api.post("/api/unidades-medida/", data),
+  update: (id, data) => api.put(`/api/unidades-medida/${id}/`, data),
+  delete: (id) => api.delete(`/api/unidades-medida/${id}/`),
+};
+
+export const unidadRelacionAPI = {
+  list: () => api.get("/api/relaciones-unidad/"),
+  create: (data) => api.post("/api/relaciones-unidad/", data),
+  update: (id, data) => api.put(`/api/relaciones-unidad/${id}/`, data),
+  delete: (id) => api.delete(`/api/relaciones-unidad/${id}/`),
 };
 
 export const proveedorAPI = {

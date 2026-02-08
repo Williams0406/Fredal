@@ -95,34 +95,75 @@ class UbicacionCliente(models.Model):
         return f"{self.cliente.nombre} - {self.nombre}"
 
 
-class UnidadEquivalencia(models.Model):
+class Dimension(models.Model):
+    codigo = models.CharField(max_length=30, unique=True)
+    nombre = models.CharField(max_length=60)
+    descripcion = models.TextField(blank=True, default="")
+    activo = models.BooleanField(default=True)
 
-    class Categoria(models.TextChoices):
-        VOLUMEN = "VOLUMEN", "Volumen"
-        LONGITUD = "LONGITUD", "Longitud"
-        MASA = "MASA", "Masa"
-        AREA = "AREA", "Área"
-        TIEMPO = "TIEMPO", "Tiempo"
-        OTRO = "OTRO", "Otro"
-        
-    nombre = models.CharField(max_length=30, unique=True)
+    def __str__(self):
+        return self.nombre
+
+
+class UnidadMedida(models.Model):
+    nombre = models.CharField(max_length=30)
     simbolo = models.CharField(max_length=10, blank=True, default="")
-    categoria = models.CharField(max_length=15, choices=Categoria.choices, default=Categoria.OTRO)
-    factor_a_unidad = models.DecimalField(max_digits=16, decimal_places=6)
-    unidad_base = models.BooleanField(default=False)
+    dimension = models.ForeignKey(
+        Dimension,
+        on_delete=models.PROTECT,
+        related_name="unidades",
+    )
+    es_base = models.BooleanField(default=False)
     activo = models.BooleanField(default=True)
 
     class Meta:
         constraints = [
             models.UniqueConstraint(
-                fields=["categoria"],
-                condition=models.Q(unidad_base=True),
-                name="unique_unidad_base_por_categoria",
+                fields=["dimension"],
+                condition=models.Q(es_base=True),
+                name="unique_unidad_base_por_dimension",
             )
         ]
+        unique_together = ("dimension", "nombre")
 
     def __str__(self):
-        return f"{self.nombre} ({self.factor_a_unidad})"
+        return f"{self.nombre} ({self.dimension.codigo})"
+
+
+class UnidadRelacion(models.Model):
+    dimension = models.ForeignKey(
+        Dimension,
+        on_delete=models.CASCADE,
+        related_name="relaciones",
+    )
+    unidad_base = models.ForeignKey(
+        UnidadMedida,
+        on_delete=models.PROTECT,
+        related_name="relaciones_base",
+    )
+    unidad_relacionada = models.ForeignKey(
+        UnidadMedida,
+        on_delete=models.PROTECT,
+        related_name="relaciones_relacionadas",
+    )
+    factor = models.DecimalField(max_digits=16, decimal_places=6)
+    activo = models.BooleanField(default=True)
+
+    class Meta:
+        unique_together = ("unidad_base", "unidad_relacionada")
+
+    def clean(self):
+        if self.unidad_base_id == self.unidad_relacionada_id:
+            raise ValidationError("La unidad base y la unidad relacionada deben ser distintas")
+        if self.unidad_base.dimension_id != self.unidad_relacionada.dimension_id:
+            raise ValidationError("Las unidades deben pertenecer a la misma dimensión")
+        if not self.unidad_base.es_base:
+            raise ValidationError("La unidad base debe estar marcada como base")
+        if self.dimension_id != self.unidad_base.dimension_id:
+            raise ValidationError("La dimensión debe coincidir con la unidad base")
+
+    def __str__(self):
+        return f"1 {self.unidad_base.nombre} = {self.factor} {self.unidad_relacionada.nombre}"
     
     
 class Item(TimeStampedModel):
@@ -135,9 +176,15 @@ class Item(TimeStampedModel):
     nombre = models.CharField(max_length=150)
     tipo_insumo = models.CharField(max_length=15, choices=TipoInsumo.choices)
 
-    unidad_medida = models.CharField(max_length=20, default="UNIDAD")
-    unidad_equivalencia = models.ForeignKey(
-        UnidadEquivalencia,
+    dimension = models.ForeignKey(
+        Dimension,
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name="items",
+    )
+    unidad_medida = models.ForeignKey(
+        UnidadMedida,
         on_delete=models.PROTECT,
         null=True,
         blank=True,
