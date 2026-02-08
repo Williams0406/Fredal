@@ -73,33 +73,50 @@ export default function ItemTable() {
     );
 
   const formatStock = (item) => {
-    if (item.tipo_insumo !== "CONSUMIBLE") {
-      return {
-        valor: item.unidades_disponibles || 0,
-        unidad: "UNIDAD",
-      };
-    }
+  // REPUESTOS: unidades físicas
+  if (item.tipo_insumo !== "CONSUMIBLE") {
+    return {
+      valor: item.unidades_disponibles ?? 0,
+      unidad: "UNID",
+    };
+  }
 
-    const baseUnit = baseUnitForDimension(item.dimension);
-    if (
-      displayUnit &&
-      baseUnit &&
-      displayUnit.dimension === item.dimension
-    ) {
-      const relacion = relationForUnits(baseUnit.id, displayUnit.id);
-      const factor = relacion ? Number(relacion.factor || 1) : 1;
-      const valor = (item.unidades_disponibles || 0) * factor;
+  // Consumibles
+  const baseUnit = item.unidad_base;
+  if (!baseUnit) {
+    return {
+      valor: item.unidades_disponibles ?? 0,
+      unidad: "",
+    };
+  }
+
+  // Si el usuario seleccionó otra unidad
+  if (
+    displayUnit &&
+    displayUnit.dimension === item.dimension &&
+    displayUnit.id !== baseUnit.id
+  ) {
+    const relacion = relaciones.find(
+      (r) =>
+        r.unidad_base === baseUnit.id &&
+        r.unidad_relacionada === displayUnit.id
+    );
+
+    if (relacion) {
+      const valor = Number(item.unidades_disponibles) * Number(relacion.factor);
       return {
-        valor: Number.isFinite(valor) ? valor.toFixed(2) : item.unidades_disponibles || 0,
+        valor: valor.toFixed(2),
         unidad: displayUnit.simbolo || displayUnit.nombre,
       };
     }
+  }
 
-    return {
-      valor: item.unidades_disponibles || 0,
-      unidad: item.unidad_medida_detalle?.simbolo || item.unidad_medida_detalle?.nombre || "UNIDAD",
-    };
+  // Default: unidad base
+  return {
+    valor: item.unidades_disponibles,
+    unidad: baseUnit.simbolo || baseUnit.nombre,
   };
+};
 
   // Estadísticas del inventario
   const stats = {

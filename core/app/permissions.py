@@ -72,7 +72,7 @@ class TrabajoPermission(BasePermission):
             return True
 
         if user_in_group(user, "Tecnico"):
-            return request.method in ["GET", "HEAD", "OPTIONS", "PUT", "PATCH"]
+            return request.method in ["GET", "HEAD", "OPTIONS", "POST", "PUT", "PATCH"]
 
         return request.method in SAFE_METHODS
 
@@ -102,6 +102,9 @@ class CambioEquipoPermission(BasePermission):
 
         if user_in_group(user, "Almacenero"):
             return True
+
+        if user_in_group(user, "Tecnico"):
+            return request.method in ["POST", "GET", "HEAD", "OPTIONS"]
 
         return request.method in SAFE_METHODS
 
@@ -156,6 +159,9 @@ class ItemPermission(BasePermission):
             return True
 
         if user_in_group(user, "Almacenero"):
+            return request.method in SAFE_METHODS
+
+        if user_in_group(user, "Tecnico"):
             return request.method in SAFE_METHODS
 
         return False

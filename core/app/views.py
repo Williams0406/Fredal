@@ -2,6 +2,7 @@ from django.contrib.auth.models import User, Group
 from rest_framework import viewsets, filters
 from django_filters.rest_framework import DjangoFilterBackend
 from rest_framework.permissions import IsAuthenticated, IsAdminUser, AllowAny
+from rest_framework.exceptions import PermissionDenied
 from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework.decorators import action
@@ -80,7 +81,7 @@ from .permissions import (
 class UserViewSet(viewsets.ModelViewSet):
     queryset = User.objects.all().order_by("username")
     serializer_class = UserSerializer
-    permission_classes = [IsAdmin]
+    permission_classes = [IsAuthenticated]
 
     @action(detail=False, methods=["get"])
     def roles(self, request):
@@ -588,6 +589,24 @@ class ActividadTrabajoViewSet(viewsets.ModelViewSet):
     permission_classes = [TrabajoPermission]
     filter_backends = [DjangoFilterBackend]
     filterset_fields = ["orden"]
+
+    def perform_create(self, serializer):
+        user = self.request.user
+
+        if user.groups.filter(name="Tecnico").exists():
+            try:
+                trabajador = user.perfil.trabajador
+            except PerfilUsuario.DoesNotExist:
+                raise PermissionDenied("Usuario sin trabajador asociado")
+
+            orden = serializer.validated_data["orden"]
+
+            if not orden.tecnicos.filter(id=trabajador.id).exists():
+                raise PermissionDenied(
+                    "No puedes registrar actividades en esta orden"
+                )
+
+        serializer.save()
 
 class MovimientoRepuestoViewSet(viewsets.ModelViewSet):
     queryset = MovimientoRepuesto.objects.all()

@@ -101,6 +101,19 @@ class Dimension(models.Model):
     descripcion = models.TextField(blank=True, default="")
     activo = models.BooleanField(default=True)
 
+    def cambiar_unidad_base(self, nueva_unidad_base):
+        if nueva_unidad_base.dimension_id != self.id:
+            raise ValidationError("La unidad no pertenece a esta dimensión")
+
+        with transaction.atomic():
+            UnidadMedida.objects.filter(
+                dimension=self,
+                es_base=True
+            ).update(es_base=False)
+
+            nueva_unidad_base.es_base = True
+            nueva_unidad_base.save(update_fields=["es_base"])
+
     def __str__(self):
         return self.nombre
 

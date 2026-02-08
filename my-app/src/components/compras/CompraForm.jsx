@@ -1,7 +1,13 @@
 "use client";
 
 import { useEffect, useState, useMemo } from "react";
-import { compraAPI, itemAPI, proveedorAPI, unidadMedidaAPI } from "@/lib/api";
+import {
+  compraAPI,
+  itemAPI,
+  proveedorAPI,
+  unidadMedidaAPI,
+  unidadRelacionAPI,
+} from "@/lib/api";
 
 const IGV = 1.18;
 
@@ -20,6 +26,7 @@ export default function CompraForm({ onCreated }) {
   const [items, setItems] = useState([]);
   const [proveedores, setProveedores] = useState([]);
   const [unidadesMedida, setUnidadesMedida] = useState([]);
+  const [relacionesUnidad, setRelacionesUnidad] = useState([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [searchTerm, setSearchTerm] = useState("");
@@ -49,6 +56,7 @@ export default function CompraForm({ onCreated }) {
       unidadMedidaAPI.list().then((res) =>
         setUnidadesMedida(res.data.filter((u) => u.activo))
       );
+      unidadRelacionAPI.list().then((res) => setRelacionesUnidad(res.data));
       setCabecera((prev) => ({
         ...prev,
         fecha: prev.fecha || getToday(),
@@ -126,6 +134,61 @@ export default function CompraForm({ onCreated }) {
     );
   };
 
+  const baseUnitForDimension = (dimensionId) =>
+    unidadesMedida.find((u) => u.dimension === dimensionId && u.es_base);
+
+  const relationForUnits = (baseUnitId, relatedUnitId) =>
+    relacionesUnidad.find(
+      (rel) =>
+        rel.unidad_base === baseUnitId &&
+        rel.unidad_relacionada === relatedUnitId &&
+        rel.activo !== false
+    );
+
+  const resolveCantidadBase = (detalle, itemSel) => {
+    const cantidad = Number(detalle.cantidad || 0);
+    if (itemSel?.tipo_insumo !== "CONSUMIBLE") {
+      return {
+        cantidad,
+        unidad_medida: detalle.unidad_medida
+          ? Number(detalle.unidad_medida)
+          : null,
+        missingRelation: false,
+      };
+    }
+
+    const baseUnit = baseUnitForDimension(itemSel.dimension);
+    const selectedUnitId = detalle.unidad_medida
+      ? Number(detalle.unidad_medida)
+      : baseUnit?.id ?? itemSel.unidad_medida ?? null;
+
+    if (!baseUnit || !selectedUnitId || selectedUnitId === baseUnit.id) {
+      return {
+        cantidad,
+        unidad_medida: baseUnit?.id ?? selectedUnitId ?? null,
+        missingRelation: false,
+      };
+    }
+
+    const relation = relationForUnits(baseUnit.id, selectedUnitId);
+    if (!relation) {
+      return {
+        cantidad,
+        unidad_medida: selectedUnitId,
+        missingRelation: true,
+      };
+    }
+
+    const factor = Number(relation.factor || 1);
+    const cantidadBase = factor ? cantidad / factor : cantidad;
+
+    return {
+      cantidad: cantidadBase,
+      unidad_medida: baseUnit.id,
+      missingRelation: false,
+    };
+  };
+
   /* =========================
       SUBMIT
   ========================= */
@@ -146,6 +209,16 @@ export default function CompraForm({ onCreated }) {
         setError(`Falta el monto en la línea ${i + 1}`);
         return;
       }
+      const itemSel = items.find((it) => it.id.toString() === detalles[i].item);
+      if (itemSel?.tipo_insumo === "CONSUMIBLE") {
+        const conversion = resolveCantidadBase(detalles[i], itemSel);
+        if (conversion.missingRelation) {
+          setError(
+            `No existe relación de unidades para convertir la línea ${i + 1}.`
+          );
+          return;
+        }
+      }
     }
 
     setLoading(true);
@@ -158,14 +231,18 @@ export default function CompraForm({ onCreated }) {
         codigo_comprobante: cabecera.codigo_comprobante,
         moneda: cabecera.moneda, // Enviamos la moneda de la cabecera
 
-        items: detalles.map((d) => ({
-          item: Number(d.item),
-          cantidad: Number(d.cantidad),
-          unidad_medida: d.unidad_medida ? Number(d.unidad_medida) : null,
-          moneda: cabecera.moneda, // Todos los items heredan la moneda del comprobante
-          tipo_registro: d.tipo_registro,
-          monto: Number(d.monto),
-        })),
+        items: detalles.map((d) => {
+          const itemSel = items.find((it) => it.id.toString() === d.item);
+          const conversion = resolveCantidadBase(d, itemSel);
+          return {
+            item: Number(d.item),
+            cantidad: Number(conversion.cantidad),
+            unidad_medida: conversion.unidad_medida,
+            moneda: cabecera.moneda, // Todos los items heredan la moneda del comprobante
+            tipo_registro: d.tipo_registro,
+            monto: Number(d.monto),
+          };
+        }),
       });
 
       setOpen(false);
