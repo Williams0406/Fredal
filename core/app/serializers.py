@@ -208,6 +208,36 @@ class ItemSerializer(serializers.ModelSerializer):
             .distinct()
             .count()
         )
+    
+    def update(self, instance, validated_data):
+        nueva_unidad = validated_data.get('unidad_medida')
+        unidad_anterior = instance.unidad_medida
+        
+        # 1. Verificamos si es CONSUMIBLE y si la unidad realmente cambió
+        if instance.tipo_insumo == 'CONSUMIBLE' and nueva_unidad and unidad_anterior and nueva_unidad != unidad_anterior:
+            
+            # 2. Buscamos la relación de conversión (Base -> Relacionada)
+            relacion = UnidadRelacion.objects.filter(
+                unidad_base=unidad_anterior,
+                unidad_relacionada=nueva_unidad,
+                activo=True
+            ).first()
+
+            if relacion:
+                # 3. ¡Aquí ocurre la magia! Actualizamos cada registro físico de stock
+                factor = Decimal(str(relacion.factor))
+                # Usamos el related_name 'unidades' que definiste en ItemUnidad
+                unidades_fisicas = instance.unidades.all() 
+                
+                for unidad_fisica in unidades_fisicas:
+                    unidad_fisica.cantidad_nominal = unidad_fisica.cantidad_nominal * factor
+                    unidad_fisica.save()
+            else:
+                # Opcional: podrías lanzar un error si no existe la relación
+                # raise serializers.ValidationError(f"No existe una relación de conversión entre {unidad_anterior.nombre} y {nueva_unidad.nombre}")
+                pass
+
+        return super().update(instance, validated_data)
 
 class MaquinariaSerializer(serializers.ModelSerializer):
     centro_costos = serializers.SerializerMethodField()

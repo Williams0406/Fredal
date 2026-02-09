@@ -439,6 +439,9 @@ class ItemViewSet(viewsets.ModelViewSet):
             "serie": unidad.serie
         })
     
+    def perform_update(self, serializer):
+        serializer.save()
+    
 
 
 class MaquinariaViewSet(viewsets.ModelViewSet):

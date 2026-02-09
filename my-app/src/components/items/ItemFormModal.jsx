@@ -1,9 +1,9 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { dimensionAPI, itemAPI, unidadMedidaAPI } from "@/lib/api";
+import { dimensionAPI, itemAPI, unidadMedidaAPI, unidadRelacionAPI } from "@/lib/api";
 
-export default function ItemFormModal({ open, onClose, onCreated }) {
+export default function ItemFormModal({ open, onClose, onSaved, item }) {
   const [autoCode, setAutoCode] = useState(true);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
@@ -18,15 +18,21 @@ export default function ItemFormModal({ open, onClose, onCreated }) {
   });
   const [dimensiones, setDimensiones] = useState([]);
   const [unidades, setUnidades] = useState([]);
+  const [relaciones, setRelaciones] = useState([]);
+
+  const isEditing = Boolean(item?.id);
 
   useEffect(() => {
     if (!open) return;
-    Promise.all([dimensionAPI.list(), unidadMedidaAPI.list()]).then(
-      ([dimensionesRes, unidadesRes]) => {
+    Promise.all([
+      dimensionAPI.list(),
+      unidadMedidaAPI.list(),
+      unidadRelacionAPI.list(),
+    ]).then(([dimensionesRes, unidadesRes, relacionesRes]) => {
         setDimensiones(dimensionesRes.data);
         setUnidades(unidadesRes.data);
-      }
-    );
+        setRelaciones(relacionesRes.data);
+      });
   }, [open]);
 
   const dimensionCantidad = useMemo(
@@ -47,6 +53,33 @@ export default function ItemFormModal({ open, onClose, onCreated }) {
         String(unidad.dimension) === String(form.dimension) && unidad.activo
     );
   }, [unidades, form.dimension]);
+
+  useEffect(() => {
+    if (!open) return;
+    if (isEditing) {
+      setForm({
+        codigo: item?.codigo || "",
+        nombre: item?.nombre || "",
+        tipo_insumo: item?.tipo_insumo || "REPUESTO",
+        dimension: item?.dimension ? String(item.dimension) : "",
+        unidad_medida: item?.unidad_medida ? String(item.unidad_medida) : "",
+        volvo: Boolean(item?.volvo),
+      });
+      setAutoCode(false);
+      setError("");
+      return;
+    }
+    setForm({
+      codigo: "",
+      nombre: "",
+      tipo_insumo: "REPUESTO",
+      dimension: "",
+      unidad_medida: "",
+      volvo: false,
+    });
+    setAutoCode(true);
+    setError("");
+  }, [open, isEditing, item]);
 
   useEffect(() => {
     if (!open) return;
@@ -101,23 +134,46 @@ export default function ItemFormModal({ open, onClose, onCreated }) {
     };
 
     try {
-      await itemAPI.create(payload);
-      onCreated();
+      if (isEditing) {
+        if (form.tipo_insumo === "CONSUMIBLE" && form.unidad_medida) {
+          // 1. Identificar unidad previa (asegura que comparamos manzanas con manzanas)
+          const previousUnitId = item?.unidad_medida?.id || item?.unidad_medida;
+          const nextUnitId = Number(form.unidad_medida);
+
+          if (previousUnitId && String(previousUnitId) !== String(nextUnitId)) {
+            // 2. Buscar la relación exacta
+            const relacion = relaciones.find(
+              (rel) =>
+                String(rel.unidad_base) === String(previousUnitId) &&
+                String(rel.unidad_relacionada) === String(nextUnitId)
+            );
+
+            if (relacion) {
+              // 3. Recalcular stock multiplicando por el factor
+              const stockActual = Number(item.unidades_disponibles || 0);
+              const factor = Number(relacion.factor);
+              
+              // Agregamos el nuevo stock al payload que se enviará al servidor
+              payload.unidades_disponibles = stockActual * factor;
+            } else {
+              // Opcional: Si no hay relación, podrías alertar al usuario que el stock no se convertirá
+              console.warn("No se encontró relación de conversión. El stock nominal no cambiará.");
+            }
+          }
+        }
+        
+        await itemAPI.update(item.id, payload);
+      } else {
+        await itemAPI.create(payload);
+      }
+      onSaved?.();
       onClose();
-      
-      // Reset form
-      setForm({
-        codigo: "",
-        nombre: "",
-        tipo_insumo: "REPUESTO",
-        dimension: "",
-        unidad_medida: "",
-        volvo: false,
-      });
-      setAutoCode(true);
     } catch (err) {
       console.error(err);
-      setError(err.response?.data?.detail || "Error al crear el item");
+      setError(
+        err.response?.data?.detail ||
+          (isEditing ? "Error al actualizar el item" : "Error al crear el item")
+      );
     } finally {
       setLoading(false);
     }
@@ -137,7 +193,7 @@ export default function ItemFormModal({ open, onClose, onCreated }) {
         <div className="border-b border-gray-200 px-6 py-4">
           <div className="flex items-center justify-between">
             <h2 className="text-xl font-semibold text-[#1e3a8a]">
-              Nuevo Item
+              {isEditing ? "Editar Item" : "Nuevo Item"}
             </h2>
             <button
               type="button"
@@ -162,28 +218,30 @@ export default function ItemFormModal({ open, onClose, onCreated }) {
           )}
 
           {/* Código autogenerado checkbox */}
-          <div className="p-4 bg-blue-50 border border-blue-200 rounded-lg">
-            <label className="flex items-center gap-3 cursor-pointer">
-              <input
-                type="checkbox"
-                checked={autoCode}
-                onChange={() => setAutoCode(!autoCode)}
-                className="w-4 h-4 text-[#1e3a8a] border-gray-300 rounded 
-                         focus:ring-2 focus:ring-[#1e3a8a]"
-              />
-              <div>
-                <span className="text-sm font-medium text-blue-900">
-                  Código autogenerado
-                </span>
-                <p className="text-xs text-blue-700 mt-0.5">
-                  El sistema generará un código único automáticamente
-                </p>
-              </div>
-            </label>
-          </div>
+          {!isEditing && (
+            <div className="p-4 bg-blue-50 border border-blue-200 rounded-lg">
+              <label className="flex items-center gap-3 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={autoCode}
+                  onChange={() => setAutoCode(!autoCode)}
+                  className="w-4 h-4 text-[#1e3a8a] border-gray-300 rounded 
+                           focus:ring-2 focus:ring-[#1e3a8a]"
+                />
+                <div>
+                  <span className="text-sm font-medium text-blue-900">
+                    Código autogenerado
+                  </span>
+                  <p className="text-xs text-blue-700 mt-0.5">
+                    El sistema generará un código único automáticamente
+                  </p>
+                </div>
+              </label>
+            </div>
+          )}
 
           {/* Código manual */}
-          {!autoCode && (
+          {(!autoCode || isEditing) && (
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-2">
                 Código del item <span className="text-red-500">*</span>
@@ -379,7 +437,7 @@ export default function ItemFormModal({ open, onClose, onCreated }) {
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} 
                           d="M5 13l4 4L19 7" />
                   </svg>
-                  Guardar Item
+                  {isEditing ? "Guardar cambios" : "Guardar Item"}
                 </>
               )}
             </button>
