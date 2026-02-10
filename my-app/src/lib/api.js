@@ -270,6 +270,15 @@ export const movimientoConsumibleAPI = {
     api.post("/api/movimientos-consumible/", data),
 };
 
+
+export const itemGrupoAPI = {
+  list: (params) => api.get("/api/item-grupos/", { params }),
+  retrieve: (id) => api.get(`/api/item-grupos/${id}/`),
+  create: (data) => api.post("/api/item-grupos/", data),
+  update: (id, data) => api.put(`/api/item-grupos/${id}/`, data),
+  delete: (id) => api.delete(`/api/item-grupos/${id}/`),
+};
+
 export const userAPI = {
   list: () => api.get("/api/users/"),
   roles: () => api.get("/api/users/roles/"),

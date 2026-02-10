@@ -30,6 +30,8 @@ from .models import (
     Dimension,
     UnidadMedida,
     UnidadRelacion,
+    ItemGrupo,
+    ItemGrupoDetalle,
 )
 
 def obtener_unidad_base(dimension):
@@ -1293,3 +1295,98 @@ class KardexContableSerializer(serializers.Serializer):
     inventario_final_cantidad = serializers.IntegerField()
     inventario_final_costo = serializers.DecimalField(max_digits=14, decimal_places=2)
     maquinaria = serializers.DictField(required=False, allow_null=True)
+
+class ItemGrupoDetalleSerializer(serializers.ModelSerializer):
+    item_nombre = serializers.CharField(source="item.nombre", read_only=True)
+    item_codigo = serializers.CharField(source="item.codigo", read_only=True)
+    item_tipo_insumo = serializers.CharField(source="item.tipo_insumo", read_only=True)
+    unidad_nombre = serializers.CharField(source="unidad_medida.nombre", read_only=True)
+    unidad_simbolo = serializers.CharField(source="unidad_medida.simbolo", read_only=True)
+
+    class Meta:
+        model = ItemGrupoDetalle
+        fields = [
+            "id",
+            "item",
+            "item_nombre",
+            "item_codigo",
+            "item_tipo_insumo",
+            "cantidad",
+            "unidad_medida",
+            "unidad_nombre",
+            "unidad_simbolo",
+        ]
+
+    def validate(self, data):
+        item = data.get("item", getattr(self.instance, "item", None))
+        unidad_medida = data.get("unidad_medida", getattr(self.instance, "unidad_medida", None))
+        cantidad = data.get("cantidad", getattr(self.instance, "cantidad", None))
+
+        if cantidad is not None and cantidad <= 0:
+            raise serializers.ValidationError({"cantidad": "La cantidad debe ser mayor a cero."})
+
+        if unidad_medida and item and item.dimension_id != unidad_medida.dimension_id:
+            raise serializers.ValidationError({
+                "unidad_medida": "La unidad no coincide con la dimensión del item."
+            })
+
+        return data
+
+
+class ItemGrupoSerializer(serializers.ModelSerializer):
+    items = ItemGrupoDetalleSerializer(many=True)
+
+    class Meta:
+        model = ItemGrupo
+        fields = ["id", "nombre", "created_at", "updated_at", "items"]
+
+    def validate_items(self, value):
+        if not value:
+            raise serializers.ValidationError("Debes agregar al menos un item.")
+
+        item_ids = [item["item"].id for item in value]
+        if len(item_ids) != len(set(item_ids)):
+            raise serializers.ValidationError("No se puede repetir el mismo item en el grupo.")
+
+        return value
+
+    def create(self, validated_data):
+        items_data = validated_data.pop("items", [])
+
+        with transaction.atomic():
+            grupo = ItemGrupo.objects.create(**validated_data)
+            detalles = [
+                ItemGrupoDetalle(
+                    grupo=grupo,
+                    item=item_data["item"],
+                    cantidad=item_data.get("cantidad"),
+                    unidad_medida=item_data.get("unidad_medida") or item_data["item"].unidad_medida,
+                )
+                for item_data in items_data
+            ]
+            ItemGrupoDetalle.objects.bulk_create(detalles)
+
+        return grupo
+
+    def update(self, instance, validated_data):
+        items_data = validated_data.pop("items", None)
+
+        for attr, value in validated_data.items():
+            setattr(instance, attr, value)
+        instance.save()
+
+        if items_data is not None:
+            with transaction.atomic():
+                instance.items.all().delete()
+                detalles = [
+                    ItemGrupoDetalle(
+                        grupo=instance,
+                        item=item_data["item"],
+                        cantidad=item_data.get("cantidad"),
+                        unidad_medida=item_data.get("unidad_medida") or item_data["item"].unidad_medida,
+                    )
+                    for item_data in items_data
+                ]
+                ItemGrupoDetalle.objects.bulk_create(detalles)
+
+        return instance

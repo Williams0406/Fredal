@@ -157,18 +157,8 @@ export default function MaquinariaFormModal({
                 value={form.codigo_maquina}
                 onChange={handleChange}
                 required
-                disabled={isEdit}
-                className={`w-full px-4 py-2.5 border rounded-lg text-gray-900 transition-colors ${
-                  isEdit
-                    ? "bg-gray-100 border-gray-300 cursor-not-allowed"
-                    : "bg-white border-gray-300 hover:border-[#1e3a8a] focus:border-[#1e3a8a] focus:ring-2 focus:ring-blue-100"
-                } outline-none`}
+                className="w-full px-4 py-2.5 border rounded-lg text-gray-900 transition-colors bg-white border-gray-300 hover:border-[#1e3a8a] focus:border-[#1e3a8a] focus:ring-2 focus:ring-blue-100 outline-none"
               />
-              {isEdit && (
-                <p className="text-xs text-gray-500 mt-1.5">
-                  El código no puede modificarse después de crear la maquinaria
-                </p>
-              )}
             </div>
 
             {/* Nombre */}

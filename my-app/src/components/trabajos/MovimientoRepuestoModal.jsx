@@ -8,6 +8,7 @@ import {
   unidadMedidaAPI,
   unidadRelacionAPI,
 } from "@/lib/api";
+import ItemGroupSelector from "@/components/items/ItemGroupSelector";
 
 export default function MovimientoRepuestoModal({ open, onClose, actividad, onSaved }) {
   const [items, setItems] = useState([]);
@@ -194,6 +195,63 @@ export default function MovimientoRepuestoModal({ open, onClose, actividad, onSa
     setForm({ item: "", estado_unidad: "NUEVO", cantidad: 1, unidad_conversion: "" });
   };
 
+  const handleApplyGroup = async (group) => {
+    if (!group?.items?.length || !actividad?.id) return;
+
+    const nuevosMovimientos = [];
+
+    for (const groupItem of group.items) {
+      const item = items.find((it) => String(it.id) === String(groupItem.item));
+      if (!item) continue;
+
+      const cantidad = Number(groupItem.cantidad) || 0;
+      if (cantidad <= 0) continue;
+
+      if (item.tipo_insumo === "CONSUMIBLE") {
+        nuevosMovimientos.push({
+          tipo: "CONSUMIBLE",
+          item_id: item.id,
+          item_codigo: item.codigo,
+          item_nombre: item.nombre,
+          cantidad,
+          unidad_medida: groupItem.unidad_nombre || item.unidad_medida_detalle?.nombre || "",
+          unidad_conversion: groupItem.unidad_medida ? String(groupItem.unidad_medida) : "",
+        });
+        continue;
+      }
+
+      const unidadesRes = await itemAPI.unidadesAsignables(item.id, { actividad: actividad.id });
+      const cantidadUnidades = Math.floor(cantidad);
+      const disponibles = (unidadesRes.data || []).filter(
+        (unidad) =>
+          unidad.estado === "NUEVO" &&
+          !movimientos.some((movimiento) => String(movimiento.unidad_id) === String(unidad.id)) &&
+          !nuevosMovimientos.some((movimiento) => String(movimiento.unidad_id) === String(unidad.id))
+      );
+
+      if (disponibles.length < cantidadUnidades) {
+        alert(`No hay suficientes unidades NUEVAS para ${item.nombre}.`);
+        continue;
+      }
+
+      nuevosMovimientos.push(
+        ...disponibles.slice(0, cantidadUnidades).map((unidad) => ({
+          tipo: "REPUESTO",
+          item_id: item.id,
+          item_codigo: item.codigo,
+          item_nombre: item.nombre,
+          unidad_id: unidad.id,
+          unidad_serie: unidad.serie || `Unidad #${unidad.id}`,
+          estado: unidad.estado,
+        }))
+      );
+    }
+
+    if (nuevosMovimientos.length) {
+      setMovimientosNew((prev) => [...prev, ...nuevosMovimientos]);
+    }
+  };
+
   const handleRemoveMovimiento = (index) => {
     const movimiento = movimientosFiltrados[index];
     if (!movimiento || movimiento.id) return;
@@ -235,6 +293,10 @@ export default function MovimientoRepuestoModal({ open, onClose, actividad, onSa
       <div className="bg-white rounded-xl w-full max-w-4xl max-h-[90vh] flex flex-col" onClick={(e)=>e.stopPropagation()}>
         <div className="border-b border-gray-200 px-6 py-4"><h3 className="text-xl font-semibold text-[#1e3a8a]">Movimiento de Items</h3></div>
         <div className="flex-1 overflow-y-auto px-6 py-6 space-y-6">
+          <ItemGroupSelector
+            onApply={handleApplyGroup}
+          />
+
           <div className="grid grid-cols-1 md:grid-cols-5 gap-4">
             <div>
               <label className="block text-sm mb-2">Item</label>

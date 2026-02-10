@@ -283,6 +283,44 @@ class ItemProveedor(models.Model):
         unique_together = ("item", "proveedor")
 
 
+
+
+class ItemGrupo(TimeStampedModel):
+    nombre = models.CharField(max_length=150, unique=True)
+
+    def __str__(self):
+        return self.nombre
+
+
+class ItemGrupoDetalle(models.Model):
+    grupo = models.ForeignKey(
+        ItemGrupo,
+        on_delete=models.CASCADE,
+        related_name="items",
+    )
+    item = models.ForeignKey(Item, on_delete=models.PROTECT, related_name="grupos")
+    cantidad = models.DecimalField(max_digits=16, decimal_places=6, default=1)
+    unidad_medida = models.ForeignKey(
+        UnidadMedida,
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name="grupos_detalle",
+    )
+
+    class Meta:
+        unique_together = ("grupo", "item")
+
+    def clean(self):
+        if self.cantidad <= 0:
+            raise ValidationError("La cantidad debe ser mayor a cero")
+
+        if self.unidad_medida and self.item.dimension_id != self.unidad_medida.dimension_id:
+            raise ValidationError("La unidad seleccionada no corresponde a la dimensión del item")
+
+    def __str__(self):
+        return f"{self.grupo.nombre} - {self.item.codigo}"
+
 class Trabajador(models.Model):
     codigo = models.CharField(
         max_length=50,

@@ -22,6 +22,7 @@ from .views import (
     DimensionViewSet,
     UnidadMedidaViewSet,
     UnidadRelacionViewSet,
+    ItemGrupoViewSet,
 )
 
 router = DefaultRouter()
@@ -42,6 +43,7 @@ router.register(r"ubicaciones-cliente", UbicacionClienteViewSet)
 router.register(r"dimensiones", DimensionViewSet)
 router.register(r"unidades-medida", UnidadMedidaViewSet)
 router.register(r"relaciones-unidad", UnidadRelacionViewSet)
+router.register(r"item-grupos", ItemGrupoViewSet)
 
 urlpatterns = [
     path("api/", include(router.urls)),

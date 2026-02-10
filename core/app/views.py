@@ -38,6 +38,7 @@ from .models import (
     Dimension,
     UnidadMedida,
     UnidadRelacion,
+    ItemGrupo,
 )
 from .serializers import (
     UserSerializer,
@@ -68,6 +69,7 @@ from .serializers import (
     DimensionSerializer,
     UnidadMedidaSerializer,
     UnidadRelacionSerializer,
+    ItemGrupoSerializer,
 )
 from .permissions import (
     IsAdmin,
@@ -733,6 +735,13 @@ class CatalogosView(APIView):
             ).data,
         })
 
+
+
+class ItemGrupoViewSet(viewsets.ModelViewSet):
+    queryset = ItemGrupo.objects.all().prefetch_related("items__item", "items__unidad_medida").order_by("-created_at")
+    serializer_class = ItemGrupoSerializer
+    permission_classes = [ItemPermission]
+    
 class AlmacenViewSet(viewsets.ModelViewSet):
     queryset = Almacen.objects.all().order_by("nombre")
     serializer_class = AlmacenSerializer

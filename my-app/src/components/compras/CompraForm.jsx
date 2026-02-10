@@ -8,6 +8,7 @@ import {
   unidadMedidaAPI,
   unidadRelacionAPI,
 } from "@/lib/api";
+import ItemGroupSelector from "@/components/items/ItemGroupSelector";
 
 const IGV = 1.18;
 
@@ -79,6 +80,27 @@ export default function CompraForm({ onCreated }) {
 
   const removeDetalle = (index) =>
     setDetalles((prev) => prev.filter((_, i) => i !== index));
+
+  const handleApplyGroup = (group) => {
+    if (!group?.items?.length) return;
+
+    const detallesDesdeGrupo = group.items
+      .map((groupItem) => {
+        const item = items.find((it) => String(it.id) === String(groupItem.item));
+        if (!item) return null;
+        return {
+          ...emptyDetalle,
+          item: String(item.id),
+          cantidad: Number(groupItem.cantidad) || 1,
+          unidad_medida: groupItem.unidad_medida ? String(groupItem.unidad_medida) : String(item.unidad_medida || ""),
+        };
+      })
+      .filter(Boolean);
+
+    if (!detallesDesdeGrupo.length) return;
+    setDetalles((prev) => [...prev, ...detallesDesdeGrupo]);
+    setError("");
+  };
 
   const calcular = (d) => {
     const monto = Number(d.monto || 0);
@@ -412,6 +434,10 @@ export default function CompraForm({ onCreated }) {
                     </div>
                   </div>
                 </div>
+
+                <ItemGroupSelector
+                  onApply={handleApplyGroup}
+                />
 
                 {/* DETALLE */}
                 <div>
