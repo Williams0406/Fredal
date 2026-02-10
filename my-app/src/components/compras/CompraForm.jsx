@@ -150,9 +150,7 @@ export default function CompraForm({ onCreated }) {
     if (itemSel?.tipo_insumo !== "CONSUMIBLE") {
       return {
         cantidad,
-        unidad_medida: detalle.unidad_medida
-          ? Number(detalle.unidad_medida)
-          : null,
+        unidad_medida: itemSel?.unidad_medida ?? null,
         missingRelation: false,
       };
     }
@@ -160,12 +158,12 @@ export default function CompraForm({ onCreated }) {
     const baseUnit = baseUnitForDimension(itemSel.dimension);
     const selectedUnitId = detalle.unidad_medida
       ? Number(detalle.unidad_medida)
-      : baseUnit?.id ?? itemSel.unidad_medida ?? null;
+      : itemSel.unidad_medida ?? baseUnit?.id ?? null;
 
     if (!baseUnit || !selectedUnitId || selectedUnitId === baseUnit.id) {
       return {
         cantidad,
-        unidad_medida: baseUnit?.id ?? selectedUnitId ?? null,
+        unidad_medida: selectedUnitId ?? null,
         missingRelation: false,
       };
     }
@@ -179,12 +177,9 @@ export default function CompraForm({ onCreated }) {
       };
     }
 
-    const factor = Number(relation.factor || 1);
-    const cantidadBase = factor ? cantidad / factor : cantidad;
-
     return {
-      cantidad: cantidadBase,
-      unidad_medida: baseUnit.id,
+      cantidad,
+      unidad_medida: selectedUnitId,
       missingRelation: false,
     };
   };

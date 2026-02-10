@@ -57,6 +57,129 @@ def obtener_factor_a_base(unidad, unidad_base):
         raise ValidationError("El factor de equivalencia no puede ser cero")
     return Decimal("1") / Decimal(relacion.factor)
 
+def obtener_factor_entre_unidades(unidad_origen, unidad_destino, unidad_base=None):
+    if unidad_origen.id == unidad_destino.id:
+        return Decimal("1")
+
+    if unidad_origen.dimension_id != unidad_destino.dimension_id:
+        raise ValidationError("Las unidades no pertenecen a la misma dimensión")
+
+    unidad_base = unidad_base or obtener_unidad_base(unidad_destino.dimension)
+    if not unidad_base:
+        raise ValidationError("No hay unidad base definida para la dimensión")
+
+    factor_origen_a_base = obtener_factor_a_base(unidad_origen, unidad_base)
+
+    if unidad_destino.id == unidad_base.id:
+        return factor_origen_a_base
+
+    relacion_destino = UnidadRelacion.objects.filter(
+        unidad_base=unidad_base,
+        unidad_relacionada=unidad_destino,
+        activo=True,
+    ).first()
+    if not relacion_destino:
+        raise ValidationError(
+            "No existe relación entre la unidad base y la unidad destino"
+        )
+    if relacion_destino.factor == 0:
+        raise ValidationError("El factor de equivalencia no puede ser cero")
+
+    return factor_origen_a_base * Decimal(relacion_destino.factor)
+
+def calcular_stock_item(item):
+    if item.tipo_insumo == Item.TipoInsumo.REPUESTO:
+        if (
+            item.unidad_medida
+            and item.dimension
+            and item.unidad_medida.nombre.upper() == "CANTIDAD"
+            and item.dimension.codigo.upper() == "UNIDAD"
+        ):
+            unidades_disponibles = (
+                ItemUnidad.objects
+                .filter(
+                    item=item,
+                    historial__fecha_fin__isnull=True,
+                    historial__almacen__isnull=False,
+                )
+                .exclude(estado=ItemUnidad.Estado.INOPERATIVO)
+                .distinct()
+                .count()
+            )
+            return Decimal(unidades_disponibles)
+
+        total_compras = (
+            CompraDetalle.objects
+            .filter(item=item)
+            .aggregate(total=Sum("cantidad"))
+            .get("total")
+            or 0
+        )
+        total_salidas = (
+            MovimientoRepuesto.objects
+            .filter(item_unidad__item=item, actividad__es_planificada=False)
+            .count()
+        )
+        return max(Decimal(total_compras) - Decimal(total_salidas), Decimal("0"))
+
+    if not item.unidad_medida or not item.dimension:
+        return Decimal("0")
+
+    unidad_base = obtener_unidad_base(item.dimension)
+    if not unidad_base:
+        return Decimal("0")
+
+    total_compras = Decimal("0")
+    detalles = (
+        CompraDetalle.objects
+        .filter(item=item)
+        .select_related("unidad_medida")
+    )
+    for detalle in detalles:
+        unidad_compra = detalle.unidad_medida or item.unidad_medida
+        factor = obtener_factor_entre_unidades(
+            unidad_compra,
+            item.unidad_medida,
+            unidad_base,
+        )
+        total_compras += Decimal(detalle.cantidad) * factor
+
+    total_salidas = Decimal("0")
+    movimientos = (
+        MovimientoConsumible.objects
+        .filter(item=item, actividad__es_planificada=False)
+        .select_related("unidad_medida")
+    )
+    for movimiento in movimientos:
+        unidad_mov = movimiento.unidad_medida or item.unidad_medida
+        if unidad_mov.id == item.unidad_medida.id:
+            total_salidas += Decimal(movimiento.cantidad)
+            continue
+        relacion = UnidadRelacion.objects.filter(
+            unidad_base=unidad_mov,
+            unidad_relacionada=item.unidad_medida,
+            activo=True,
+        ).first()
+        if not relacion:
+            raise ValidationError(
+                "No existe relación entre la unidad registrada y la unidad del item"
+            )
+        if relacion.factor == 0:
+            raise ValidationError("El factor de equivalencia no puede ser cero")
+        total_salidas += Decimal(movimiento.cantidad) * Decimal(relacion.factor)
+
+    return max(total_compras - total_salidas, Decimal("0"))
+
+def actualizar_stock_item(item):
+    if hasattr(item, "_stock_calculado"):
+        return item._stock_calculado
+    stock = calcular_stock_item(item)
+    item._stock_calculado = stock
+    if item.stock != stock:
+        item.stock = stock
+        item.save(update_fields=["stock"])
+    return stock
+
 class UserSerializer(serializers.ModelSerializer):
     password = serializers.CharField(write_only=True)
     groups = serializers.PrimaryKeyRelatedField(
@@ -99,6 +222,7 @@ class UserSerializer(serializers.ModelSerializer):
 
 class ItemSerializer(serializers.ModelSerializer):
     unidades_disponibles = serializers.SerializerMethodField()
+    stock = serializers.SerializerMethodField()
     dimension_detalle = serializers.SerializerMethodField()
     unidad_medida_detalle = serializers.SerializerMethodField()
 
@@ -115,7 +239,9 @@ class ItemSerializer(serializers.ModelSerializer):
             "unidad_medida_detalle",
             "volvo",
             "unidades_disponibles",
+            "stock",
         ]
+        read_only_fields = ["stock"]
 
     def get_dimension_detalle(self, obj):
         if not obj.dimension:
@@ -177,37 +303,29 @@ class ItemSerializer(serializers.ModelSerializer):
                 raise serializers.ValidationError(
                     "La unidad seleccionada no pertenece a la dimensión del item"
                 )
+            unidad_base = obtener_unidad_base(dimension)
+            if not unidad_base:
+                raise serializers.ValidationError(
+                    "Debe existir una unidad base para la dimensión del item"
+                )
+            if unidad_medida.id != unidad_base.id:
+                relacion = UnidadRelacion.objects.filter(
+                    unidad_base=unidad_base,
+                    unidad_relacionada=unidad_medida,
+                    activo=True,
+                ).first()
+                if not relacion:
+                    raise serializers.ValidationError(
+                        "No existe relación de unidad para la unidad seleccionada"
+                    )
 
         return data
     
     def get_unidades_disponibles(self, obj):
-        if obj.tipo_insumo == Item.TipoInsumo.CONSUMIBLE:
-            total_compras = (
-                CompraDetalle.objects
-                .filter(item=obj)
-                .aggregate(total=Sum("cantidad"))
-                .get("total")
-                or 0
-            )
-            total_salidas = (
-                MovimientoConsumible.objects
-                .filter(item=obj, actividad__es_planificada=False)
-                .aggregate(total=Sum("cantidad"))
-                .get("total")
-                or 0
-            )
-            return max(total_compras - total_salidas, 0)
-        
-        return (
-            obj.unidades
-            .filter(
-                estado=ItemUnidad.Estado.NUEVO,
-                historial__fecha_fin__isnull=True,
-                historial__almacen__isnull=False
-            )
-            .distinct()
-            .count()
-        )
+        return actualizar_stock_item(obj)
+
+    def get_stock(self, obj):
+        return actualizar_stock_item(obj)
     
     def update(self, instance, validated_data):
         nueva_unidad = validated_data.get('unidad_medida')
@@ -237,7 +355,9 @@ class ItemSerializer(serializers.ModelSerializer):
                 # raise serializers.ValidationError(f"No existe una relación de conversión entre {unidad_anterior.nombre} y {nueva_unidad.nombre}")
                 pass
 
-        return super().update(instance, validated_data)
+        instance = super().update(instance, validated_data)
+        actualizar_stock_item(instance)
+        return instance
 
 class MaquinariaSerializer(serializers.ModelSerializer):
     centro_costos = serializers.SerializerMethodField()
@@ -291,9 +411,10 @@ class CompraCreateSerializer(serializers.ModelSerializer):
                 cantidad = cantidad_original
 
                 if unidad_medida and data["item"].tipo_insumo != Item.TipoInsumo.CONSUMIBLE:
-                    raise serializers.ValidationError(
-                        f"El item {data['item'].codigo} no es CONSUMIBLE y no permite equivalencias"
-                    )
+                    if data["item"].unidad_medida_id != unidad_medida.id:
+                        raise serializers.ValidationError(
+                            f"El item {data['item'].codigo} solo permite su unidad base"
+                        )
                 
                 if data["item"].tipo_insumo == Item.TipoInsumo.CONSUMIBLE and unidad_medida:
                     if not data["item"].dimension:
@@ -309,14 +430,33 @@ class CompraCreateSerializer(serializers.ModelSerializer):
                         raise serializers.ValidationError(
                             "No hay unidad base definida para la dimensión del item"
                         )
-                    factor_a_base = obtener_factor_a_base(unidad_medida, unidad_base)
-                    cantidad_decimal = Decimal(cantidad_original) * factor_a_base
-                    if cantidad_decimal != cantidad_decimal.to_integral_value():
+                    if unidad_medida.id != unidad_base.id:
+                        relacion = UnidadRelacion.objects.filter(
+                            unidad_base=unidad_base,
+                            unidad_relacionada=unidad_medida,
+                            activo=True,
+                        ).first()
+                        if not relacion:
+                            raise serializers.ValidationError(
+                                f"No existe relación de unidad para {data['item'].codigo}"
+                            )
+                        if relacion.factor == 0:
+                            raise serializers.ValidationError(
+                                "El factor de equivalencia no puede ser cero"
+                            )
+                elif data["item"].tipo_insumo == Item.TipoInsumo.CONSUMIBLE:
+                    unidad_medida = data["item"].unidad_medida
+                    if not unidad_medida:
                         raise serializers.ValidationError(
-                            f"La cantidad convertida a UNIDAD debe ser entera para {data['item'].codigo}"
+                            f"El item {data['item'].codigo} no tiene unidad de medida configurada"
                         )
-                    cantidad = int(cantidad_decimal)
-                    
+                else:
+                    unidad_medida = data["item"].unidad_medida
+                    if not unidad_medida:
+                        raise serializers.ValidationError(
+                            f"El item {data['item'].codigo} no tiene unidad de medida configurada"
+                        )
+
                 monto = data["monto"]
                 tipo = data["tipo_registro"]
                 
@@ -335,6 +475,7 @@ class CompraCreateSerializer(serializers.ModelSerializer):
                     compra=compra,
                     item=data["item"],
                     cantidad=cantidad,
+                    unidad_medida=unidad_medida,
                     moneda=data["moneda"],
                     valor_unitario=valor_unitario.quantize(Decimal("0.01"))
                 )
@@ -353,6 +494,7 @@ class CompraCreateSerializer(serializers.ModelSerializer):
                             estado=unidad.estado,
                             fecha_inicio=compra.fecha
                         )
+                actualizar_stock_item(data["item"])
             return compra
 
 class CompraDetalleListSerializer(serializers.ModelSerializer):
@@ -383,6 +525,16 @@ class CompraDetalleListSerializer(serializers.ModelSerializer):
     valor_total = serializers.SerializerMethodField()
     costo_unitario = serializers.SerializerMethodField()
     costo_total = serializers.SerializerMethodField()
+    unidad_medida_nombre = serializers.CharField(
+        source="unidad_medida.nombre",
+        read_only=True,
+        default=None,
+    )
+    unidad_medida_simbolo = serializers.CharField(
+        source="unidad_medida.simbolo",
+        read_only=True,
+        default="",
+    )
 
     class Meta:
         model = CompraDetalle
@@ -394,6 +546,8 @@ class CompraDetalleListSerializer(serializers.ModelSerializer):
             "item_volvo",
             "proveedor_nombre",
             "cantidad",
+            "unidad_medida_nombre",
+            "unidad_medida_simbolo",
             "valor_unitario",
             "valor_total",
             "costo_unitario",
@@ -594,6 +748,7 @@ class MovimientoRepuestoSerializer(serializers.ModelSerializer):
 
             # 📦 4️⃣ Registrar movimiento
             movimiento = super().create(validated_data)
+            actualizar_stock_item(item)
 
         return movimiento
 
@@ -601,18 +756,14 @@ class MovimientoConsumibleSerializer(serializers.ModelSerializer):
     item_id = serializers.IntegerField(source="item.id", read_only=True)
     item_codigo = serializers.CharField(source="item.codigo", read_only=True)
     item_nombre = serializers.CharField(source="item.nombre", read_only=True)
-    unidad_medida = serializers.CharField(source="item.unidad_medida.nombre", read_only=True)
-    unidad_conversion = serializers.PrimaryKeyRelatedField(
+    unidad_medida = serializers.PrimaryKeyRelatedField(
         queryset=UnidadMedida.objects.filter(activo=True),
         required=False,
         allow_null=True,
-        write_only=True,
     )
-    cantidad_equivalente = serializers.DecimalField(
-        max_digits=12,
-        decimal_places=2,
-        required=False,
-        write_only=True,
+    unidad_medida_detalle = serializers.CharField(
+        source="unidad_medida.nombre",
+        read_only=True,
     )
 
     class Meta:
@@ -622,13 +773,12 @@ class MovimientoConsumibleSerializer(serializers.ModelSerializer):
             "actividad",
             "item",
             "cantidad",
+            "unidad_medida",
+            "unidad_medida_detalle",
             "fecha",
             "item_id",
             "item_codigo",
             "item_nombre",
-            "unidad_medida",
-            "unidad_conversion",
-            "cantidad_equivalente",
         ]
         read_only_fields = ["fecha"]
 
@@ -652,36 +802,49 @@ class MovimientoConsumibleSerializer(serializers.ModelSerializer):
                 "La cantidad debe ser mayor a 0"
             )
 
-        unidad_conversion = data.get("unidad_conversion")
-        cantidad_equivalente = data.get("cantidad_equivalente")
-
-        if unidad_conversion and cantidad_equivalente:
-            if not item.dimension:
-                raise serializers.ValidationError(
-                    "El item no tiene dimensión configurada"
-                )
-            if unidad_conversion.dimension_id != item.dimension_id:
-                raise serializers.ValidationError(
-                    "La unidad de conversión no coincide con la dimensión del item"
-                )
-            unidad_base = obtener_unidad_base(item.dimension)
-            if not unidad_base:
-                raise serializers.ValidationError(
-                    "No hay unidad base definida para la dimensión del item"
-                )
-            factor_a_base = obtener_factor_a_base(unidad_conversion, unidad_base)
-            cantidad_decimal = Decimal(cantidad_equivalente) * factor_a_base
-            if cantidad_decimal != cantidad_decimal.to_integral_value():
-                raise serializers.ValidationError(
-                    "La cantidad equivalente convertida a UNIDAD debe ser entera"
-                )
-            data["cantidad"] = int(cantidad_decimal)
-        elif unidad_conversion or cantidad_equivalente:
+        unidad_medida = data.get("unidad_medida") or item.unidad_medida
+        if not unidad_medida:
             raise serializers.ValidationError(
-                "Debe enviar unidad_equivalencia y cantidad_equivalente juntos"
+                "El item no tiene unidad de medida configurada"
+            )
+        if not item.dimension:
+            raise serializers.ValidationError(
+                "El item no tiene dimensión configurada"
+            )
+        if unidad_medida.dimension_id != item.dimension_id:
+            raise serializers.ValidationError(
+                "La unidad de medida no coincide con la dimensión del item"
+            )
+        data["unidad_medida"] = unidad_medida
+
+        stock_actual = item.stock
+        if unidad_medida.id != item.unidad_medida_id:
+            relacion = UnidadRelacion.objects.filter(
+                unidad_base=item.unidad_medida,
+                unidad_relacionada=unidad_medida,
+                activo=True,
+            ).first()
+            if not relacion:
+                raise serializers.ValidationError(
+                    "No existe relación entre la unidad del item y la unidad registrada"
+                )
+            if relacion.factor == 0:
+                raise serializers.ValidationError(
+                    "El factor de equivalencia no puede ser cero"
+                )
+            stock_actual = Decimal(item.stock) * Decimal(relacion.factor)
+
+        if Decimal(cantidad) > Decimal(stock_actual):
+            raise serializers.ValidationError(
+                "La cantidad excede el stock disponible en la unidad seleccionada"
             )
 
         return data
+    
+    def create(self, validated_data):
+        movimiento = super().create(validated_data)
+        actualizar_stock_item(movimiento.item)
+        return movimiento
 
 class ActividadTrabajoSerializer(serializers.ModelSerializer):
     repuestos = MovimientoRepuestoSerializer(many=True, read_only=True)
@@ -947,6 +1110,7 @@ class HistorialUbicacionItemSerializer(serializers.ModelSerializer):
 
 class ItemDetalleSerializer(serializers.ModelSerializer):
     unidades = serializers.SerializerMethodField()
+    stock = serializers.SerializerMethodField()
 
     class Meta:
         model = Item
@@ -977,6 +1141,9 @@ class ItemDetalleSerializer(serializers.ModelSerializer):
             })
 
         return data
+    
+    def get_stock(self, obj):
+        return actualizar_stock_item(obj)
 
 class KardexUnidadSerializer(serializers.ModelSerializer):
     item = serializers.CharField(source="item_unidad.item.nombre")

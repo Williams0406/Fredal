@@ -905,7 +905,7 @@ function ActividadCard({
                         {mov.item_codigo} - {mov.item_nombre}
                       </span>
                       <span className="text-gray-500">
-                        Cantidad: {mov.cantidad} {mov.unidad_medida || ""}
+                        Cantidad: {Number(mov.cantidad || 0).toFixed(2)} {mov.unidad_medida || ""}
                       </span>
                     </span>
                     <span className="text-gray-500 italic bg-white px-2 py-0.5 rounded border border-gray-100">

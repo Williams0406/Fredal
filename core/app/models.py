@@ -203,6 +203,11 @@ class Item(TimeStampedModel):
         blank=True,
         related_name="items",
     )
+    stock = models.DecimalField(
+        max_digits=16,
+        decimal_places=6,
+        default=0,
+    )
     volvo = models.BooleanField(default=False)
     ultimo_correlativo = models.PositiveIntegerField(default=0)
 
@@ -497,7 +502,13 @@ class MovimientoConsumible(models.Model):
     )
 
     item = models.ForeignKey(Item, on_delete=models.PROTECT)
-    cantidad = models.PositiveIntegerField()
+    cantidad = models.DecimalField(max_digits=16, decimal_places=6)
+    unidad_medida = models.ForeignKey(
+        UnidadMedida,
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+    )
     fecha = models.DateTimeField(auto_now_add=True)
 
     def clean(self):
@@ -545,6 +556,12 @@ class CompraDetalle(models.Model):
 
     item = models.ForeignKey(Item, on_delete=models.PROTECT)
     cantidad = models.PositiveIntegerField()
+    unidad_medida = models.ForeignKey(
+        UnidadMedida,
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+    )
 
     moneda = models.CharField(
         max_length=3,

@@ -161,6 +161,9 @@ export default function CompraTable({ compras = [] }) {
                   <th className="px-4 py-3 text-center text-xs font-semibold text-gray-700 uppercase tracking-wider">
                     Cant.
                   </th>
+                  <th className="px-4 py-3 text-center text-xs font-semibold text-gray-700 uppercase tracking-wider">
+                    Unidad
+                  </th>
                   <th className="px-4 py-3 text-right text-xs font-semibold text-gray-700 uppercase tracking-wider">
                     V. Unit.
                   </th>
@@ -207,6 +210,9 @@ export default function CompraTable({ compras = [] }) {
                     </td>
                     <td className="px-4 py-3 text-sm text-gray-700 text-center whitespace-nowrap">
                       {c.cantidad}
+                    </td>
+                    <td className="px-4 py-3 text-sm text-gray-700 text-center whitespace-nowrap">
+                      {c.unidad_medida_simbolo || c.unidad_medida_nombre || "UNID"}
                     </td>
                     <td className="px-4 py-3 text-sm text-gray-700 text-right whitespace-nowrap">
                       {Number(c.valor_unitario).toFixed(2)}

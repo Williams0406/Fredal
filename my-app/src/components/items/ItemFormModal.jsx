@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { dimensionAPI, itemAPI, unidadMedidaAPI, unidadRelacionAPI } from "@/lib/api";
+import { dimensionAPI, itemAPI, unidadMedidaAPI } from "@/lib/api";
 
 export default function ItemFormModal({ open, onClose, onSaved, item }) {
   const [autoCode, setAutoCode] = useState(true);
@@ -18,7 +18,6 @@ export default function ItemFormModal({ open, onClose, onSaved, item }) {
   });
   const [dimensiones, setDimensiones] = useState([]);
   const [unidades, setUnidades] = useState([]);
-  const [relaciones, setRelaciones] = useState([]);
 
   const isEditing = Boolean(item?.id);
 
@@ -27,12 +26,10 @@ export default function ItemFormModal({ open, onClose, onSaved, item }) {
     Promise.all([
       dimensionAPI.list(),
       unidadMedidaAPI.list(),
-      unidadRelacionAPI.list(),
-    ]).then(([dimensionesRes, unidadesRes, relacionesRes]) => {
-        setDimensiones(dimensionesRes.data);
-        setUnidades(unidadesRes.data);
-        setRelaciones(relacionesRes.data);
-      });
+    ]).then(([dimensionesRes, unidadesRes]) => {
+      setDimensiones(dimensionesRes.data);
+      setUnidades(unidadesRes.data);
+    });
   }, [open]);
 
   const dimensionCantidad = useMemo(
@@ -134,34 +131,7 @@ export default function ItemFormModal({ open, onClose, onSaved, item }) {
     };
 
     try {
-      if (isEditing) {
-        if (form.tipo_insumo === "CONSUMIBLE" && form.unidad_medida) {
-          // 1. Identificar unidad previa (asegura que comparamos manzanas con manzanas)
-          const previousUnitId = item?.unidad_medida?.id || item?.unidad_medida;
-          const nextUnitId = Number(form.unidad_medida);
-
-          if (previousUnitId && String(previousUnitId) !== String(nextUnitId)) {
-            // 2. Buscar la relación exacta
-            const relacion = relaciones.find(
-              (rel) =>
-                String(rel.unidad_base) === String(previousUnitId) &&
-                String(rel.unidad_relacionada) === String(nextUnitId)
-            );
-
-            if (relacion) {
-              // 3. Recalcular stock multiplicando por el factor
-              const stockActual = Number(item.unidades_disponibles || 0);
-              const factor = Number(relacion.factor);
-              
-              // Agregamos el nuevo stock al payload que se enviará al servidor
-              payload.unidades_disponibles = stockActual * factor;
-            } else {
-              // Opcional: Si no hay relación, podrías alertar al usuario que el stock no se convertirá
-              console.warn("No se encontró relación de conversión. El stock nominal no cambiará.");
-            }
-          }
-        }
-        
+      if (isEditing) {        
         await itemAPI.update(item.id, payload);
       } else {
         await itemAPI.create(payload);

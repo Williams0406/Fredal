@@ -72,12 +72,34 @@ export default function ItemTable() {
         rel.unidad_base === baseUnitId &&
         rel.unidad_relacionada === relatedUnitId
     );
+  
+  const getBaseFactor = (baseUnitId, targetUnitId) => {
+    if (baseUnitId === targetUnitId) return 1;
+    const relacion = relationForUnits(baseUnitId, targetUnitId);
+    if (!relacion) return null;
+    return Number(relacion.factor);
+  };
+
+  const convertStockValue = (stockValue, fromUnit, toUnit, dimensionId) => {
+    if (!fromUnit || !toUnit || fromUnit.id === toUnit.id) return stockValue;
+    const baseUnit = baseUnitForDimension(dimensionId);
+    if (!baseUnit) return stockValue;
+
+    const factorFromBase = getBaseFactor(baseUnit.id, fromUnit.id);
+    const factorToBase = fromUnit.id === baseUnit.id ? 1 : factorFromBase ? 1 / factorFromBase : null;
+    const factorBaseToTarget = getBaseFactor(baseUnit.id, toUnit.id);
+
+    if (factorToBase === null || factorBaseToTarget === null) return stockValue;
+
+    return Number(stockValue) * factorToBase * factorBaseToTarget;
+  };
 
   const formatStock = (item) => {
+    const stockValue = item.stock ?? item.unidades_disponibles ?? 0;
     // REPUESTOS: unidades físicas
     if (item.tipo_insumo !== "CONSUMIBLE") {
       return {
-        valor: item.unidades_disponibles ?? 0,
+        valor: stockValue,
         unidad: "UNID",
       };
     }
@@ -88,7 +110,7 @@ export default function ItemTable() {
       item.unidad_base;
     if (!currentUnit) {
       return {
-        valor: item.unidades_disponibles ?? 0,
+        valor: stockValue,
         unidad: "",
       };
     }
@@ -99,24 +121,21 @@ export default function ItemTable() {
       displayUnit.dimension === item.dimension &&
       displayUnit.id !== currentUnit.id
     ) {
-      const relacion = relaciones.find(
-        (rel) =>
-          rel.unidad_base === currentUnit.id &&
-          rel.unidad_relacionada === displayUnit.id
+      const valor = convertStockValue(
+        stockValue,
+        currentUnit,
+        displayUnit,
+        item.dimension
       );
-
-      if (relacion) {
-        const valor = Number(item.unidades_disponibles) * Number(relacion.factor);
-        return {
-          valor: valor.toFixed(2),
-          unidad: displayUnit.simbolo || displayUnit.nombre,
-        };
-      }
+      return {
+        valor: valor.toFixed(2),
+        unidad: displayUnit.simbolo || displayUnit.nombre,
+      };
     }
 
     // Default: unidad actual del item
     return {
-      valor: item.unidades_disponibles,
+      valor: stockValue,
       unidad: currentUnit.simbolo || currentUnit.nombre,
     };
   };
@@ -127,7 +146,10 @@ export default function ItemTable() {
     repuestos: items.filter((i) => i.tipo_insumo === "REPUESTO").length,
     consumibles: items.filter((i) => i.tipo_insumo === "CONSUMIBLE").length,
     volvo: items.filter((i) => i.volvo).length,
-    totalUnidades: items.reduce((sum, i) => sum + (i.unidades_disponibles || 0), 0),
+    totalUnidades: items.reduce(
+      (sum, i) => sum + Number(i.stock ?? i.unidades_disponibles ?? 0),
+      0
+    ),
   };
 
   return (
