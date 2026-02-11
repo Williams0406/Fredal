@@ -169,4 +169,4 @@ CORS_ALLOWED_ORIGINS = os.environ.get(
 CORS_ALLOW_HEADERS = [
     "authorization",
     "content-type",
-]   
+]

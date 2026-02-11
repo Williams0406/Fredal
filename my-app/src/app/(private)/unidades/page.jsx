@@ -34,7 +34,6 @@ export default function UnidadesPage() {
     nombre: "",
     simbolo: "",
     dimension: "",
-    es_base: false,
   });
   const [formRelacion, setFormRelacion] = useState({
     dimension: "",
@@ -67,15 +66,6 @@ export default function UnidadesPage() {
     if (savedDimension) setDisplayDimensionId(savedDimension);
   }, []);
 
-  const basePorDimension = useMemo(() => {
-    return unidades.reduce((acc, unidad) => {
-      if (unidad.es_base) {
-        acc[unidad.dimension] = unidad;
-      }
-      return acc;
-    }, {});
-  }, [unidades]);
-
   const buildDimensionPayload = (dimension, overrides = {}) => ({
     codigo: dimension.codigo,
     nombre: dimension.nombre,
@@ -88,8 +78,6 @@ export default function UnidadesPage() {
     nombre: unidad.nombre,
     simbolo: unidad.simbolo,
     dimension: unidad.dimension,
-    es_base: unidad.es_base,
-    activo: unidad.activo,
     ...overrides,
   });
 
@@ -124,14 +112,6 @@ export default function UnidadesPage() {
     if (!formUnidad.nombre || !formUnidad.dimension) return;
     const nombre = formUnidad.nombre.toUpperCase();
 
-    const baseActual = basePorDimension[formUnidad.dimension];
-    if (formUnidad.es_base && baseActual && baseActual.id !== editingUnidad?.id) {
-      await unidadMedidaAPI.update(
-        baseActual.id,
-        buildUnidadPayload(baseActual, { es_base: false })
-      );
-    }
-
     if (editingUnidad) {
       await unidadMedidaAPI.update(
         editingUnidad.id,
@@ -139,7 +119,6 @@ export default function UnidadesPage() {
           nombre,
           simbolo: formUnidad.simbolo,
           dimension: Number(formUnidad.dimension),
-          es_base: formUnidad.es_base,
         })
       );
     } else {
@@ -147,12 +126,10 @@ export default function UnidadesPage() {
         nombre,
         simbolo: formUnidad.simbolo,
         dimension: Number(formUnidad.dimension),
-        es_base: formUnidad.es_base,
-        activo: true,
       });
     }
 
-    setFormUnidad({ nombre: "", simbolo: "", dimension: "", es_base: false });
+    setFormUnidad({ nombre: "", simbolo: "", dimension: "" });
     setEditingUnidad(null);
     setOpenUnidadModal(false);
     loadData();
@@ -224,7 +201,7 @@ export default function UnidadesPage() {
   const handleCloseUnidadModal = () => {
     setOpenUnidadModal(false);
     setEditingUnidad(null);
-    setFormUnidad({ nombre: "", simbolo: "", dimension: "", es_base: false });
+    setFormUnidad({ nombre: "", simbolo: "", dimension: "" });
   };
 
   const handleCloseRelacionModal = () => {
@@ -254,7 +231,6 @@ export default function UnidadesPage() {
       nombre: unidad.nombre,
       simbolo: unidad.simbolo ?? "",
       dimension: String(unidad.dimension),
-      es_base: unidad.es_base,
     });
     setOpenUnidadModal(true);
   };
@@ -296,7 +272,7 @@ export default function UnidadesPage() {
   const unidadesPorDimension = useMemo(() => {
     return unidades.filter(
       (unidad) =>
-        String(unidad.dimension) === String(displayDimensionId) && unidad.activo
+        String(unidad.dimension) === String(displayDimensionId)
     );
   }, [unidades, displayDimensionId]);
 
@@ -331,48 +307,6 @@ export default function UnidadesPage() {
           >
             Crear relación
           </button>
-        </div>
-      </div>
-
-      <div className="rounded-xl border border-gray-200 bg-white p-4">
-        <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
-          <div>
-            <h2 className="text-sm font-semibold text-[#1e3a8a]">
-              Visualización de stock
-            </h2>
-            <p className="text-xs text-gray-500">
-              Selecciona la dimensión y unidad para visualizar el stock de
-              consumibles en el catálogo de items.
-            </p>
-          </div>
-          <div className="grid w-full gap-3 md:max-w-xl md:grid-cols-2">
-            <select
-              className="w-full rounded-lg border px-3 py-2 text-sm"
-              value={displayDimensionId}
-              onChange={(e) => handleDisplayDimensionChange(e.target.value)}
-            >
-              <option value="">Selecciona dimensión</option>
-              {dimensiones.map((dimension) => (
-                <option key={dimension.id} value={dimension.id}>
-                  {dimension.nombre} ({dimension.codigo})
-                </option>
-              ))}
-            </select>
-            <select
-              className="w-full rounded-lg border px-3 py-2 text-sm"
-              value={displayUnitId}
-              onChange={(e) => handleDisplayUnitChange(e.target.value)}
-              disabled={!displayDimensionId}
-            >
-              <option value="">Unidad de visualización</option>
-              {unidadesPorDimension.map((unidad) => (
-                <option key={unidad.id} value={unidad.id}>
-                  {unidad.nombre}
-                  {unidad.simbolo ? ` (${unidad.simbolo})` : ""}
-                </option>
-              ))}
-            </select>
-          </div>
         </div>
       </div>
 
@@ -428,7 +362,6 @@ export default function UnidadesPage() {
         form={formRelacion}
         dimensiones={dimensiones}
         unidades={unidades}
-        baseActual={basePorDimension[formRelacion.dimension]}
         onClose={handleCloseRelacionModal}
         onChange={setFormRelacion}
         onSave={handleCreateRelacion}

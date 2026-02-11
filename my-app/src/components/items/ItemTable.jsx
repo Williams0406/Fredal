@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { itemAPI, unidadMedidaAPI, unidadRelacionAPI } from "@/lib/api";
+import { itemAPI } from "@/lib/api";
 import ItemFormModal from "./ItemFormModal";
 import ItemHistorialModal from "./ItemHistorialModal";
 import ItemUbicacionModal from "./ItemUbicacionModal";
@@ -21,9 +21,6 @@ export default function ItemTable() {
   const [items, setItems] = useState([]);
   const [loading, setLoading] = useState(true);
   const [open, setOpen] = useState(false);
-  const [unidades, setUnidades] = useState([]);
-  const [relaciones, setRelaciones] = useState([]);
-  const [displayUnitId, setDisplayUnitId] = useState("");
 
   const [selectedItem, setSelectedItem] = useState(null);
   const [editingItem, setEditingItem] = useState(null);
@@ -55,81 +52,24 @@ export default function ItemTable() {
 
   useEffect(() => {
     loadItems();
-    unidadMedidaAPI.list().then((res) => setUnidades(res.data));
-    unidadRelacionAPI.list().then((res) => setRelaciones(res.data));
-    const savedUnitId = window.localStorage.getItem("stock_display_unit_id");
-    if (savedUnitId) setDisplayUnitId(savedUnitId);
-  }, []);
-
-  useEffect(() => {
-    const handleStorage = (event) => {
-      if (event.key === "stock_display_unit_id") {
-        setDisplayUnitId(event.newValue || "");
-      }
-    };
-    window.addEventListener("storage", handleStorage);
-    return () => window.removeEventListener("storage", handleStorage);
-  }, []);
-
-  useEffect(() => {
-    const handleDisplayChange = () => {
-      const savedUnitId = window.localStorage.getItem("stock_display_unit_id");
-      setDisplayUnitId(savedUnitId || "");
-    };
-    window.addEventListener("stockDisplayChange", handleDisplayChange);
-    return () => window.removeEventListener("stockDisplayChange", handleDisplayChange);
   }, []);
 
   useEffect(() => {
     setPage(1);
   }, [search, tipoFilter, volvoFilter, stockFilter, pageSize]);
 
-  const displayUnit = unidades.find((u) => String(u.id) === String(displayUnitId));
-  const baseUnitForDimension = (dimensionId) =>
-    unidades.find((u) => u.dimension === dimensionId && u.es_base);
-  const relationForUnits = (baseUnitId, relatedUnitId) =>
-    relaciones.find((rel) => rel.unidad_base === baseUnitId && rel.unidad_relacionada === relatedUnitId);
-  
-  const getBaseFactor = (baseUnitId, targetUnitId) => {
-    if (baseUnitId === targetUnitId) return 1;
-    const relacion = relationForUnits(baseUnitId, targetUnitId);
-    if (!relacion) return null;
-    return Number(relacion.factor);
-  };
-
-  const convertStockValue = (stockValue, fromUnit, toUnit, dimensionId) => {
-    if (!fromUnit || !toUnit || fromUnit.id === toUnit.id) return Number(stockValue);
-    const baseUnit = baseUnitForDimension(dimensionId);
-    if (!baseUnit) return Number(stockValue);
-
-    const factorFromBase = getBaseFactor(baseUnit.id, fromUnit.id);
-    const factorToBase = fromUnit.id === baseUnit.id ? 1 : factorFromBase ? 1 / factorFromBase : null;
-    const factorBaseToTarget = getBaseFactor(baseUnit.id, toUnit.id);
-
-    if (factorToBase === null || factorBaseToTarget === null) return Number(stockValue);
-
-    return Number(stockValue) * factorToBase * factorBaseToTarget;
-  };
-
   const formatStock = (item) => {
-    const stockValue = Number(item.stock ?? item.unidades_disponibles ?? 0);
-    if (item.tipo_insumo !== "CONSUMIBLE") {
-      return { valor: stockValue, unidad: "UNID" };
+    const stockValue = Number(item.stock ?? 0);
+    const currentUnit = item.unidad_medida_detalle;
+
+    if (!currentUnit) {
+      return { valor: stockValue, unidad: item.tipo_insumo === "CONSUMIBLE" ? "" : "UNID" };
     }
 
-    const currentUnit =
-      item.unidad_medida_detalle ||
-      unidades.find((unidad) => String(unidad.id) === String(item.unidad_medida)) ||
-      item.unidad_base;
-
-    if (!currentUnit) return { valor: stockValue, unidad: "" };
-
-    if (displayUnit && displayUnit.dimension === item.dimension && displayUnit.id !== currentUnit.id) {
-      const valor = convertStockValue(stockValue, currentUnit, displayUnit, item.dimension);
-      return { valor: Number(valor.toFixed(2)), unidad: displayUnit.simbolo || displayUnit.nombre };
-    }
-
-    return { valor: stockValue, unidad: currentUnit.simbolo || currentUnit.nombre };
+    return {
+      valor: stockValue,
+      unidad: currentUnit.simbolo || currentUnit.nombre || "",
+    };
   };
 
   const stats = {
@@ -137,7 +77,7 @@ export default function ItemTable() {
     repuestos: items.filter((i) => i.tipo_insumo === "REPUESTO").length,
     consumibles: items.filter((i) => i.tipo_insumo === "CONSUMIBLE").length,
     volvo: items.filter((i) => i.volvo).length,
-    totalUnidades: items.reduce((sum, i) => sum + Number(i.stock ?? i.unidades_disponibles ?? 0), 0),
+    totalUnidades: items.reduce((sum, i) => sum + Number(i.stock ?? 0), 0),
   };
 
   const filteredItems = useMemo(() => {
@@ -151,7 +91,7 @@ export default function ItemTable() {
       const matchesVolvo =
         volvoFilter === "TODOS" ? true : volvoFilter === "SI" ? Boolean(item.volvo) : !item.volvo;
 
-      const rawStock = Number(item.stock ?? item.unidades_disponibles ?? 0);
+      const rawStock = Number(item.stock ?? 0);
       const matchesStock =
         stockFilter === "TODOS"
           ? true
@@ -170,8 +110,8 @@ export default function ItemTable() {
       let right;
 
       if (sortKey === "stock") {
-        left = Number(a.stock ?? a.unidades_disponibles ?? 0);
-        right = Number(b.stock ?? b.unidades_disponibles ?? 0);
+        left = Number(a.stock ?? 0);
+        right = Number(b.stock ?? 0);
       } else if (sortKey === "tipo_insumo") {
         left = a.tipo_insumo || "";
         right = b.tipo_insumo || "";

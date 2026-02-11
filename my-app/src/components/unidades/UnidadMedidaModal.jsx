@@ -57,16 +57,6 @@ export default function UnidadMedidaModal({
               </option>
             ))}
           </select>
-          <label className="flex items-center gap-2 text-sm text-gray-600">
-            <input
-              type="checkbox"
-              checked={form.es_base}
-              onChange={(e) =>
-                onChange({ ...form, es_base: e.target.checked })
-              }
-            />
-            Marcar como unidad base de la dimensión
-          </label>
         </div>
 
         <div className="mt-6 flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
