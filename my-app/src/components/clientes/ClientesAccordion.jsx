@@ -6,7 +6,14 @@ const getClienteKey = (cliente) => cliente?.id ?? cliente?.nombre;
 const getUbicacionKey = (ubicacion) =>
   ubicacion?.cliente ?? ubicacion?.cliente_id ?? ubicacion?.clienteId ?? ubicacion?.cliente_nombre;
 
-export default function ClientesAccordion({ clientes, ubicaciones }) {
+export default function ClientesAccordion({
+  clientes,
+  ubicaciones,
+  onEditCliente,
+  onDeleteCliente,
+  onEditUbicacion,
+  onDeleteUbicacion,
+}) {
   const [openCliente, setOpenCliente] = useState(null);
 
   const ubicacionesByCliente = useMemo(() => {
@@ -54,7 +61,24 @@ export default function ClientesAccordion({ clientes, ubicaciones }) {
             </button>
 
             {isOpen && (
-              <div className="border-t border-gray-200 px-4 py-3">
+              <div className="border-t border-gray-200 px-4 py-3 space-y-3">
+                <div className="flex justify-end gap-2">
+                  <button
+                    type="button"
+                    className="rounded border border-gray-300 px-3 py-1 text-xs text-gray-700"
+                    onClick={() => onEditCliente?.(cliente)}
+                  >
+                    Editar cliente
+                  </button>
+                  <button
+                    type="button"
+                    className="rounded border border-red-300 px-3 py-1 text-xs text-red-600"
+                    onClick={() => onDeleteCliente?.(cliente)}
+                  >
+                    Eliminar cliente
+                  </button>
+                </div>
+
                 {ubicacionesCliente.length ? (
                   <ul className="space-y-2">
                     {ubicacionesCliente.map((ubicacion) => (
@@ -62,8 +86,28 @@ export default function ClientesAccordion({ clientes, ubicaciones }) {
                         key={ubicacion.id ?? `${ubicacion.nombre}-${ubicacion.direccion}`}
                         className="rounded-md border border-gray-100 bg-gray-50 p-3"
                       >
-                        <p className="text-sm font-medium text-gray-700">{ubicacion.nombre}</p>
-                        <p className="text-xs text-gray-500">{ubicacion.direccion || "Sin dirección"}</p>
+                        <div className="flex items-start justify-between gap-2">
+                          <div>
+                            <p className="text-sm font-medium text-gray-700">{ubicacion.nombre}</p>
+                            <p className="text-xs text-gray-500">{ubicacion.direccion || "Sin dirección"}</p>
+                          </div>
+                          <div className="flex gap-2">
+                            <button
+                              type="button"
+                              className="rounded border border-gray-300 px-2 py-1 text-xs text-gray-700"
+                              onClick={() => onEditUbicacion?.(ubicacion)}
+                            >
+                              Editar
+                            </button>
+                            <button
+                              type="button"
+                              className="rounded border border-red-300 px-2 py-1 text-xs text-red-600"
+                              onClick={() => onDeleteUbicacion?.(ubicacion)}
+                            >
+                              Eliminar
+                            </button>
+                          </div>
+                        </div>
                       </li>
                     ))}
                   </ul>

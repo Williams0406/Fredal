@@ -207,6 +207,55 @@ class UnidadRelacion(models.Model):
             activo=self.activo,
         ).save(crear_inversa=False)
 
+    def save(self, *args, **kwargs):
+        crear_inversa = kwargs.pop("crear_inversa", True)
+        self.full_clean()
+        super().save(*args, **kwargs)
+
+        if not crear_inversa:
+            return
+
+        if self.factor == 0:
+            raise ValidationError("El factor de equivalencia no puede ser cero")
+
+        factor_inverso = (Decimal("1") / Decimal(self.factor)).quantize(
+            Decimal("0.000001"),
+            rounding=ROUND_HALF_UP,
+        )
+        factor_field = self._meta.get_field("factor")
+        try:
+            factor_inverso = factor_field.clean(factor_inverso, self)
+        except ValidationError:
+            raise ValidationError(
+                {
+                    "factor": (
+                        "No se puede crear la relación inversa porque 1/factor "
+                        f"excede el límite permitido ({factor_field.max_digits} dígitos, "
+                        f"{factor_field.decimal_places} decimales)."
+                    )
+                }
+            )
+
+        inversa = UnidadRelacion.objects.filter(
+            unidad_base=self.unidad_relacionada,
+            unidad_relacionada=self.unidad_base,
+        )
+        if inversa.exists():
+            inversa.update(
+                dimension=self.dimension,
+                factor=factor_inverso,
+                activo=self.activo,
+            )
+            return
+
+        UnidadRelacion(
+            dimension=self.dimension,
+            unidad_base=self.unidad_relacionada,
+            unidad_relacionada=self.unidad_base,
+            factor=factor_inverso,
+            activo=self.activo,
+        ).save(crear_inversa=False)
+
     def __str__(self):
         return f"1 {self.unidad_base.nombre} = {self.factor} {self.unidad_relacionada.nombre}"
     

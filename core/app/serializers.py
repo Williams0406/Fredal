@@ -1222,6 +1222,32 @@ class UnidadRelacionSerializer(serializers.ModelSerializer):
                 }
             )
 
+        factor = data.get("factor", getattr(self.instance, "factor", None))
+        if factor in (None, 0):
+            return data
+
+        factor_inverso = (Decimal("1") / Decimal(factor)).quantize(
+            Decimal("0.000001"),
+            rounding=ROUND_HALF_UP,
+        )
+        factor_field = UnidadRelacion._meta.get_field("factor")
+        factor_validator = serializers.DecimalField(
+            max_digits=factor_field.max_digits,
+            decimal_places=factor_field.decimal_places,
+        )
+        try:
+            factor_validator.run_validation(str(factor_inverso))
+        except serializers.ValidationError:
+            raise serializers.ValidationError(
+                {
+                    "factor": (
+                        "No se puede guardar esta relación porque su inversa (1/factor) "
+                        f"excede el límite permitido ({factor_field.max_digits} dígitos y "
+                        f"{factor_field.decimal_places} decimales)."
+                    )
+                }
+            )
+
         return data
         
 class KardexContableSerializer(serializers.Serializer):
