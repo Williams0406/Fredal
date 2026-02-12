@@ -726,11 +726,11 @@ class CatalogosView(APIView):
                 many=True
             ).data,
             "unidades_medida": UnidadMedidaSerializer(
-                UnidadMedida.objects.filter(activo=True),
+                UnidadMedida.objects.all(),
                 many=True
             ).data,
             "relaciones_unidad": UnidadRelacionSerializer(
-                UnidadRelacion.objects.filter(activo=True),
+                UnidadRelacion.objects.all(),
                 many=True
             ).data,
         })

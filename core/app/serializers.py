@@ -2,7 +2,7 @@ from django.contrib.auth.models import User
 from django.contrib.auth.models import Group
 from rest_framework import serializers
 from django.contrib.contenttypes.models import ContentType
-from decimal import Decimal
+from decimal import Decimal, ROUND_HALF_UP
 from django.db import transaction
 from django.db.models import Sum
 from django.utils import timezone
@@ -35,59 +35,30 @@ from .models import (
 )
 
 def obtener_unidad_base(dimension):
-    return UnidadMedida.objects.filter(
-        dimension=dimension,
-        es_base=True,
-        activo=True
-    ).first()
+    return UnidadMedida.objects.filter(dimension=dimension).order_by("id").first()
 
-
-def obtener_factor_a_base(unidad, unidad_base):
-    if unidad.id == unidad_base.id:
-        return Decimal("1")
-
-    relacion = UnidadRelacion.objects.filter(
-        unidad_base=unidad_base,
-        unidad_relacionada=unidad,
-        activo=True,
-    ).first()
-    if not relacion:
-        raise ValidationError(
-            "No existe relación entre la unidad seleccionada y la unidad base"
-        )
-    if relacion.factor == 0:
-        raise ValidationError("El factor de equivalencia no puede ser cero")
-    return Decimal("1") / Decimal(relacion.factor)
 
 def obtener_factor_entre_unidades(unidad_origen, unidad_destino, unidad_base=None):
+    del unidad_base  # Compatibilidad con llamadas antiguas.
+
     if unidad_origen.id == unidad_destino.id:
         return Decimal("1")
 
     if unidad_origen.dimension_id != unidad_destino.dimension_id:
         raise ValidationError("Las unidades no pertenecen a la misma dimensión")
 
-    unidad_base = unidad_base or obtener_unidad_base(unidad_destino.dimension)
-    if not unidad_base:
-        raise ValidationError("No hay unidad base definida para la dimensión")
-
-    factor_origen_a_base = obtener_factor_a_base(unidad_origen, unidad_base)
-
-    if unidad_destino.id == unidad_base.id:
-        return factor_origen_a_base
-
-    relacion_destino = UnidadRelacion.objects.filter(
-        unidad_base=unidad_base,
+    relacion = UnidadRelacion.objects.filter(
+        unidad_base=unidad_origen,
         unidad_relacionada=unidad_destino,
-        activo=True,
     ).first()
-    if not relacion_destino:
+    if not relacion:
         raise ValidationError(
-            "No existe relación entre la unidad base y la unidad destino"
+            "No existe relación de unidad entre la unidad origen y destino"
         )
-    if relacion_destino.factor == 0:
+    if relacion.factor == 0:
         raise ValidationError("El factor de equivalencia no puede ser cero")
 
-    return factor_origen_a_base * Decimal(relacion_destino.factor)
+    return Decimal(relacion.factor)
 
 def calcular_stock_item(item):
     if item.tipo_insumo == Item.TipoInsumo.REPUESTO:
@@ -127,10 +98,6 @@ def calcular_stock_item(item):
     if not item.unidad_medida or not item.dimension:
         return Decimal("0")
 
-    unidad_base = obtener_unidad_base(item.dimension)
-    if not unidad_base:
-        return Decimal("0")
-
     total_compras = Decimal("0")
     detalles = (
         CompraDetalle.objects
@@ -142,7 +109,6 @@ def calcular_stock_item(item):
         factor = obtener_factor_entre_unidades(
             unidad_compra,
             item.unidad_medida,
-            unidad_base,
         )
         total_compras += Decimal(detalle.cantidad) * factor
 
@@ -157,18 +123,8 @@ def calcular_stock_item(item):
         if unidad_mov.id == item.unidad_medida.id:
             total_salidas += Decimal(movimiento.cantidad)
             continue
-        relacion = UnidadRelacion.objects.filter(
-            unidad_base=unidad_mov,
-            unidad_relacionada=item.unidad_medida,
-            activo=True,
-        ).first()
-        if not relacion:
-            raise ValidationError(
-                "No existe relación entre la unidad registrada y la unidad del item"
-            )
-        if relacion.factor == 0:
-            raise ValidationError("El factor de equivalencia no puede ser cero")
-        total_salidas += Decimal(movimiento.cantidad) * Decimal(relacion.factor)
+        factor = obtener_factor_entre_unidades(unidad_mov, item.unidad_medida)
+        total_salidas += Decimal(movimiento.cantidad) * factor
 
     return max(total_compras - total_salidas, Decimal("0"))
 
@@ -275,10 +231,13 @@ class ItemSerializer(serializers.ModelSerializer):
                 raise serializers.ValidationError(
                     "Debe existir la dimensión CANTIDAD para registrar repuestos"
                 )
-            unidad_base = obtener_unidad_base(dimension_cantidad)
+            unidad_base = UnidadMedida.objects.filter(
+                dimension=dimension_cantidad,
+                nombre__iexact="CANTIDAD",
+            ).first() or obtener_unidad_base(dimension_cantidad)
             if not unidad_base:
                 raise serializers.ValidationError(
-                    "Debe existir una unidad base para la dimensión CANTIDAD"
+                    "Debe existir al menos una unidad en la dimensión CANTIDAD"
                 )
             if dimension and dimension.id != dimension_cantidad.id:
                 raise serializers.ValidationError(
@@ -286,7 +245,7 @@ class ItemSerializer(serializers.ModelSerializer):
                 )
             if unidad_medida and unidad_medida.id != unidad_base.id:
                 raise serializers.ValidationError(
-                    "La unidad de un REPUESTO debe ser la unidad base de CANTIDAD"
+                    "La unidad de un REPUESTO debe ser CANTIDAD"
                 )
             data["dimension"] = dimension_cantidad
             data["unidad_medida"] = unidad_base
@@ -305,21 +264,9 @@ class ItemSerializer(serializers.ModelSerializer):
                 raise serializers.ValidationError(
                     "La unidad seleccionada no pertenece a la dimensión del item"
                 )
-            unidad_base = obtener_unidad_base(dimension)
-            if not unidad_base:
-                raise serializers.ValidationError(
-                    "Debe existir una unidad base para la dimensión del item"
-                )
-            if unidad_medida.id != unidad_base.id:
-                relacion = UnidadRelacion.objects.filter(
-                    unidad_base=unidad_base,
-                    unidad_relacionada=unidad_medida,
-                    activo=True,
-                ).first()
-                if not relacion:
-                    raise serializers.ValidationError(
-                        "No existe relación de unidad para la unidad seleccionada"
-                    )
+            unidad_item_actual = getattr(self.instance, "unidad_medida", None)
+            if unidad_item_actual and unidad_medida.id != unidad_item_actual.id:
+                obtener_factor_entre_unidades(unidad_medida, unidad_item_actual)
 
         return data
     
@@ -340,7 +287,6 @@ class ItemSerializer(serializers.ModelSerializer):
             relacion = UnidadRelacion.objects.filter(
                 unidad_base=unidad_anterior,
                 unidad_relacionada=nueva_unidad,
-                activo=True
             ).first()
 
             if relacion:
@@ -380,7 +326,7 @@ class CompraCreateItemSerializer(serializers.Serializer):
     item = serializers.PrimaryKeyRelatedField(queryset=Item.objects.all())
     cantidad = serializers.IntegerField(min_value=1)
     unidad_medida = serializers.PrimaryKeyRelatedField(
-        queryset=UnidadMedida.objects.filter(activo=True),
+        queryset=UnidadMedida.objects.all(),
         required=False,
         allow_null=True,
     )
@@ -415,7 +361,7 @@ class CompraCreateSerializer(serializers.ModelSerializer):
                 if unidad_medida and data["item"].tipo_insumo != Item.TipoInsumo.CONSUMIBLE:
                     if data["item"].unidad_medida_id != unidad_medida.id:
                         raise serializers.ValidationError(
-                            f"El item {data['item'].codigo} solo permite su unidad base"
+                            f"El item {data['item'].codigo} solo permite su unidad configurada"
                         )
                 
                 if data["item"].tipo_insumo == Item.TipoInsumo.CONSUMIBLE and unidad_medida:
@@ -427,25 +373,8 @@ class CompraCreateSerializer(serializers.ModelSerializer):
                         raise serializers.ValidationError(
                             "La unidad de medida no coincide con la dimensión del item"
                         )
-                    unidad_base = obtener_unidad_base(data["item"].dimension)
-                    if not unidad_base:
-                        raise serializers.ValidationError(
-                            "No hay unidad base definida para la dimensión del item"
-                        )
-                    if unidad_medida.id != unidad_base.id:
-                        relacion = UnidadRelacion.objects.filter(
-                            unidad_base=unidad_base,
-                            unidad_relacionada=unidad_medida,
-                            activo=True,
-                        ).first()
-                        if not relacion:
-                            raise serializers.ValidationError(
-                                f"No existe relación de unidad para {data['item'].codigo}"
-                            )
-                        if relacion.factor == 0:
-                            raise serializers.ValidationError(
-                                "El factor de equivalencia no puede ser cero"
-                            )
+                    if unidad_medida.id != data["item"].unidad_medida_id:
+                        obtener_factor_entre_unidades(unidad_medida, data["item"].unidad_medida)
                 elif data["item"].tipo_insumo == Item.TipoInsumo.CONSUMIBLE:
                     unidad_medida = data["item"].unidad_medida
                     if not unidad_medida:
@@ -759,7 +688,7 @@ class MovimientoConsumibleSerializer(serializers.ModelSerializer):
     item_codigo = serializers.CharField(source="item.codigo", read_only=True)
     item_nombre = serializers.CharField(source="item.nombre", read_only=True)
     unidad_medida = serializers.PrimaryKeyRelatedField(
-        queryset=UnidadMedida.objects.filter(activo=True),
+        queryset=UnidadMedida.objects.all(),
         required=False,
         allow_null=True,
     )
@@ -821,20 +750,8 @@ class MovimientoConsumibleSerializer(serializers.ModelSerializer):
 
         stock_actual = item.stock
         if unidad_medida.id != item.unidad_medida_id:
-            relacion = UnidadRelacion.objects.filter(
-                unidad_base=item.unidad_medida,
-                unidad_relacionada=unidad_medida,
-                activo=True,
-            ).first()
-            if not relacion:
-                raise serializers.ValidationError(
-                    "No existe relación entre la unidad del item y la unidad registrada"
-                )
-            if relacion.factor == 0:
-                raise serializers.ValidationError(
-                    "El factor de equivalencia no puede ser cero"
-                )
-            stock_actual = Decimal(item.stock) * Decimal(relacion.factor)
+            factor = obtener_factor_entre_unidades(item.unidad_medida, unidad_medida)
+            stock_actual = Decimal(item.stock) * factor
 
         if Decimal(cantidad) > Decimal(stock_actual):
             raise serializers.ValidationError(
@@ -1270,10 +1187,6 @@ class UnidadRelacionSerializer(serializers.ModelSerializer):
             raise serializers.ValidationError(
                 "Las unidades deben pertenecer a la misma dimensión"
             )
-        if unidad_base and not unidad_base.es_base:
-            raise serializers.ValidationError(
-                "La unidad base debe estar marcada como base"
-            )
         if dimension and unidad_base and dimension.id != unidad_base.dimension_id:
             raise serializers.ValidationError(
                 "La dimensión debe coincidir con la unidad base"
@@ -1281,6 +1194,32 @@ class UnidadRelacionSerializer(serializers.ModelSerializer):
         if dimension and unidad_relacionada and dimension.id != unidad_relacionada.dimension_id:
             raise serializers.ValidationError(
                 "La dimensión debe coincidir con la unidad relacionada"
+            )
+
+        factor = data.get("factor", getattr(self.instance, "factor", None))
+        if factor in (None, 0):
+            return data
+
+        factor_inverso = (Decimal("1") / Decimal(factor)).quantize(
+            Decimal("0.000001"),
+            rounding=ROUND_HALF_UP,
+        )
+        factor_field = UnidadRelacion._meta.get_field("factor")
+        factor_validator = serializers.DecimalField(
+            max_digits=factor_field.max_digits,
+            decimal_places=factor_field.decimal_places,
+        )
+        try:
+            factor_validator.run_validation(str(factor_inverso))
+        except serializers.ValidationError:
+            raise serializers.ValidationError(
+                {
+                    "factor": (
+                        "No se puede guardar esta relación porque su inversa (1/factor) "
+                        f"excede el límite permitido ({factor_field.max_digits} dígitos y "
+                        f"{factor_field.decimal_places} decimales)."
+                    )
+                }
             )
 
         return data

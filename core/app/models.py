@@ -7,7 +7,7 @@ from django.core.exceptions import ValidationError
 from django.db.models import Max
 import uuid
 from datetime import timedelta
-from decimal import Decimal
+from decimal import Decimal, ROUND_HALF_UP
 from django.db import transaction
 from django.db.models import Avg
 
@@ -104,15 +104,7 @@ class Dimension(models.Model):
     def cambiar_unidad_base(self, nueva_unidad_base):
         if nueva_unidad_base.dimension_id != self.id:
             raise ValidationError("La unidad no pertenece a esta dimensión")
-
-        with transaction.atomic():
-            UnidadMedida.objects.filter(
-                dimension=self,
-                es_base=True
-            ).update(es_base=False)
-
-            nueva_unidad_base.es_base = True
-            nueva_unidad_base.save(update_fields=["es_base"])
+        return nueva_unidad_base
 
     def __str__(self):
         return self.nombre
@@ -130,13 +122,6 @@ class UnidadMedida(models.Model):
     activo = models.BooleanField(default=True)
 
     class Meta:
-        constraints = [
-            models.UniqueConstraint(
-                fields=["dimension"],
-                condition=models.Q(es_base=True),
-                name="unique_unidad_base_por_dimension",
-            )
-        ]
         unique_together = ("dimension", "nombre")
 
     def __str__(self):
@@ -159,7 +144,7 @@ class UnidadRelacion(models.Model):
         on_delete=models.PROTECT,
         related_name="relaciones_relacionadas",
     )
-    factor = models.DecimalField(max_digits=16, decimal_places=6)
+    factor = models.DecimalField(max_digits=30, decimal_places=12)
     activo = models.BooleanField(default=True)
 
     class Meta:
@@ -170,10 +155,57 @@ class UnidadRelacion(models.Model):
             raise ValidationError("La unidad base y la unidad relacionada deben ser distintas")
         if self.unidad_base.dimension_id != self.unidad_relacionada.dimension_id:
             raise ValidationError("Las unidades deben pertenecer a la misma dimensión")
-        if not self.unidad_base.es_base:
-            raise ValidationError("La unidad base debe estar marcada como base")
         if self.dimension_id != self.unidad_base.dimension_id:
             raise ValidationError("La dimensión debe coincidir con la unidad base")
+
+    def save(self, *args, **kwargs):
+        crear_inversa = kwargs.pop("crear_inversa", True)
+        self.full_clean()
+        super().save(*args, **kwargs)
+
+        if not crear_inversa:
+            return
+
+        if self.factor == 0:
+            raise ValidationError("El factor de equivalencia no puede ser cero")
+
+        factor_inverso = (Decimal("1") / Decimal(self.factor)).quantize(
+            Decimal("0.000001"),
+            rounding=ROUND_HALF_UP,
+        )
+        factor_field = self._meta.get_field("factor")
+        try:
+            factor_inverso = factor_field.clean(factor_inverso, self)
+        except ValidationError:
+            raise ValidationError(
+                {
+                    "factor": (
+                        "No se puede crear la relación inversa porque 1/factor "
+                        f"excede el límite permitido ({factor_field.max_digits} dígitos, "
+                        f"{factor_field.decimal_places} decimales)."
+                    )
+                }
+            )
+
+        inversa = UnidadRelacion.objects.filter(
+            unidad_base=self.unidad_relacionada,
+            unidad_relacionada=self.unidad_base,
+        )
+        if inversa.exists():
+            inversa.update(
+                dimension=self.dimension,
+                factor=factor_inverso,
+                activo=self.activo,
+            )
+            return
+
+        UnidadRelacion(
+            dimension=self.dimension,
+            unidad_base=self.unidad_relacionada,
+            unidad_relacionada=self.unidad_base,
+            factor=factor_inverso,
+            activo=self.activo,
+        ).save(crear_inversa=False)
 
     def __str__(self):
         return f"1 {self.unidad_base.nombre} = {self.factor} {self.unidad_relacionada.nombre}"

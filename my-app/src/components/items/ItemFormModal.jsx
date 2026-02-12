@@ -39,15 +39,19 @@ export default function ItemFormModal({ open, onClose, onSaved, item }) {
 
   const unidadBaseCantidad = useMemo(() => {
     if (!dimensionCantidad) return null;
-    return unidades.find(
-      (unidad) => unidad.dimension === dimensionCantidad.id && unidad.es_base
+    return (
+      unidades.find(
+        (unidad) =>
+          unidad.dimension === dimensionCantidad.id &&
+          String(unidad.nombre || "").toUpperCase() === "CANTIDAD"
+      ) || unidades.find((unidad) => unidad.dimension === dimensionCantidad.id)
     );
   }, [dimensionCantidad, unidades]);
 
   const unidadesPorDimension = useMemo(() => {
     return unidades.filter(
       (unidad) =>
-        String(unidad.dimension) === String(form.dimension) && unidad.activo
+        String(unidad.dimension) === String(form.dimension)
     );
   }, [unidades, form.dimension]);
 

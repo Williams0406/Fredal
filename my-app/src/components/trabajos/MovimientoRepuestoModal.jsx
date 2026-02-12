@@ -42,7 +42,7 @@ export default function MovimientoRepuestoModal({ open, onClose, actividad, onSa
   useEffect(() => {
     itemAPI.list().then((res) => setItems(res.data));
     unidadMedidaAPI.list().then((res) =>
-      setUnidadesMedida(res.data.filter((u) => u.activo))
+      setUnidadesMedida(res.data)
     );
     unidadRelacionAPI.list().then((res) => setRelaciones(res.data));
   }, []);
@@ -115,7 +115,7 @@ export default function MovimientoRepuestoModal({ open, onClose, actividad, onSa
   const selectedItem = items.find((i) => String(i.id) === String(form.item));
   const esConsumible = selectedItem?.tipo_insumo === "CONSUMIBLE";
   const unidadesConsumible = unidadesMedida.filter(
-    (u) => u.activo && u.dimension === selectedItem?.dimension
+    (u) => u.dimension === selectedItem?.dimension
   );
 
   const unidadesDisponiblesCount = unidades.filter(

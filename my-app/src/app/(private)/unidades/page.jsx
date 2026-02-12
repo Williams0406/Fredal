@@ -34,7 +34,6 @@ export default function UnidadesPage() {
     nombre: "",
     simbolo: "",
     dimension: "",
-    es_base: false,
   });
   const [formRelacion, setFormRelacion] = useState({
     dimension: "",
@@ -67,15 +66,6 @@ export default function UnidadesPage() {
     if (savedDimension) setDisplayDimensionId(savedDimension);
   }, []);
 
-  const basePorDimension = useMemo(() => {
-    return unidades.reduce((acc, unidad) => {
-      if (unidad.es_base) {
-        acc[unidad.dimension] = unidad;
-      }
-      return acc;
-    }, {});
-  }, [unidades]);
-
   const buildDimensionPayload = (dimension, overrides = {}) => ({
     codigo: dimension.codigo,
     nombre: dimension.nombre,
@@ -88,8 +78,6 @@ export default function UnidadesPage() {
     nombre: unidad.nombre,
     simbolo: unidad.simbolo,
     dimension: unidad.dimension,
-    es_base: unidad.es_base,
-    activo: unidad.activo,
     ...overrides,
   });
 
@@ -124,14 +112,6 @@ export default function UnidadesPage() {
     if (!formUnidad.nombre || !formUnidad.dimension) return;
     const nombre = formUnidad.nombre.toUpperCase();
 
-    const baseActual = basePorDimension[formUnidad.dimension];
-    if (formUnidad.es_base && baseActual && baseActual.id !== editingUnidad?.id) {
-      await unidadMedidaAPI.update(
-        baseActual.id,
-        buildUnidadPayload(baseActual, { es_base: false })
-      );
-    }
-
     if (editingUnidad) {
       await unidadMedidaAPI.update(
         editingUnidad.id,
@@ -139,7 +119,6 @@ export default function UnidadesPage() {
           nombre,
           simbolo: formUnidad.simbolo,
           dimension: Number(formUnidad.dimension),
-          es_base: formUnidad.es_base,
         })
       );
     } else {
@@ -147,12 +126,10 @@ export default function UnidadesPage() {
         nombre,
         simbolo: formUnidad.simbolo,
         dimension: Number(formUnidad.dimension),
-        es_base: formUnidad.es_base,
-        activo: true,
       });
     }
 
-    setFormUnidad({ nombre: "", simbolo: "", dimension: "", es_base: false });
+    setFormUnidad({ nombre: "", simbolo: "", dimension: "" });
     setEditingUnidad(null);
     setOpenUnidadModal(false);
     loadData();
@@ -224,7 +201,7 @@ export default function UnidadesPage() {
   const handleCloseUnidadModal = () => {
     setOpenUnidadModal(false);
     setEditingUnidad(null);
-    setFormUnidad({ nombre: "", simbolo: "", dimension: "", es_base: false });
+    setFormUnidad({ nombre: "", simbolo: "", dimension: "" });
   };
 
   const handleCloseRelacionModal = () => {
@@ -254,7 +231,6 @@ export default function UnidadesPage() {
       nombre: unidad.nombre,
       simbolo: unidad.simbolo ?? "",
       dimension: String(unidad.dimension),
-      es_base: unidad.es_base,
     });
     setOpenUnidadModal(true);
   };
@@ -296,7 +272,7 @@ export default function UnidadesPage() {
   const unidadesPorDimension = useMemo(() => {
     return unidades.filter(
       (unidad) =>
-        String(unidad.dimension) === String(displayDimensionId) && unidad.activo
+        String(unidad.dimension) === String(displayDimensionId)
     );
   }, [unidades, displayDimensionId]);
 
@@ -428,7 +404,6 @@ export default function UnidadesPage() {
         form={formRelacion}
         dimensiones={dimensiones}
         unidades={unidades}
-        baseActual={basePorDimension[formRelacion.dimension]}
         onClose={handleCloseRelacionModal}
         onChange={setFormRelacion}
         onSave={handleCreateRelacion}

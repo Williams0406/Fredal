@@ -6,13 +6,18 @@ import ClienteModal from "@/components/clientes/ClienteModal";
 import UbicacionModal from "@/components/clientes/UbicacionModal";
 import ClientesAccordion from "@/components/clientes/ClientesAccordion";
 
+const emptyClienteForm = { nombre: "", ruc: "" };
+const emptyUbicacionForm = { cliente: "", nombre: "", direccion: "" };
+
 export default function ClientesPage() {
   const [clientes, setClientes] = useState([]);
   const [ubicaciones, setUbicaciones] = useState([]);
-  const [formCliente, setFormCliente] = useState({ nombre: "", ruc: "" });
-  const [formUbicacion, setFormUbicacion] = useState({ cliente: "", nombre: "", direccion: "" });
+  const [formCliente, setFormCliente] = useState(emptyClienteForm);
+  const [formUbicacion, setFormUbicacion] = useState(emptyUbicacionForm);
   const [showClienteModal, setShowClienteModal] = useState(false);
   const [showUbicacionModal, setShowUbicacionModal] = useState(false);
+  const [editingCliente, setEditingCliente] = useState(null);
+  const [editingUbicacion, setEditingUbicacion] = useState(null);
 
   const loadData = async () => {
     const [cRes, uRes] = await Promise.all([clienteAPI.list(), ubicacionClienteAPI.list()]);
@@ -24,22 +29,81 @@ export default function ClientesPage() {
     loadData();
   }, []);
 
+  const openCreateCliente = () => {
+    setEditingCliente(null);
+    setFormCliente(emptyClienteForm);
+    setShowClienteModal(true);
+  };
+
+  const openCreateUbicacion = () => {
+    setEditingUbicacion(null);
+    setFormUbicacion(emptyUbicacionForm);
+    setShowUbicacionModal(true);
+  };
+
   const saveCliente = async () => {
     if (!formCliente.nombre || !formCliente.ruc) return;
-    await clienteAPI.create(formCliente);
-    setFormCliente({ nombre: "", ruc: "" });
+
+    if (editingCliente?.id) {
+      await clienteAPI.update(editingCliente.id, formCliente);
+    } else {
+      await clienteAPI.create(formCliente);
+    }
+
+    setFormCliente(emptyClienteForm);
+    setEditingCliente(null);
     setShowClienteModal(false);
     loadData();
   };
 
   const saveUbicacion = async () => {
     if (!formUbicacion.cliente || !formUbicacion.nombre) return;
-    await ubicacionClienteAPI.create({
+
+    const payload = {
       ...formUbicacion,
       cliente: Number(formUbicacion.cliente),
-    });
-    setFormUbicacion({ cliente: "", nombre: "", direccion: "" });
+    };
+
+    if (editingUbicacion?.id) {
+      await ubicacionClienteAPI.update(editingUbicacion.id, payload);
+    } else {
+      await ubicacionClienteAPI.create(payload);
+    }
+
+    setFormUbicacion(emptyUbicacionForm);
+    setEditingUbicacion(null);
     setShowUbicacionModal(false);
+    loadData();
+  };
+
+  const handleEditCliente = (cliente) => {
+    setEditingCliente(cliente);
+    setFormCliente({
+      nombre: cliente.nombre || "",
+      ruc: cliente.ruc || "",
+    });
+    setShowClienteModal(true);
+  };
+
+  const handleDeleteCliente = async (cliente) => {
+    if (!window.confirm(`¿Eliminar al cliente ${cliente.nombre}?`)) return;
+    await clienteAPI.delete(cliente.id);
+    loadData();
+  };
+
+  const handleEditUbicacion = (ubicacion) => {
+    setEditingUbicacion(ubicacion);
+    setFormUbicacion({
+      cliente: String(ubicacion.cliente || ""),
+      nombre: ubicacion.nombre || "",
+      direccion: ubicacion.direccion || "",
+    });
+    setShowUbicacionModal(true);
+  };
+
+  const handleDeleteUbicacion = async (ubicacion) => {
+    if (!window.confirm(`¿Eliminar la ubicación ${ubicacion.nombre}?`)) return;
+    await ubicacionClienteAPI.delete(ubicacion.id);
     loadData();
   };
 
@@ -55,24 +119,37 @@ export default function ClientesPage() {
         <div className="flex flex-wrap gap-2">
           <button
             className="rounded bg-[#1e3a8a] px-4 py-2 text-sm text-white"
-            onClick={() => setShowClienteModal(true)}
+            onClick={openCreateCliente}
           >
             Nuevo cliente
           </button>
           <button
             className="rounded border border-[#1e3a8a] px-4 py-2 text-sm text-[#1e3a8a]"
-            onClick={() => setShowUbicacionModal(true)}
+            onClick={openCreateUbicacion}
           >
             Nueva ubicación
           </button>
         </div>
       </div>
 
-      <ClientesAccordion clientes={clientes} ubicaciones={ubicaciones} />
+      <ClientesAccordion
+        clientes={clientes}
+        ubicaciones={ubicaciones}
+        onEditCliente={handleEditCliente}
+        onDeleteCliente={handleDeleteCliente}
+        onEditUbicacion={handleEditUbicacion}
+        onDeleteUbicacion={handleDeleteUbicacion}
+      />
 
       <ClienteModal
         open={showClienteModal}
-        onClose={() => setShowClienteModal(false)}
+        onClose={() => {
+          setShowClienteModal(false);
+          setEditingCliente(null);
+          setFormCliente(emptyClienteForm);
+        }}
+        title={editingCliente ? "Editar cliente" : "Registrar cliente"}
+        primaryLabel={editingCliente ? "Actualizar" : "Guardar"}
         formCliente={formCliente}
         onChange={setFormCliente}
         onSave={saveCliente}
@@ -80,7 +157,13 @@ export default function ClientesPage() {
 
       <UbicacionModal
         open={showUbicacionModal}
-        onClose={() => setShowUbicacionModal(false)}
+        onClose={() => {
+          setShowUbicacionModal(false);
+          setEditingUbicacion(null);
+          setFormUbicacion(emptyUbicacionForm);
+        }}
+        title={editingUbicacion ? "Editar ubicación" : "Registrar ubicación"}
+        primaryLabel={editingUbicacion ? "Actualizar" : "Guardar"}
         clientes={clientes}
         formUbicacion={formUbicacion}
         onChange={setFormUbicacion}

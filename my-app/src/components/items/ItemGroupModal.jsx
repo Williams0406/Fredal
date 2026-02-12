@@ -19,11 +19,11 @@ export default function ItemGroupModal({ onClose, onCreated }) {
 
   useEffect(() => {
     itemAPI.list().then((res) => setItems(res.data));
-    unidadMedidaAPI.list().then((res) => setUnits(res.data.filter((u) => u.activo)));
+    unidadMedidaAPI.list().then((res) => setUnits(res.data));
   }, []);
 
   const unitsByDimension = (dimensionId) =>
-    units.filter((unit) => unit.dimension === dimensionId && unit.activo);
+    units.filter((unit) => unit.dimension === dimensionId);
 
   const updateRow = (index, field, value) => {
     setRows((prev) => {

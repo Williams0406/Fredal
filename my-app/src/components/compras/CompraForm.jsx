@@ -55,7 +55,7 @@ export default function CompraForm({ onCreated }) {
       itemAPI.list().then((res) => setItems(res.data));
       proveedorAPI.list().then((res) => setProveedores(res.data));
       unidadMedidaAPI.list().then((res) =>
-        setUnidadesMedida(res.data.filter((u) => u.activo))
+        setUnidadesMedida(res.data)
       );
       unidadRelacionAPI.list().then((res) => setRelacionesUnidad(res.data));
       setCabecera((prev) => ({
@@ -151,20 +151,14 @@ export default function CompraForm({ onCreated }) {
 
   const unidadesPorItem = (itemSel) => {
     if (!itemSel?.dimension) return [];
-    return unidadesMedida.filter(
-      (u) => u.dimension === itemSel.dimension && u.activo
-    );
+    return unidadesMedida.filter((u) => u.dimension === itemSel.dimension);
   };
 
-  const baseUnitForDimension = (dimensionId) =>
-    unidadesMedida.find((u) => u.dimension === dimensionId && u.es_base);
-
-  const relationForUnits = (baseUnitId, relatedUnitId) =>
+  const relationForUnits = (originUnitId, targetUnitId) =>
     relacionesUnidad.find(
       (rel) =>
-        rel.unidad_base === baseUnitId &&
-        rel.unidad_relacionada === relatedUnitId &&
-        rel.activo !== false
+        rel.unidad_base === originUnitId &&
+        rel.unidad_relacionada === targetUnitId
     );
 
   const resolveCantidadBase = (detalle, itemSel) => {
@@ -177,12 +171,11 @@ export default function CompraForm({ onCreated }) {
       };
     }
 
-    const baseUnit = baseUnitForDimension(itemSel.dimension);
     const selectedUnitId = detalle.unidad_medida
       ? Number(detalle.unidad_medida)
-      : itemSel.unidad_medida ?? baseUnit?.id ?? null;
+      : itemSel.unidad_medida ?? null;
 
-    if (!baseUnit || !selectedUnitId || selectedUnitId === baseUnit.id) {
+    if (!selectedUnitId || selectedUnitId === itemSel.unidad_medida) {
       return {
         cantidad,
         unidad_medida: selectedUnitId ?? null,
@@ -190,7 +183,7 @@ export default function CompraForm({ onCreated }) {
       };
     }
 
-    const relation = relationForUnits(baseUnit.id, selectedUnitId);
+    const relation = relationForUnits(selectedUnitId, itemSel.unidad_medida);
     if (!relation) {
       return {
         cantidad,
