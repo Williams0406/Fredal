@@ -2,9 +2,17 @@
 
 import Modal from "@/components/ui/Modal";
 
-export default function ClienteModal({ open, onClose, formCliente, onChange, onSave }) {
+export default function ClienteModal({
+  open,
+  onClose,
+  title = "Registrar cliente",
+  primaryLabel = "Guardar",
+  formCliente,
+  onChange,
+  onSave,
+}) {
   return (
-    <Modal open={open} onClose={onClose} title="Registrar cliente" size="sm">
+    <Modal open={open} onClose={onClose} title={title} size="sm">
       <div className="space-y-4">
         <div className="space-y-2">
           <label className="text-sm font-medium text-gray-700">Nombre</label>
@@ -37,7 +45,7 @@ export default function ClienteModal({ open, onClose, formCliente, onChange, onS
             onClick={onSave}
             className="rounded bg-[#1e3a8a] px-4 py-2 text-sm text-white"
           >
-            Guardar
+            {primaryLabel}
           </button>
         </div>
       </div>

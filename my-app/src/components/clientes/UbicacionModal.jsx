@@ -2,9 +2,18 @@
 
 import Modal from "@/components/ui/Modal";
 
-export default function UbicacionModal({ open, onClose, clientes, formUbicacion, onChange, onSave }) {
+export default function UbicacionModal({
+  open,
+  onClose,
+  title = "Registrar ubicación",
+  primaryLabel = "Guardar",
+  clientes,
+  formUbicacion,
+  onChange,
+  onSave,
+}) {
   return (
-    <Modal open={open} onClose={onClose} title="Registrar ubicación" size="sm">
+    <Modal open={open} onClose={onClose} title={title} size="sm">
       <div className="space-y-4">
         <div className="space-y-2">
           <label className="text-sm font-medium text-gray-700">Cliente</label>
@@ -52,7 +61,7 @@ export default function UbicacionModal({ open, onClose, clientes, formUbicacion,
             onClick={onSave}
             className="rounded bg-[#1e3a8a] px-4 py-2 text-sm text-white"
           >
-            Guardar
+            {primaryLabel}
           </button>
         </div>
       </div>
