@@ -285,11 +285,8 @@ export default function CompraForm({ onCreated }) {
   // CÁLCULO DEL TOTAL GENERAL (Suma de todos los ítems)
   const totalGeneralCompra = useMemo(() => {
     return detalles.reduce((acc, d) => {
-      const montoNum = parseFloat(d.monto) || 0;
-      const cantNum = parseFloat(d.cantidad) || 0;
-      const esValor = d.tipo_registro === "VALOR_UNITARIO";
-      const costoFila = esValor ? (montoNum * IGV) * cantNum : montoNum * cantNum;
-      return acc + costoFila;
+      const { costo_total } = calcular(d);
+      return acc + costo_total;
     }, 0);
   }, [detalles]);
 
