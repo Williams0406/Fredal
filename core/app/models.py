@@ -660,6 +660,44 @@ class CompraDetalle(models.Model):
     def costo_total(self):
         return self.valor_total * self.IGV
 
+
+class LoteConsumible(models.Model):
+
+    compra_detalle = models.ForeignKey(
+        CompraDetalle,
+        on_delete=models.PROTECT,
+        related_name="lotes"
+    )
+
+    item = models.ForeignKey(
+        Item,
+        on_delete=models.PROTECT,
+        limit_choices_to={"tipo_insumo": Item.TipoInsumo.CONSUMIBLE}
+    )
+
+    cantidad_inicial = models.DecimalField(
+        max_digits=16,
+        decimal_places=6
+    )
+
+    cantidad_disponible = models.DecimalField(
+        max_digits=16,
+        decimal_places=6
+    )
+
+    unidad_medida = models.ForeignKey(
+        UnidadMedida,
+        on_delete=models.PROTECT
+    )
+
+    almacen = models.ForeignKey(
+        Almacen,
+        on_delete=models.PROTECT
+    )
+
+    fecha_ingreso = models.DateTimeField(auto_now_add=True)
+
+
 # =========================
 # AUDITORÍA
 # =========================
@@ -776,3 +814,65 @@ class HistorialUbicacionItem(models.Model):
         self.full_clean()
         
         super().save(*args, **kwargs)
+
+class HistorialConsumible(models.Model):
+
+    lote = models.ForeignKey(
+        LoteConsumible,
+        on_delete=models.PROTECT,
+        related_name="historiales"
+    )
+
+    item = models.ForeignKey(
+        Item,
+        on_delete=models.PROTECT
+    )
+
+    cantidad = models.DecimalField(
+        max_digits=16,
+        decimal_places=6
+    )
+
+    unidad_medida = models.ForeignKey(
+        UnidadMedida,
+        on_delete=models.PROTECT
+    )
+
+    maquinaria = models.ForeignKey(
+        Maquinaria,
+        null=True,
+        blank=True,
+        on_delete=models.PROTECT
+    )
+
+    trabajador = models.ForeignKey(
+        Trabajador,
+        null=True,
+        blank=True,
+        on_delete=models.PROTECT
+    )
+
+    almacen = models.ForeignKey(
+        Almacen,
+        null=True,
+        blank=True,
+        on_delete=models.PROTECT
+    )
+
+    orden_trabajo = models.ForeignKey(
+        OrdenTrabajo,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL
+    )
+
+    fecha_inicio = models.DateTimeField(auto_now_add=True)
+    fecha_fin = models.DateTimeField(null=True, blank=True)
+
+    def clean(self):
+        destinos = [self.maquinaria, self.trabajador, self.almacen]
+        if sum(bool(d) for d in destinos) != 1:
+            raise ValidationError("Debe existir un único destino")
+
+        if self.cantidad > self.lote.cantidad_disponible:
+            raise ValidationError("No hay suficiente cantidad disponible en el lote")
