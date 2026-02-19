@@ -170,6 +170,12 @@ export const itemAPI = {
   unidadesAsignables: (itemId, params) =>
     api.get(`/api/items/${itemId}/unidades_asignables/`, { params }),
 
+  proveedoresDisponibles: () =>
+    api.get("/api/items/proveedores_disponibles/"),
+
+  lotesDisponibles: (itemId, params) =>
+    api.get(`/api/items/${itemId}/lotes_disponibles/`, { params }),
+
   porMaquinaria: (maquinariaId) =>
     api.get("/api/items/por_maquinaria/", {
       params: { maquinaria: maquinariaId },

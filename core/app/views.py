@@ -10,7 +10,7 @@ from rest_framework import status
 from django.utils import timezone
 from datetime import timedelta
 from .permissions import IsAdmin
-from django.db.models import Avg
+from django.db.models import Avg, Sum
 from decimal import Decimal
 from itertools import chain
 from datetime import datetime, time
@@ -39,6 +39,7 @@ from .models import (
     UnidadMedida,
     UnidadRelacion,
     ItemGrupo,
+    LoteConsumible,
 )
 from .serializers import (
     UserSerializer,
@@ -107,6 +108,34 @@ class ItemViewSet(viewsets.ModelViewSet):
     queryset = Item.objects.all().order_by("nombre")
     serializer_class = ItemSerializer
     permission_classes = [ItemPermission]
+
+    def get_queryset(self):
+        queryset = super().get_queryset()
+        proveedor_id = self.request.query_params.get("proveedor")
+        solo_disponibles = self.request.query_params.get("disponibles") == "1"
+
+        if proveedor_id:
+            queryset = queryset.filter(
+                compradetalle__compra__proveedor_id=proveedor_id
+            ).distinct()
+
+        if proveedor_id and solo_disponibles:
+            repuestos = queryset.filter(
+                tipo_insumo=Item.TipoInsumo.REPUESTO,
+                unidades__compra_detalle__compra__proveedor_id=proveedor_id,
+                unidades__historial__almacen__isnull=False,
+                unidades__historial__fecha_fin__isnull=True,
+            ).exclude(unidades__estado=ItemUnidad.Estado.INOPERATIVO)
+
+            consumibles = queryset.filter(
+                tipo_insumo=Item.TipoInsumo.CONSUMIBLE,
+                loteconsumible__compra_detalle__compra__proveedor_id=proveedor_id,
+                loteconsumible__cantidad_disponible__gt=0,
+            )
+
+            queryset = (repuestos | consumibles).distinct()
+
+        return queryset
 
     def get_serializer_class(self):
         if self.action == "retrieve":
@@ -191,6 +220,27 @@ class ItemViewSet(viewsets.ModelViewSet):
         return Response(data)
     
     @action(detail=False, methods=["get"])
+    def proveedores_disponibles(self, request):
+        proveedores_repuesto = Proveedor.objects.filter(
+            compras__detalles__item__tipo_insumo=Item.TipoInsumo.REPUESTO,
+            compras__detalles__item__unidades__historial__almacen__isnull=False,
+            compras__detalles__item__unidades__historial__fecha_fin__isnull=True,
+        ).exclude(
+            compras__detalles__item__unidades__estado=ItemUnidad.Estado.INOPERATIVO
+        )
+
+        proveedores_consumible = Proveedor.objects.filter(
+            compras__detalles__item__tipo_insumo=Item.TipoInsumo.CONSUMIBLE,
+            compras__detalles__item__loteconsumible__cantidad_disponible__gt=0,
+        )
+
+        proveedores = (proveedores_repuesto | proveedores_consumible).distinct().order_by("nombre")
+
+        return Response(
+            [{"id": p.id, "nombre": p.nombre, "ruc": p.ruc} for p in proveedores]
+        )
+    
+    @action(detail=False, methods=["get"])
     def por_maquinaria(self, request):
         maquinaria_id = request.query_params.get("maquinaria")
 
@@ -209,6 +259,7 @@ class ItemViewSet(viewsets.ModelViewSet):
     def unidades_asignables(self, request, pk=None):
         item = self.get_object()
         actividad_id = request.query_params.get("actividad")
+        proveedor_id = request.query_params.get("proveedor")
 
         if not actividad_id:
             return Response([])
@@ -234,6 +285,11 @@ class ItemViewSet(viewsets.ModelViewSet):
             .distinct()
         )
 
+        if proveedor_id:
+            unidades = unidades.filter(
+                compra_detalle__compra__proveedor_id=proveedor_id
+            )
+
         return Response([
             {
                 "id": u.id,
@@ -242,6 +298,24 @@ class ItemViewSet(viewsets.ModelViewSet):
             }
             for u in unidades
         ])
+    
+    @action(detail=True, methods=["get"])
+    def lotes_disponibles(self, request, pk=None):
+        item = self.get_object()
+        proveedor_id = request.query_params.get("proveedor")
+
+        if item.tipo_insumo != Item.TipoInsumo.CONSUMIBLE:
+            return Response({"cantidad_disponible": 0})
+
+        lotes = LoteConsumible.objects.filter(item=item, cantidad_disponible__gt=0)
+        if proveedor_id:
+            lotes = lotes.filter(compra_detalle__compra__proveedor_id=proveedor_id)
+
+        total = lotes.aggregate(total=Sum("cantidad_disponible")).get("total") or Decimal("0")
+        return Response({
+            "cantidad_disponible": total,
+            "unidad_medida": item.unidad_medida.nombre if item.unidad_medida else "",
+        })
     
     @action(detail=True, methods=["get"])
     def kardex_contable(self, request, pk=None):
