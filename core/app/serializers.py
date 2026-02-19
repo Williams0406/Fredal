@@ -673,7 +673,21 @@ class MovimientoRepuestoSerializer(serializers.ModelSerializer):
         with transaction.atomic():
 
             if actividad.es_planificada:
-                return super().create(validated_data)
+                if unidad_nueva.estado == ItemUnidad.Estado.NUEVO:
+                    unidad_nueva.estado = ItemUnidad.Estado.USADO
+                    unidad_nueva.save(update_fields=["estado"])
+
+                HistorialUbicacionItem.objects.create(
+                    item_unidad=unidad_nueva,
+                    orden_trabajo=actividad.orden,
+                    trabajador=tecnico,
+                    estado=unidad_nueva.estado,
+                )
+
+                movimiento = super().create(validated_data)
+                actualizar_stock_item(item)
+                return movimiento
+
 
             if not tecnico:
                 # 🔎 1️⃣ Buscar unidad(es) ACTUAL(ES) del mismo item en la maquinaria

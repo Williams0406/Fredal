@@ -92,19 +92,13 @@ export default function MovimientoRepuestoModal({ open, onClose, actividad, onSa
   }, [open, actividad?.orden]);
 
   useEffect(() => {
-    if (requiereProveedorTecnico && !form.proveedor) {
-      setItems([]);
-      setForm((prev) => ({ ...prev, item: "", unidad_conversion: "", cantidad: 1 }));
-      return;
-    }
-
     itemAPI
       .list({ ...(form.proveedor ? { proveedor: form.proveedor } : {}), disponibles: 1 })
       .then((res) => setItems(res.data || []));
-  }, [form.proveedor, requiereProveedorTecnico]);
+  }, [form.proveedor]);
 
   useEffect(() => {
-    if (!form.item || (requiereProveedorTecnico && !form.proveedor) || selectedItem?.tipo_insumo === "CONSUMIBLE") {
+    if (!form.item || selectedItem?.tipo_insumo === "CONSUMIBLE") {
       setUnidades([]);
       return;
     }
@@ -117,10 +111,10 @@ export default function MovimientoRepuestoModal({ open, onClose, actividad, onSa
       })
       .then((res) => setUnidades(res.data || []))
       .finally(() => setLoading(false));
-  }, [form.item, form.proveedor, actividad?.id, selectedItem?.tipo_insumo, requiereProveedorTecnico]);
+  }, [form.item, form.proveedor, actividad?.id, selectedItem?.tipo_insumo]);
 
   useEffect(() => {
-    if (!form.item || (requiereProveedorTecnico && !form.proveedor) || !selectedItem || selectedItem.tipo_insumo !== "CONSUMIBLE") {
+    if (!form.item || !selectedItem || selectedItem.tipo_insumo !== "CONSUMIBLE") {
       setStockConsumibleProveedor(0);
       return;
     }
@@ -128,7 +122,7 @@ export default function MovimientoRepuestoModal({ open, onClose, actividad, onSa
     itemAPI
       .lotesDisponibles(form.item, { ...(form.proveedor ? { proveedor: form.proveedor } : {}) })
       .then((res) => setStockConsumibleProveedor(Number(res.data?.cantidad_disponible || 0)));
-  }, [form.item, form.proveedor, selectedItem, requiereProveedorTecnico]);
+  }, [form.item, form.proveedor, selectedItem]);
 
   useEffect(() => {
     if (!actividad?.id) return;
@@ -359,22 +353,30 @@ export default function MovimientoRepuestoModal({ open, onClose, actividad, onSa
 
   const itemsFiltrados = items.filter((i) => `${i.codigo} ${i.nombre}`.toLowerCase().includes(itemSearch.toLowerCase()));
 
-  const disableItemSelector = requiereProveedorTecnico && (!form.proveedor || !form.tecnico);
+  const canAddMovimiento = !requiereProveedorTecnico || (form.proveedor && form.tecnico);
 
   return (
     <div className="fixed inset-0 bg-black/40 z-[60] flex items-center justify-center p-4" onClick={onClose}>
-      <div className="bg-white rounded-xl w-full max-w-4xl max-h-[90vh] flex flex-col" onClick={(e)=>e.stopPropagation()}>
-        <div className="border-b border-gray-200 px-6 py-4"><h3 className="text-xl font-semibold text-[#1e3a8a]">Movimiento de Items</h3></div>
+      <div className="bg-white rounded-2xl w-full max-w-5xl max-h-[90vh] flex flex-col shadow-2xl" onClick={(e)=>e.stopPropagation()}>
+        <div className="border-b border-gray-200 px-6 py-5 bg-gradient-to-r from-slate-50 to-blue-50 rounded-t-2xl">
+          <h3 className="text-xl font-semibold text-[#1e3a8a]">Movimiento de Items</h3>
+          <p className="text-sm text-slate-600 mt-1">Selecciona primero el item y luego completa la asignación para registrarlo en la actividad.</p>
+        </div>
         <div className="flex-1 overflow-y-auto px-6 py-6 space-y-6">
           <ItemGroupSelector onApply={handleApplyGroup} />
 
-          <div className="grid grid-cols-1 md:grid-cols-6 gap-4">
-            <div>
+          {requiereProveedorTecnico && (
+            <div className="rounded-xl border border-blue-100 bg-blue-50 px-4 py-3 text-sm text-blue-800">
+              <strong>Orden sugerido:</strong> Item → Cantidad → Unidad → Estado → Proveedor → Técnico asignado.
+            </div>
+          )}
+
+          <div className="grid grid-cols-1 md:grid-cols-6 gap-4 bg-slate-50 border border-slate-200 rounded-xl p-4">
+            <div className="md:col-span-2 relative">
               <label className="block text-sm mb-2">Item</label>
               <input
-                disabled={disableItemSelector}
-                className="w-full px-3 py-2 border rounded disabled:bg-gray-50"
-                placeholder={disableItemSelector ? "Selecciona proveedor y técnico primero" : "Buscar item"}
+                className="w-full px-3 py-2 border rounded-lg bg-white"
+                placeholder="Buscar item"
                 value={itemSearch}
                 onChange={(e) => {
                   setItemSearch(e.target.value);
@@ -383,7 +385,7 @@ export default function MovimientoRepuestoModal({ open, onClose, actividad, onSa
                 }}
               />
               {showItemDropdown && itemSearch && (
-                <div className="absolute z-30 bg-white border rounded mt-1 max-h-56 overflow-y-auto">
+                <div className="absolute z-30 bg-white border rounded-lg mt-1 max-h-56 overflow-y-auto shadow-lg w-full">
                   {itemsFiltrados.map((i) => (
                     <button key={i.id} type="button" className="block w-full text-left px-3 py-2 hover:bg-blue-50" onClick={() => { setForm((p) => ({ ...p, item: String(i.id) })); setItemSearch(`${i.codigo} - ${i.nombre}`); setShowItemDropdown(false); }}>
                       {i.codigo} - {i.nombre}
@@ -401,7 +403,7 @@ export default function MovimientoRepuestoModal({ open, onClose, actividad, onSa
               <>
                 <div>
                   <label className="block text-sm mb-2">Proveedor</label>
-                  <select className="w-full px-3 py-2 border rounded" value={form.proveedor} onChange={(e) => setForm((p) => ({ ...p, proveedor: e.target.value }))}>
+                  <select className="w-full px-3 py-2 border rounded-lg bg-white" value={form.proveedor} onChange={(e) => setForm((p) => ({ ...p, proveedor: e.target.value }))}>
                     <option value="">Selecciona proveedor</option>
                     {proveedores.map((p) => (<option key={p.id} value={p.id}>{p.nombre}</option>))}
                   </select>
@@ -409,7 +411,7 @@ export default function MovimientoRepuestoModal({ open, onClose, actividad, onSa
 
                 <div>
                   <label className="block text-sm mb-2">Técnico asignado</label>
-                  <select className="w-full px-3 py-2 border rounded" value={form.tecnico} onChange={(e) => setForm((p) => ({ ...p, tecnico: e.target.value }))}>
+                  <select className="w-full px-3 py-2 border rounded-lg bg-white" value={form.tecnico} onChange={(e) => setForm((p) => ({ ...p, tecnico: e.target.value }))}>
                     <option value="">Selecciona técnico</option>
                     {tecnicosAsignados.map((t) => (<option key={t.id} value={t.id}>{t.nombres} {t.apellidos}</option>))}
                   </select>
@@ -417,12 +419,12 @@ export default function MovimientoRepuestoModal({ open, onClose, actividad, onSa
               </>
             )}
 
-            <div className="flex items-end"><button disabled={requiereProveedorTecnico ? (!form.proveedor || !form.tecnico) : false} className="w-full px-4 py-2 bg-[#84cc16] text-white rounded disabled:bg-gray-300" onClick={handleAddUnidad}>Agregar</button></div>
+            <div className="flex items-end"><button disabled={!canAddMovimiento} className="w-full px-4 py-2 bg-[#84cc16] text-white rounded-lg disabled:bg-gray-300" onClick={handleAddUnidad}>Agregar</button></div>
           </div>
           
-          {esConsumible && form.proveedor && selectedItem && (
+          {esConsumible && selectedItem && (
             <div className="text-xs text-blue-700 bg-blue-50 border border-blue-100 rounded p-2">
-              Stock disponible del proveedor en unidad base ({selectedItem?.unidad_medida_detalle?.nombre || "-"}): <strong>{Number(stockConsumibleProveedor || 0).toFixed(2)}</strong>
+              Stock disponible {form.proveedor ? "del proveedor" : "total"} en unidad base ({selectedItem?.unidad_medida_detalle?.nombre || "-"}): <strong>{Number(stockConsumibleProveedor || 0).toFixed(2)}</strong>
             </div>
           )}
 
