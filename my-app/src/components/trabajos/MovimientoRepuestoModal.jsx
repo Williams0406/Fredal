@@ -36,6 +36,8 @@ export default function MovimientoRepuestoModal({ open, onClose, actividad, onSa
   });
 
   const movimientos = [...movimientosDB, ...movimientosNew];
+  const esActividadPlanificada = Boolean(actividad?.es_planificada);
+  const requiereProveedorTecnico = esActividadPlanificada;
   const selectedItem = items.find((i) => String(i.id) === String(form.item));
   const esConsumible = selectedItem?.tipo_insumo === "CONSUMIBLE";
 
@@ -90,40 +92,43 @@ export default function MovimientoRepuestoModal({ open, onClose, actividad, onSa
   }, [open, actividad?.orden]);
 
   useEffect(() => {
-    if (!form.proveedor) {
+    if (requiereProveedorTecnico && !form.proveedor) {
       setItems([]);
       setForm((prev) => ({ ...prev, item: "", unidad_conversion: "", cantidad: 1 }));
       return;
     }
 
     itemAPI
-      .list({ proveedor: form.proveedor, disponibles: 1 })
+      .list({ ...(form.proveedor ? { proveedor: form.proveedor } : {}), disponibles: 1 })
       .then((res) => setItems(res.data || []));
-  }, [form.proveedor]);
+  }, [form.proveedor, requiereProveedorTecnico]);
 
   useEffect(() => {
-    if (!form.item || !form.proveedor || selectedItem?.tipo_insumo === "CONSUMIBLE") {
+    if (!form.item || (requiereProveedorTecnico && !form.proveedor) || selectedItem?.tipo_insumo === "CONSUMIBLE") {
       setUnidades([]);
       return;
     }
 
     setLoading(true);
     itemAPI
-      .unidadesAsignables(form.item, { actividad: actividad.id, proveedor: form.proveedor })
+      .unidadesAsignables(form.item, {
+        actividad: actividad.id,
+        ...(form.proveedor ? { proveedor: form.proveedor } : {}),
+      })
       .then((res) => setUnidades(res.data || []))
       .finally(() => setLoading(false));
-  }, [form.item, form.proveedor, actividad?.id, selectedItem?.tipo_insumo]);
+  }, [form.item, form.proveedor, actividad?.id, selectedItem?.tipo_insumo, requiereProveedorTecnico]);
 
   useEffect(() => {
-    if (!form.item || !form.proveedor || !selectedItem || selectedItem.tipo_insumo !== "CONSUMIBLE") {
+    if (!form.item || (requiereProveedorTecnico && !form.proveedor) || !selectedItem || selectedItem.tipo_insumo !== "CONSUMIBLE") {
       setStockConsumibleProveedor(0);
       return;
     }
 
     itemAPI
-      .lotesDisponibles(form.item, { proveedor: form.proveedor })
+      .lotesDisponibles(form.item, { ...(form.proveedor ? { proveedor: form.proveedor } : {}) })
       .then((res) => setStockConsumibleProveedor(Number(res.data?.cantidad_disponible || 0)));
-  }, [form.item, form.proveedor, selectedItem]);
+  }, [form.item, form.proveedor, selectedItem, requiereProveedorTecnico]);
 
   useEffect(() => {
     if (!actividad?.id) return;
@@ -169,7 +174,8 @@ export default function MovimientoRepuestoModal({ open, onClose, actividad, onSa
   const unidadesDisponiblesCount = unidades.filter((u) => u.estado === form.estado_unidad).length;
 
   const handleAddUnidad = () => {
-    if (!form.tecnico || !form.item || !form.cantidad) return;
+    if (!form.item || !form.cantidad) return;
+    if (requiereProveedorTecnico && (!form.proveedor || !form.tecnico)) return;
 
     const item = selectedItem;
     const cantidad = Number(form.cantidad) || 0;
@@ -246,7 +252,7 @@ export default function MovimientoRepuestoModal({ open, onClose, actividad, onSa
 
   const handleApplyGroup = async (group) => {
     if (!group?.items?.length || !actividad?.id) return;
-    if (!form.tecnico) {
+    if (requiereProveedorTecnico && !form.tecnico) {
       alert("Selecciona un técnico asignado antes de aplicar el grupo");
       return;
     }
@@ -277,7 +283,7 @@ export default function MovimientoRepuestoModal({ open, onClose, actividad, onSa
 
       const unidadesRes = await itemAPI.unidadesAsignables(item.id, {
         actividad: actividad.id,
-        proveedor: form.proveedor,
+        ...(form.proveedor ? { proveedor: form.proveedor } : {}),
       });
 
       const cantidadUnidades = Math.floor(cantidad);
@@ -330,7 +336,7 @@ export default function MovimientoRepuestoModal({ open, onClose, actividad, onSa
             item: m.item_id,
             cantidad: Number(m.cantidad),
             unidad_medida: m.unidad_conversion ? Number(m.unidad_conversion) : null,
-            proveedor: form.proveedor ? Number(form.proveedor) : null,
+            proveedor: requiereProveedorTecnico && form.proveedor ? Number(form.proveedor) : null,
             tecnico: m.tecnico ? Number(m.tecnico) : null,
           });
         } else {
@@ -353,6 +359,8 @@ export default function MovimientoRepuestoModal({ open, onClose, actividad, onSa
 
   const itemsFiltrados = items.filter((i) => `${i.codigo} ${i.nombre}`.toLowerCase().includes(itemSearch.toLowerCase()));
 
+  const disableItemSelector = requiereProveedorTecnico && (!form.proveedor || !form.tecnico);
+
   return (
     <div className="fixed inset-0 bg-black/40 z-[60] flex items-center justify-center p-4" onClick={onClose}>
       <div className="bg-white rounded-xl w-full max-w-4xl max-h-[90vh] flex flex-col" onClick={(e)=>e.stopPropagation()}>
@@ -362,29 +370,11 @@ export default function MovimientoRepuestoModal({ open, onClose, actividad, onSa
 
           <div className="grid grid-cols-1 md:grid-cols-6 gap-4">
             <div>
-              <label className="block text-sm mb-2">Proveedor</label>
-              <select className="w-full px-3 py-2 border rounded" value={form.proveedor} onChange={(e) => setForm((p) => ({ ...p, proveedor: e.target.value }))}>
-                <option value="">Selecciona proveedor</option>
-                {proveedores.map((p) => (<option key={p.id} value={p.id}>{p.nombre}</option>))}
-              </select>
-              <p className="text-xs text-gray-500 mt-1">Primero elige proveedor para ver su stock disponible.</p>
-            </div>
-            
-            <div>
-              <label className="block text-sm mb-2">Técnico asignado</label>
-              <select className="w-full px-3 py-2 border rounded" value={form.tecnico} onChange={(e) => setForm((p) => ({ ...p, tecnico: e.target.value }))}>
-                <option value="">Selecciona técnico</option>
-                {tecnicosAsignados.map((t) => (<option key={t.id} value={t.id}>{t.nombres} {t.apellidos}</option>))}
-              </select>
-              <p className="text-xs text-gray-500 mt-1">Solo técnicos asignados en la orden.</p>
-            </div>
-
-            <div>
               <label className="block text-sm mb-2">Item</label>
               <input
-                disabled={!form.proveedor || !form.tecnico}
+                disabled={disableItemSelector}
                 className="w-full px-3 py-2 border rounded disabled:bg-gray-50"
-                placeholder={form.proveedor ? "Buscar item" : "Selecciona proveedor primero"}
+                placeholder={disableItemSelector ? "Selecciona proveedor y técnico primero" : "Buscar item"}
                 value={itemSearch}
                 onChange={(e) => {
                   setItemSearch(e.target.value);
@@ -392,7 +382,7 @@ export default function MovimientoRepuestoModal({ open, onClose, actividad, onSa
                   setForm((p) => ({ ...p, item: "", estado_unidad: "NUEVO", cantidad: 1, unidad_conversion: "" }));
                 }}
               />
-              {showItemDropdown && itemSearch && form.proveedor && (
+              {showItemDropdown && itemSearch && (
                 <div className="absolute z-30 bg-white border rounded mt-1 max-h-56 overflow-y-auto">
                   {itemsFiltrados.map((i) => (
                     <button key={i.id} type="button" className="block w-full text-left px-3 py-2 hover:bg-blue-50" onClick={() => { setForm((p) => ({ ...p, item: String(i.id) })); setItemSearch(`${i.codigo} - ${i.nombre}`); setShowItemDropdown(false); }}>
@@ -407,7 +397,27 @@ export default function MovimientoRepuestoModal({ open, onClose, actividad, onSa
             <div>{esConsumible ? <><label className="block text-sm mb-2">Unidad</label><select className="w-full px-3 py-2 border rounded" value={form.unidad_conversion} onChange={(e)=>setForm((p)=>({...p,unidad_conversion:e.target.value}))}><option value="">{selectedItem?.unidad_medida_detalle?.nombre ? `Por defecto: ${selectedItem.unidad_medida_detalle.nombre}` : "Selecciona unidad"}</option>{unidadesConsumible.map((u)=><option key={u.id} value={u.id}>{u.nombre}{u.simbolo ? ` (${u.simbolo})` : ""}</option>)}</select></> : <><label className="block text-sm mb-2">Unidad</label><input disabled className="w-full px-3 py-2 border rounded bg-gray-50" value={selectedItem?.unidad_medida_detalle?.nombre || ""} /></>}</div>
             <div><label className="block text-sm mb-2">Estado</label>{esConsumible ? <input disabled className="w-full px-3 py-2 border rounded bg-gray-50 font-medium" value="NUEVO" /> : <><select className="w-full px-3 py-2 border rounded" value={form.estado_unidad} onChange={(e)=>setForm((p)=>({...p,estado_unidad:e.target.value}))}><option value="">Seleccione estado</option><option value="NUEVO">NUEVO</option><option value="USADO">USADO</option><option value="REPARADO">REPARADO</option></select><p className="text-xs text-gray-500 mt-1">Disponibles: {unidadesDisponiblesCount}</p></>}</div>
 
-            <div className="flex items-end"><button disabled={!form.proveedor || !form.tecnico} className="w-full px-4 py-2 bg-[#84cc16] text-white rounded disabled:bg-gray-300" onClick={handleAddUnidad}>Agregar</button></div>
+            {requiereProveedorTecnico && (
+              <>
+                <div>
+                  <label className="block text-sm mb-2">Proveedor</label>
+                  <select className="w-full px-3 py-2 border rounded" value={form.proveedor} onChange={(e) => setForm((p) => ({ ...p, proveedor: e.target.value }))}>
+                    <option value="">Selecciona proveedor</option>
+                    {proveedores.map((p) => (<option key={p.id} value={p.id}>{p.nombre}</option>))}
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block text-sm mb-2">Técnico asignado</label>
+                  <select className="w-full px-3 py-2 border rounded" value={form.tecnico} onChange={(e) => setForm((p) => ({ ...p, tecnico: e.target.value }))}>
+                    <option value="">Selecciona técnico</option>
+                    {tecnicosAsignados.map((t) => (<option key={t.id} value={t.id}>{t.nombres} {t.apellidos}</option>))}
+                  </select>
+                </div>
+              </>
+            )}
+
+            <div className="flex items-end"><button disabled={requiereProveedorTecnico ? (!form.proveedor || !form.tecnico) : false} className="w-full px-4 py-2 bg-[#84cc16] text-white rounded disabled:bg-gray-300" onClick={handleAddUnidad}>Agregar</button></div>
           </div>
           
           {esConsumible && form.proveedor && selectedItem && (
@@ -417,8 +427,28 @@ export default function MovimientoRepuestoModal({ open, onClose, actividad, onSa
           )}
 
           <table className="w-full text-sm">
-            <thead><tr><th className="text-left">Código</th><th className="text-left">Item</th><th className="text-left">Detalle</th><th className="text-left">Técnico</th><th className="text-left">Estado</th><th className="text-left">Acción</th></tr></thead>
-            <tbody>{movimientosFiltrados.map((m,i)=><tr key={i}><td>{m.item_codigo}</td><td>{m.item_nombre}</td><td>{m.tipo==="CONSUMIBLE"?`${Number(m.cantidad).toFixed(2)} ${m.unidad_medida || ""}`:m.unidad_serie}</td><td>{m.tecnico_nombre || "-"}</td><td>{m.tipo==="CONSUMIBLE"?"NUEVO":m.estado}</td><td>{m.id ? <span className="text-gray-400 text-xs">Guardado</span> : <button type="button" className="text-red-600 hover:text-red-800" onClick={()=>handleRemoveMovimiento(i)}>Borrar</button>}</td></tr>)}</tbody>
+            <thead>
+              <tr>
+                <th className="text-left">Código</th>
+                <th className="text-left">Item</th>
+                <th className="text-left">Detalle</th>
+                {requiereProveedorTecnico && <th className="text-left">Técnico</th>}
+                <th className="text-left">Estado</th>
+                <th className="text-left">Acción</th>
+              </tr>
+            </thead>
+            <tbody>
+              {movimientosFiltrados.map((m,i)=>(
+                <tr key={i}>
+                  <td>{m.item_codigo}</td>
+                  <td>{m.item_nombre}</td>
+                  <td>{m.tipo==="CONSUMIBLE"?`${Number(m.cantidad).toFixed(2)} ${m.unidad_medida || ""}`:m.unidad_serie}</td>
+                  {requiereProveedorTecnico && <td>{m.tecnico_nombre || "-"}</td>}
+                  <td>{m.tipo==="CONSUMIBLE"?"NUEVO":m.estado}</td>
+                  <td>{m.id ? <span className="text-gray-400 text-xs">Guardado</span> : <button type="button" className="text-red-600 hover:text-red-800" onClick={()=>handleRemoveMovimiento(i)}>Borrar</button>}</td>
+                </tr>
+              ))}
+            </tbody>
           </table>
         </div>
         <div className="border-t px-6 py-4 flex justify-end gap-2"><button className="px-4 py-2 border rounded" onClick={onClose}>Cancelar</button><button className="px-4 py-2 bg-[#1e3a8a] text-white rounded" onClick={handleSave} disabled={loading}>Guardar</button></div>

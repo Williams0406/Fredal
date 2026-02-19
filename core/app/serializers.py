@@ -654,9 +654,9 @@ class MovimientoRepuestoSerializer(serializers.ModelSerializer):
             )
         
         tecnico = data.get("tecnico")
-        if not tecnico:
+        if actividad.es_planificada and not tecnico:
             raise serializers.ValidationError("Debe seleccionar un técnico asignado")
-        if not actividad.orden.tecnicos.filter(id=tecnico.id).exists():
+        if tecnico and not actividad.orden.tecnicos.filter(id=tecnico.id).exists():
             raise serializers.ValidationError(
                 "El técnico seleccionado no está asignado a esta orden"
             )
@@ -834,9 +834,9 @@ class MovimientoConsumibleSerializer(serializers.ModelSerializer):
 
         proveedor = data.get("proveedor")
         tecnico = data.get("tecnico")
-        if not tecnico:
+        if actividad.es_planificada and not tecnico:
             raise serializers.ValidationError("Debe seleccionar un técnico asignado")
-        if not actividad.orden.tecnicos.filter(id=tecnico.id).exists():
+        if tecnico and not actividad.orden.tecnicos.filter(id=tecnico.id).exists():
             raise serializers.ValidationError(
                 "El técnico seleccionado no está asignado a esta orden"
             )
@@ -892,6 +892,7 @@ class MovimientoConsumibleSerializer(serializers.ModelSerializer):
                     cantidad=descontar,
                     unidad_medida=item.unidad_medida,
                     trabajador=tecnico,
+                    maquinaria=validated_data["actividad"].orden.maquinaria if not tecnico else None,
                     orden_trabajo=validated_data["actividad"].orden,
                 )
                 restante -= descontar
