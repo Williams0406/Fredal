@@ -263,40 +263,101 @@ class ItemViewSet(viewsets.ModelViewSet):
 
         if not actividad_id:
             return Response([])
-        
+
         if item.tipo_insumo == Item.TipoInsumo.CONSUMIBLE:
             return Response([])
 
-        unidades = (
-            ItemUnidad.objects
+        actividad = (
+            ActividadTrabajo.objects
+            .select_related("orden")
+            .filter(id=actividad_id)
+            .first()
+        )
+        if not actividad:
+            return Response([])
+
+        if actividad.es_planificada:
+            unidades = (
+                ItemUnidad.objects
+                .filter(
+                    item=item,
+                    estado__in=[
+                        ItemUnidad.Estado.NUEVO,
+                        ItemUnidad.Estado.USADO,
+                        ItemUnidad.Estado.REPARADO,
+                    ],
+                    historial__almacen__isnull=False,
+                    historial__fecha_fin__isnull=True,
+                )
+                .exclude(estado=ItemUnidad.Estado.INOPERATIVO)
+                .distinct()
+            )
+
+            if proveedor_id:
+                unidades = unidades.filter(
+                    compra_detalle__compra__proveedor_id=proveedor_id
+                )
+
+            return Response([
+                {
+                    "id": u.id,
+                    "serie": u.serie,
+                    "estado": u.estado,
+                }
+                for u in unidades
+            ])
+
+        unidades_planificadas_ids = list(
+            MovimientoRepuesto.objects
             .filter(
-                item=item,
+                actividad__orden=actividad.orden,
+                actividad__es_planificada=True,
+                item_unidad__item=item,
+            )
+            .values_list("item_unidad_id", flat=True)
+        )
+
+        if not unidades_planificadas_ids:
+            return Response([])
+
+        historial_ids = list(
+            HistorialUbicacionItem.objects
+            .filter(
+                orden_trabajo=actividad.orden,
+                item_unidad_id__in=unidades_planificadas_ids,
+            )
+            .order_by("fecha_inicio", "id")
+            .values_list("item_unidad_id", flat=True)
+        )
+
+        unidades_ordenadas_ids = []
+        vistos = set()
+        for unidad_id in historial_ids:
+            if unidad_id in vistos:
+                continue
+            vistos.add(unidad_id)
+            unidades_ordenadas_ids.append(unidad_id)
+
+        unidades_por_id = {
+            u.id: u
+            for u in ItemUnidad.objects.filter(
+                id__in=unidades_ordenadas_ids,
                 estado__in=[
                     ItemUnidad.Estado.NUEVO,
                     ItemUnidad.Estado.USADO,
                     ItemUnidad.Estado.REPARADO,
                 ],
-                historial__almacen__isnull=False,
-                historial__fecha_fin__isnull=True,
-            )
-            .exclude(
-                estado=ItemUnidad.Estado.INOPERATIVO
-            )
-            .distinct()
-        )
-
-        if proveedor_id:
-            unidades = unidades.filter(
-                compra_detalle__compra__proveedor_id=proveedor_id
-            )
+            ).exclude(estado=ItemUnidad.Estado.INOPERATIVO)
+        }
 
         return Response([
             {
-                "id": u.id,
-                "serie": u.serie,
-                "estado": u.estado,
+                "id": unidad_id,
+                "serie": unidades_por_id[unidad_id].serie,
+                "estado": unidades_por_id[unidad_id].estado,
             }
-            for u in unidades
+            for unidad_id in unidades_ordenadas_ids
+            if unidad_id in unidades_por_id
         ])
     
     @action(detail=True, methods=["get"])

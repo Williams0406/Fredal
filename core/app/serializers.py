@@ -687,7 +687,63 @@ class MovimientoRepuestoSerializer(serializers.ModelSerializer):
                 movimiento = super().create(validated_data)
                 actualizar_stock_item(item)
                 return movimiento
+            
 
+            if not actividad.es_planificada:
+                unidades_planificadas = list(
+                    MovimientoRepuesto.objects
+                    .filter(
+                        actividad__orden=actividad.orden,
+                        actividad__es_planificada=True,
+                        item_unidad__item=item,
+                    )
+                    .values_list("item_unidad_id", flat=True)
+                )
+
+                if unidades_planificadas:
+                    unidades_registradas = set(
+                        MovimientoRepuesto.objects
+                        .filter(
+                            actividad__orden=actividad.orden,
+                            actividad__es_planificada=False,
+                            item_unidad__item=item,
+                        )
+                        .values_list("item_unidad_id", flat=True)
+                    )
+
+                    historial_ids = (
+                        HistorialUbicacionItem.objects
+                        .filter(
+                            orden_trabajo=actividad.orden,
+                            item_unidad_id__in=unidades_planificadas,
+                        )
+                        .order_by("fecha_inicio", "id")
+                        .values_list("item_unidad_id", flat=True)
+                    )
+
+                    unidades_planificadas_ordenadas = []
+                    vistos = set()
+                    for unidad_id in historial_ids:
+                        if unidad_id in vistos:
+                            continue
+                        vistos.add(unidad_id)
+                        unidades_planificadas_ordenadas.append(unidad_id)
+
+                    unidad_disponible_id = next(
+                        (
+                            unidad_id
+                            for unidad_id in unidades_planificadas_ordenadas
+                            if unidad_id not in unidades_registradas
+                        ),
+                        None,
+                    )
+
+                    if unidad_disponible_id:
+                        unidad_nueva = ItemUnidad.objects.select_related("item").get(
+                            id=unidad_disponible_id
+                        )
+                        validated_data["item_unidad"] = unidad_nueva
+                        item = unidad_nueva.item
 
             if not tecnico:
                 # 🔎 1️⃣ Buscar unidad(es) ACTUAL(ES) del mismo item en la maquinaria

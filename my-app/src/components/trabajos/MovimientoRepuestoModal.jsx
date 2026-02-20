@@ -165,7 +165,9 @@ export default function MovimientoRepuestoModal({ open, onClose, actividad, onSa
   }
 
   const unidadesConsumible = unidadesMedida.filter((u) => u.dimension === selectedItem?.dimension);
-  const unidadesDisponiblesCount = unidades.filter((u) => u.estado === form.estado_unidad).length;
+  const unidadesDisponiblesCount = esActividadPlanificada
+    ? unidades.filter((u) => u.estado === form.estado_unidad).length
+    : unidades.length;
 
   const handleAddUnidad = () => {
     if (!form.item || !form.cantidad) return;
@@ -216,12 +218,17 @@ export default function MovimientoRepuestoModal({ open, onClose, actividad, onSa
       return;
     }
 
-    const unidadesDisponibles = unidades.filter(
-      (u) => u.estado === form.estado_unidad && !movimientos.some((m) => String(m.unidad_id) === String(u.id))
-    );
+    const unidadesDisponibles = unidades.filter((u) => {
+      const noRegistrada = !movimientos.some((m) => String(m.unidad_id) === String(u.id));
+      if (!noRegistrada) return false;
+      return esActividadPlanificada ? u.estado === form.estado_unidad : true;
+    });
 
     if (unidadesDisponibles.length < cantidad) {
-      alert("No hay suficientes unidades disponibles con ese estado");
+      alert(esActividadPlanificada
+        ? "No hay suficientes unidades disponibles con ese estado"
+        : "No hay suficientes unidades disponibles según lo planificado"
+      );
       return;
     }
 
@@ -281,15 +288,16 @@ export default function MovimientoRepuestoModal({ open, onClose, actividad, onSa
       });
 
       const cantidadUnidades = Math.floor(cantidad);
-      const disponibles = (unidadesRes.data || []).filter(
-        (unidad) =>
-          unidad.estado === "NUEVO" &&
+      const disponibles = (unidadesRes.data || []).filter((unidad) => {
+        const noExiste =
           !movimientos.some((m) => String(m.unidad_id) === String(unidad.id)) &&
-          !nuevosMovimientos.some((m) => String(m.unidad_id) === String(unidad.id))
-      );
+          !nuevosMovimientos.some((m) => String(m.unidad_id) === String(unidad.id));
+        if (!noExiste) return false;
+        return esActividadPlanificada ? unidad.estado === "NUEVO" : true;
+      });
 
       if (disponibles.length < cantidadUnidades) {
-        alert(`No hay suficientes unidades NUEVAS para ${item.nombre}.`);
+        alert(`No hay suficientes unidades disponibles para ${item.nombre}.`);
         continue;
       }
 
