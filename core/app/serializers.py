@@ -875,6 +875,7 @@ class MovimientoConsumibleSerializer(serializers.ModelSerializer):
     def create(self, validated_data):
         with transaction.atomic():
             item = validated_data["item"]
+            actividad = validated_data["actividad"]
             proveedor = validated_data.pop("proveedor", None)
             tecnico = validated_data.pop("tecnico", None)
             unidad_mov = validated_data.get("unidad_medida") or item.unidad_medida
@@ -891,6 +892,55 @@ class MovimientoConsumibleSerializer(serializers.ModelSerializer):
             )
             if proveedor:
                 lotes = lotes.filter(compra_detalle__compra__proveedor=proveedor)
+            
+            if not actividad.es_planificada:
+                now = timezone.now()
+                historiales_qs = (
+                    HistorialConsumible.objects
+                    .select_for_update()
+                    .filter(
+                        item=item,
+                        orden_trabajo=actividad.orden,
+                        trabajador__isnull=False,
+                        fecha_fin__isnull=True,
+                    )
+                    .order_by("fecha_inicio", "id")
+                )
+                if tecnico:
+                    historiales_qs = historiales_qs.filter(trabajador=tecnico)
+
+                historiales_asignados = list(historiales_qs)
+                restante_asignado = Decimal(cantidad_requerida)
+
+                for historial in historiales_asignados:
+                    if restante_asignado <= 0:
+                        break
+
+                    cantidad_historial = Decimal(historial.cantidad)
+                    consumido = min(cantidad_historial, restante_asignado)
+
+                    historial.fecha_fin = now
+                    historial.cantidad = consumido
+                    historial.save(update_fields=["fecha_fin", "cantidad"])
+
+                    sobrante = cantidad_historial - consumido
+                    if sobrante > 0:
+                        historial_restante = HistorialConsumible.objects.create(
+                            lote=historial.lote,
+                            item=historial.item,
+                            cantidad=sobrante,
+                            unidad_medida=historial.unidad_medida,
+                            trabajador=historial.trabajador,
+                            maquinaria=historial.maquinaria,
+                            almacen=historial.almacen,
+                            orden_trabajo=historial.orden_trabajo,
+                        )
+                        HistorialConsumible.objects.filter(pk=historial_restante.pk).update(
+                            fecha_inicio=historial.fecha_inicio,
+                            fecha_fin=None,
+                        )
+
+                    restante_asignado -= consumido
 
             restante = Decimal(cantidad_requerida)
             for lote in lotes:
@@ -898,16 +948,19 @@ class MovimientoConsumibleSerializer(serializers.ModelSerializer):
                     break
                 disponible = Decimal(lote.cantidad_disponible)
                 descontar = min(disponible, restante)
-                lote.cantidad_disponible = disponible - descontar
-                lote.save(update_fields=["cantidad_disponible"])
+                
+                if not actividad.es_planificada:
+                    lote.cantidad_disponible = disponible - descontar
+                    lote.save(update_fields=["cantidad_disponible"])
+
                 HistorialConsumible.objects.create(
                     lote=lote,
                     item=item,
                     cantidad=descontar,
                     unidad_medida=item.unidad_medida,
                     trabajador=tecnico,
-                    maquinaria=validated_data["actividad"].orden.maquinaria if not tecnico else None,
-                    orden_trabajo=validated_data["actividad"].orden,
+                    maquinaria=actividad.orden.maquinaria if not tecnico else None,
+                    orden_trabajo=actividad.orden,
                 )
                 restante -= descontar
 
@@ -917,7 +970,8 @@ class MovimientoConsumibleSerializer(serializers.ModelSerializer):
                 )
 
             movimiento = super().create(validated_data)
-            actualizar_stock_item(item)
+            if not actividad.es_planificada:
+                actualizar_stock_item(item)
             return movimiento
 
 class ActividadTrabajoSerializer(serializers.ModelSerializer):
