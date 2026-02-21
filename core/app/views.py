@@ -125,7 +125,12 @@ class ItemViewSet(viewsets.ModelViewSet):
                 unidades__compra_detalle__compra__proveedor_id=proveedor_id,
                 unidades__historial__almacen__isnull=False,
                 unidades__historial__fecha_fin__isnull=True,
-            ).exclude(unidades__estado=ItemUnidad.Estado.INOPERATIVO)
+                unidades__estado__in=[
+                    ItemUnidad.Estado.NUEVO,
+                    ItemUnidad.Estado.USADO,
+                    ItemUnidad.Estado.REPARADO,
+                ],
+            )
 
             consumibles = queryset.filter(
                 tipo_insumo=Item.TipoInsumo.CONSUMIBLE,
@@ -225,8 +230,11 @@ class ItemViewSet(viewsets.ModelViewSet):
             compras__detalles__item__tipo_insumo=Item.TipoInsumo.REPUESTO,
             compras__detalles__item__unidades__historial__almacen__isnull=False,
             compras__detalles__item__unidades__historial__fecha_fin__isnull=True,
-        ).exclude(
-            compras__detalles__item__unidades__estado=ItemUnidad.Estado.INOPERATIVO
+            compras__detalles__item__unidades__estado__in=[
+                ItemUnidad.Estado.NUEVO,
+                ItemUnidad.Estado.USADO,
+                ItemUnidad.Estado.REPARADO,
+            ],
         )
 
         proveedores_consumible = Proveedor.objects.filter(

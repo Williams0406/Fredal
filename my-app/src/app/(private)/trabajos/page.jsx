@@ -269,7 +269,13 @@ export default function TrabajosPage() {
           setModalOpen(false);
           setSelected(null);
         }}
-        onSaved={loadTrabajos}
+        onSaved={async (savedTrabajo, isEdit) => {
+          await loadTrabajos();
+          if (!isEdit && savedTrabajo?.id) {
+            setDetalleId(savedTrabajo.id);
+            setDetalleOpen(true);
+          }
+        }}
       />
 
       <TrabajoDetalleModal

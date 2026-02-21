@@ -125,13 +125,16 @@ export default function TrabajoFormModal({
     });
 
     try {
+      let savedTrabajo = null;
       if (isEdit) {
-        await trabajoAPI.update(trabajo.id, payload);
+        const res = await trabajoAPI.update(trabajo.id, payload);
+        savedTrabajo = res.data;
       } else {
-        await trabajoAPI.create(payload);
+        const res = await trabajoAPI.create(payload);
+        savedTrabajo = res.data;
       }
 
-      onSaved();
+      onSaved?.(savedTrabajo, isEdit);
       onClose();
     } catch (err) {
       setError(err.response?.data?.detail || "Error al guardar la orden");

@@ -1,6 +1,6 @@
 // src/components/trabajos/TrabajoDetalleModal.jsx
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   trabajoAPI,
   trabajadorAPI,
@@ -49,7 +49,7 @@ export default function TrabajoDetalleModal({ open, trabajoId, onClose, onUpdate
 
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
-  const [editMode, setEditMode] = useState(false);
+  const saveSeqRef = useRef(0);
 
   const [showActividadModal, setShowActividadModal] = useState(false);
   const [actividadModalPlanificada, setActividadModalPlanificada] = useState(false);
@@ -65,7 +65,7 @@ export default function TrabajoDetalleModal({ open, trabajoId, onClose, onUpdate
   const esEnProceso = trabajo?.estatus === "EN_PROCESO";
   const esFinalizado = trabajo?.estatus === "FINALIZADO";
 
-  const readOnly = esFinalizado || !editMode;
+  const readOnly = esFinalizado;
 
   const actividadesPlanificadas = actividades.filter((a) => a.es_planificada);
   const actividadesRegistradas = actividades.filter((a) => !a.es_planificada);
@@ -160,6 +160,7 @@ export default function TrabajoDetalleModal({ open, trabajoId, onClose, onUpdate
             const consumibles = consumibleRes.data.map((m) => ({
               ...m,
               tipo: "CONSUMIBLE",
+              unidad_medida: m.unidad_medida_simbolo || m.unidad_medida_detalle || "",
             }));
 
             result[a.id] = [...repuestos, ...consumibles];
@@ -191,47 +192,56 @@ export default function TrabajoDetalleModal({ open, trabajoId, onClose, onUpdate
   /* =========================
      HANDLERS
   ========================= */
+  const buildPatchPayload = (currentForm) => ({
+    prioridad: currentForm.prioridad,
+    lugar: currentForm.lugar,
+    estado_equipo: currentForm.estado_equipo || null,
+    fecha: currentForm.fecha,
+    hora_inicio: currentForm.hora_inicio,
+    hora_fin: currentForm.hora_fin,
+    horometro: currentForm.horometro,
+    ubicacion_detalle: currentForm.ubicacion_detalle || "",
+    observaciones: currentForm.observaciones || "",
+    maquinaria: currentForm.maquinaria,
+    tecnicos: currentForm.tecnicos,
+  });
+
+  const persistCambios = async (nextForm) => {
+    setForm(nextForm);
+    const seq = ++saveSeqRef.current;
+    setSaving(true);
+    try {
+      const res = await trabajoAPI.patch(trabajoId, buildPatchPayload(nextForm));
+      if (seq !== saveSeqRef.current) return;
+      setTrabajo(res.data);
+      setForm((prev) => ({ ...prev, ...res.data }));
+      onUpdated?.(res.data);
+    } catch (error) {
+      console.error("Error guardando cambios automáticos", error);
+    } finally {
+      if (seq === saveSeqRef.current) {
+        setSaving(false);
+      }
+    }
+  };
+
   const handleChange = (e) => {
     const { name, value } = e.target;
-    setForm((prev) => ({ ...prev, [name]: value }));
+    const parsedValue = name === "maquinaria" && value !== "" ? Number(value) : value;
+    const nextForm = { ...form, [name]: parsedValue };
+    persistCambios(nextForm);
   };
 
   const toggleTecnico = (id) => {
     if (!canAssignTecnicos || readOnly) return;
-    setForm((prev) => {
-      const actuales = prev.tecnicos || [];
-      return {
-        ...prev,
-        tecnicos: actuales.includes(id)
-          ? actuales.filter((t) => t !== id)
-          : [...actuales, id],
-      };
-    });
-  };
-
-  const handleSave = async () => {
-    setSaving(true);
-    try {
-      const res = await trabajoAPI.patch(trabajoId, {
-        prioridad: form.prioridad,
-        lugar: form.lugar,
-        estado_equipo: form.estado_equipo || null,
-        fecha: form.fecha,
-        hora_inicio: form.hora_inicio,
-        hora_fin: form.hora_fin,
-        horometro: form.horometro,
-        ubicacion_detalle: form.ubicacion_detalle || "",
-        observaciones: form.observaciones || "",
-        maquinaria: form.maquinaria,
-        tecnicos: form.tecnicos,
-      });
-
-      setTrabajo(res.data);
-      setForm(res.data);
-      setEditMode(false);
-    } finally {
-      setSaving(false);
-    }
+    const actuales = form.tecnicos || [];
+    const nextForm = {
+      ...form,
+      tecnicos: actuales.includes(id)
+        ? actuales.filter((t) => t !== id)
+        : [...actuales, id],
+    };
+    persistCambios(nextForm);
   };
 
   const handleIniciarTrabajo = async () => {
@@ -258,7 +268,6 @@ export default function TrabajoDetalleModal({ open, trabajoId, onClose, onUpdate
     setTrabajo(null);
     setForm(null);
     setLoading(true);
-    setEditMode(false);
 
     setShowActividadModal(false);
     setActividadModalPlanificada(false);
@@ -299,37 +308,6 @@ export default function TrabajoDetalleModal({ open, trabajoId, onClose, onUpdate
             </div>
 
             <div className="flex items-center gap-3">
-              {!esFinalizado && (
-                !editMode ? (
-                  <button
-                    className="text-sm font-medium text-[#1e3a8a] hover:text-[#1e3a8a]/80 
-                             transition-colors duration-200 flex items-center gap-1"
-                    onClick={() => setEditMode(true)}
-                  >
-                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} 
-                            d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
-                    </svg>
-                    Editar
-                  </button>
-                ) : (
-                  <button
-                    className="text-sm font-medium text-gray-600 hover:text-gray-800 
-                             transition-colors duration-200"
-                    onClick={() => {
-                      setForm({
-                        ...trabajo,
-                        fecha: trabajo.fecha || getToday(),
-                        hora_inicio: trabajo.hora_inicio || getCurrentTime(),
-                      });
-                      setEditMode(false);
-                    }}
-                  >
-                    Cancelar edición
-                  </button>
-                )
-              )}
-
               <button
                 onClick={handleCloseAll}
                 className="text-gray-400 hover:text-gray-600 transition-colors duration-200"
@@ -682,7 +660,7 @@ export default function TrabajoDetalleModal({ open, trabajoId, onClose, onUpdate
         {/* FOOTER STICKY CON ACCIONES */}
         <div className="sticky bottom-0 bg-gray-50 border-t border-gray-200 px-6 py-4 rounded-b-xl flex-shrink-0">
           <div className="flex justify-end gap-3">
-            {esPendiente && !editMode && (
+            {esPendiente && (
               <button
                 className="px-5 py-2.5 text-sm font-medium text-white bg-[#84cc16]
                          rounded-lg hover:bg-[#84cc16]/90 focus:outline-none 
@@ -700,7 +678,7 @@ export default function TrabajoDetalleModal({ open, trabajoId, onClose, onUpdate
               </button>
             )}
 
-            {esEnProceso && !editMode && (
+            {esEnProceso && (
               <button
                 className="px-5 py-2.5 text-sm font-medium text-white bg-red-600
                          rounded-lg hover:bg-red-700 focus:outline-none 
@@ -716,31 +694,6 @@ export default function TrabajoDetalleModal({ open, trabajoId, onClose, onUpdate
               </button>
             )}
 
-            {editMode && (
-              <button
-                className="px-5 py-2.5 text-sm font-medium text-white bg-[#1e3a8a]
-                         rounded-lg hover:bg-[#1e3a8a]/90 focus:outline-none 
-                         focus:ring-2 focus:ring-[#1e3a8a] focus:ring-offset-2
-                         transition-all duration-200 disabled:opacity-50 flex items-center gap-2"
-                onClick={handleSave}
-                disabled={saving}
-              >
-                {saving ? (
-                  <>
-                    <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
-                    Guardando...
-                  </>
-                ) : (
-                  <>
-                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} 
-                            d="M5 13l4 4L19 7" />
-                    </svg>
-                    Guardar Cambios
-                  </>
-                )}
-              </button>
-            )}
 
             <button
               className="px-5 py-2.5 text-sm font-medium text-gray-700 bg-white 

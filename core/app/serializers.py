@@ -603,11 +603,22 @@ class MovimientoRepuestoSerializer(serializers.ModelSerializer):
         historial_previo = (
             HistorialUbicacionItem.objects
             .filter(item_unidad=obj.item_unidad, fecha_inicio__lt=obj.fecha)
+            .exclude(orden_trabajo_id=obj.actividad.orden_id)
             .order_by("-fecha_inicio")
             .first()
         )
         if historial_previo:
             return historial_previo.estado
+
+        historial_cercano = (
+            HistorialUbicacionItem.objects
+            .filter(item_unidad=obj.item_unidad, fecha_inicio__lt=obj.fecha)
+            .order_by("-fecha_inicio")
+            .first()
+        )
+        if historial_cercano:
+            return historial_cercano.estado
+        
         return obj.item_unidad.estado
     
     def get_tecnico_id(self, obj):
@@ -669,19 +680,16 @@ class MovimientoRepuestoSerializer(serializers.ModelSerializer):
         tecnico = validated_data.pop("tecnico", None)
         maquinaria = actividad.orden.maquinaria
         item = unidad_nueva.item
+        estado_original_unidad = unidad_nueva.estado
 
         with transaction.atomic():
 
             if actividad.es_planificada:
-                if unidad_nueva.estado == ItemUnidad.Estado.NUEVO:
-                    unidad_nueva.estado = ItemUnidad.Estado.USADO
-                    unidad_nueva.save(update_fields=["estado"])
-
                 HistorialUbicacionItem.objects.create(
                     item_unidad=unidad_nueva,
                     orden_trabajo=actividad.orden,
                     trabajador=tecnico,
-                    estado=unidad_nueva.estado,
+                    estado=estado_original_unidad,
                 )
 
                 movimiento = super().create(validated_data)
@@ -744,15 +752,16 @@ class MovimientoRepuestoSerializer(serializers.ModelSerializer):
                         )
                         validated_data["item_unidad"] = unidad_nueva
                         item = unidad_nueva.item
+                        estado_original_unidad = unidad_nueva.estado
 
             if not tecnico:
-                # 🔎 1️⃣ Buscar unidad(es) ACTUAL(ES) del mismo item en la maquinaria
                 unidades_en_actividad = (
                     MovimientoRepuesto.objects
                     .filter(actividad=actividad)
                     .values_list("item_unidad_id", flat=True)
                 )
-                historiales_actuales = (
+
+                historial_previo = (
                     HistorialUbicacionItem.objects
                     .select_related("item_unidad")
                     .filter(
@@ -760,27 +769,37 @@ class MovimientoRepuestoSerializer(serializers.ModelSerializer):
                         fecha_fin__isnull=True,
                         item_unidad__item=item,
                     )
+                    .exclude(item_unidad=unidad_nueva)
                     .exclude(item_unidad_id__in=unidades_en_actividad)
-                    .order_by("fecha_inicio")
+                    .order_by("fecha_inicio", "id")
+                    .first()
                 )
 
-                # 🔁 2️⃣ Si existe, marcar UNA como INOPERATIVO
-                historial_actual = historiales_actuales.first()
-                if historial_actual:
-                    unidad_anterior = historial_actual.item_unidad
-                    unidad_anterior.estado = ItemUnidad.Estado.INOPERATIVO
-                    unidad_anterior.save(update_fields=["estado"])
+                if historial_previo:
+                    tecnico_resguardo = (
+                        actividad.orden.tecnicos
+                        .order_by("id")
+                        .first()
+                    )
+                    if not tecnico_resguardo:
+                        raise serializers.ValidationError(
+                            "La orden debe tener al menos un técnico asignado para reasignar unidades previas"
+                        )
+
+                    unidad_anterior = historial_previo.item_unidad
+                    if unidad_anterior.estado != ItemUnidad.Estado.INOPERATIVO:
+                        unidad_anterior.estado = ItemUnidad.Estado.INOPERATIVO
+                        unidad_anterior.save(update_fields=["estado"])
 
                     HistorialUbicacionItem.objects.create(
                         item_unidad=unidad_anterior,
-                        maquinaria=maquinaria,
                         orden_trabajo=actividad.orden,
-                        estado=ItemUnidad.Estado.INOPERATIVO
+                        trabajador=tecnico_resguardo,
+                        estado=ItemUnidad.Estado.INOPERATIVO,
                     )
 
-
-            # ✅ 3️⃣ Asignar nueva unidad
-            if unidad_nueva.estado == ItemUnidad.Estado.NUEVO:
+            # ✅ 3️⃣ En actividades registradas la unidad pasa a estado USADO
+            if unidad_nueva.estado != ItemUnidad.Estado.USADO:
                 unidad_nueva.estado = ItemUnidad.Estado.USADO
                 unidad_nueva.save(update_fields=["estado"])
 
@@ -788,7 +807,7 @@ class MovimientoRepuestoSerializer(serializers.ModelSerializer):
             HistorialUbicacionItem.objects.create(
                 item_unidad=unidad_nueva,
                 orden_trabajo=actividad.orden,
-                estado=unidad_nueva.estado,
+                estado=ItemUnidad.Estado.USADO,
                 **destino,
             )
 
@@ -809,6 +828,10 @@ class MovimientoConsumibleSerializer(serializers.ModelSerializer):
     )
     unidad_medida_detalle = serializers.CharField(
         source="unidad_medida.nombre",
+        read_only=True,
+    )
+    unidad_medida_simbolo = serializers.CharField(
+        source="unidad_medida.simbolo",
         read_only=True,
     )
     proveedor = serializers.PrimaryKeyRelatedField(
@@ -834,6 +857,7 @@ class MovimientoConsumibleSerializer(serializers.ModelSerializer):
             "cantidad",
             "unidad_medida",
             "unidad_medida_detalle",
+            "unidad_medida_simbolo",
             "fecha",
             "item_id",
             "item_codigo",
