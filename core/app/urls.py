@@ -23,12 +23,14 @@ from .views import (
     UnidadMedidaViewSet,
     UnidadRelacionViewSet,
     ItemGrupoViewSet,
+    TipoCambioDiarioViewSet,
 )
 
 router = DefaultRouter()
 router.register(r"items", ItemViewSet)
 router.register(r"maquinarias", MaquinariaViewSet)
 router.register(r"compras", CompraViewSet)
+router.register(r"tipos-cambio", TipoCambioDiarioViewSet)
 router.register(r"trabajadores", TrabajadorViewSet)
 router.register(r"users", UserViewSet)
 router.register(r"trabajos", OrdenTrabajoViewSet)

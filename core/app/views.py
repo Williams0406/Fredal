@@ -29,6 +29,7 @@ from .models import (
     CodigoRegistro,
     PerfilUsuario,
     HistorialUbicacionItem,
+    HistorialConsumible,
     ItemProveedor,
     Proveedor,
     ItemUnidad,
@@ -40,6 +41,7 @@ from .models import (
     UnidadRelacion,
     ItemGrupo,
     LoteConsumible,
+    TipoCambioDiario,
 )
 from .serializers import (
     UserSerializer,
@@ -59,6 +61,7 @@ from .serializers import (
     TrabajadorAdminSerializer,
     GroupSerializer,
     ItemDetalleSerializer,
+    HistorialConsumibleActivoSerializer,
     HistorialUbicacionItemSerializer,
     KardexUnidadSerializer,
     ItemProveedorSerializer,
@@ -71,6 +74,7 @@ from .serializers import (
     UnidadMedidaSerializer,
     UnidadRelacionSerializer,
     ItemGrupoSerializer,
+    TipoCambioDiarioSerializer,
 )
 from .permissions import (
     IsAdmin,
@@ -157,6 +161,66 @@ class ItemViewSet(viewsets.ModelViewSet):
         ).order_by("-fecha_inicio")
 
         serializer = HistorialUbicacionItemSerializer(qs, many=True)
+        return Response(serializer.data)
+    
+    @action(detail=True, methods=["post"])
+    def cambiar_ubicacion_consumible(self, request, pk=None):
+        item = self.get_object()
+        historial_id = request.data.get("historial_id")
+        almacen_id = request.data.get("almacen_id")
+        maquinaria_id = request.data.get("maquinaria_id")
+        trabajador_id = request.data.get("trabajador_id")
+
+        historial = HistorialConsumible.objects.filter(
+            id=historial_id,
+            item=item,
+            fecha_fin__isnull=True,
+        ).first()
+
+        if not historial:
+            return Response({"detail": "Historial consumible no encontrado"}, status=status.HTTP_404_NOT_FOUND)
+
+        destinos = [bool(almacen_id), bool(maquinaria_id), bool(trabajador_id)]
+        if sum(destinos) != 1:
+            return Response({"detail": "Debe seleccionar un único destino"}, status=status.HTTP_400_BAD_REQUEST)
+
+        data = {
+            "lote": historial.lote,
+            "item": historial.item,
+            "cantidad": historial.cantidad,
+            "unidad_medida": historial.unidad_medida,
+            "orden_trabajo": historial.orden_trabajo,
+        }
+
+        if almacen_id:
+            data["almacen"] = Almacen.objects.filter(id=almacen_id).first()
+        if maquinaria_id:
+            data["maquinaria"] = Maquinaria.objects.filter(id=maquinaria_id).first()
+        if trabajador_id:
+            data["trabajador"] = Trabajador.objects.filter(id=trabajador_id).first()
+
+        if not any([data.get("almacen"), data.get("maquinaria"), data.get("trabajador")]):
+            return Response({"detail": "Destino inválido"}, status=status.HTTP_400_BAD_REQUEST)
+
+        historial.fecha_fin = timezone.now()
+        historial.save(update_fields=["fecha_fin"])
+
+        nuevo_historial = HistorialConsumible.objects.create(**data)
+        serializer = HistorialConsumibleActivoSerializer(nuevo_historial)
+        return Response(serializer.data, status=status.HTTP_201_CREATED)
+
+    @action(detail=True, methods=["get"])
+    def ubicaciones_consumible(self, request, pk=None):
+        item = self.get_object()
+
+        historial = (
+            HistorialConsumible.objects
+            .filter(item=item, fecha_fin__isnull=True)
+            .select_related("lote", "maquinaria", "almacen", "trabajador")
+            .order_by("-fecha_inicio")
+        )
+
+        serializer = HistorialConsumibleActivoSerializer(historial, many=True)
         return Response(serializer.data)
 
     # 📍 UBICACIÓN ACTUAL
@@ -385,6 +449,30 @@ class ItemViewSet(viewsets.ModelViewSet):
             "cantidad_disponible": total,
             "unidad_medida": item.unidad_medida.nombre if item.unidad_medida else "",
         })
+
+    @staticmethod
+    def _costo_unitario_pen(detalle):
+        costo_unitario = detalle.costo_unitario
+        moneda = detalle.moneda
+
+        if moneda == Compra.Moneda.PEN:
+            return costo_unitario
+
+        tipo_cambio = TipoCambioDiario.objects.filter(fecha=detalle.compra.fecha).first()
+        if not tipo_cambio:
+            return None
+
+        if moneda == Compra.Moneda.USD:
+            if tipo_cambio.compra_usd <= 0:
+                return None
+            return costo_unitario * tipo_cambio.compra_usd
+
+        if moneda == Compra.Moneda.EUR:
+            if tipo_cambio.compra_eur <= 0:
+                return None
+            return costo_unitario * tipo_cambio.compra_eur
+
+        return None
     
     @action(detail=True, methods=["get"])
     def kardex_contable(self, request, pk=None):
@@ -418,6 +506,10 @@ class ItemViewSet(viewsets.ModelViewSet):
 
         # ===== COMPRAS =====
         for c in compras:
+            costo_unitario_pen = self._costo_unitario_pen(c)
+            if costo_unitario_pen is None:
+                continue
+
             eventos.append({
                 "fecha": timezone.make_aware(
                     datetime.combine(c.compra.fecha, time.min),
@@ -425,7 +517,7 @@ class ItemViewSet(viewsets.ModelViewSet):
                 ),
                 "tipo": "COMPRA",
                 "cantidad": c.cantidad,
-                "costo_unitario": c.costo_unitario,
+                "costo_unitario": costo_unitario_pen,
                 "registro": f"{c.compra.tipo_comprobante} {c.compra.codigo_comprobante}",
             })
 
@@ -436,7 +528,9 @@ class ItemViewSet(viewsets.ModelViewSet):
             orden = s.actividad.orden if s.actividad else None
             maquinaria = orden.maquinaria if orden else None
 
-            costo_unitario = detalle.costo_unitario if detalle else Decimal("0.00")
+            costo_unitario = self._costo_unitario_pen(detalle) if detalle else Decimal("0.00")
+            if costo_unitario is None:
+                continue
 
             eventos.append({
                 "fecha": s.fecha,
@@ -598,6 +692,31 @@ class MaquinariaViewSet(viewsets.ModelViewSet):
         if self.action == "retrieve":
             return MaquinariaDetalleSerializer
         return MaquinariaSerializer
+    
+    @staticmethod
+    def _costo_unitario_pen_por_detalle(detalle):
+        if not detalle:
+            return Decimal("0.00")
+
+        costo_unitario = detalle.costo_unitario
+        if detalle.moneda == Compra.Moneda.PEN:
+            return costo_unitario
+
+        tipo_cambio = TipoCambioDiario.objects.filter(fecha=detalle.compra.fecha).first()
+        if not tipo_cambio:
+            return Decimal("0.00")
+
+        if detalle.moneda == Compra.Moneda.USD:
+            if tipo_cambio.compra_usd <= 0:
+                return Decimal("0.00")
+            return costo_unitario * tipo_cambio.compra_usd
+
+        if detalle.moneda == Compra.Moneda.EUR:
+            if tipo_cambio.compra_eur <= 0:
+                return Decimal("0.00")
+            return costo_unitario * tipo_cambio.compra_eur
+
+        return Decimal("0.00")
 
     @action(detail=True, methods=["get"], permission_classes=[IsAuthenticated])
     def detalle(self, request, pk=None):
@@ -629,13 +748,7 @@ class MaquinariaViewSet(viewsets.ModelViewSet):
         for h in historiales:
             unidad = h.item_unidad
             detalle = unidad.compra_detalle
-            compra = detalle.compra if detalle else None
-
-            costo = (
-                detalle.costo_unitario
-                if detalle
-                else Decimal("0.00")
-            )
+            costo = self._costo_unitario_pen_por_detalle(detalle)
 
             centro_costos += costo
 
@@ -657,6 +770,12 @@ class MaquinariaViewSet(viewsets.ModelViewSet):
             "unidades": unidades,
             "centro_costos": round(centro_costos, 2),
         })
+
+
+class TipoCambioDiarioViewSet(viewsets.ModelViewSet):
+    queryset = TipoCambioDiario.objects.all().order_by("-fecha")
+    serializer_class = TipoCambioDiarioSerializer
+    permission_classes = [CompraPermission]
 
 class CompraViewSet(viewsets.ModelViewSet):
     queryset = CompraDetalle.objects.all().order_by("-compra__fecha")

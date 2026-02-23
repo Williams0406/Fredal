@@ -365,26 +365,32 @@ export default function MovimientoRepuestoModal({ open, onClose, actividad, onSa
 
   return (
     <div className="fixed inset-0 bg-black/40 z-[60] flex items-center justify-center p-4" onClick={onClose}>
-      <div className="bg-white rounded-2xl w-full max-w-5xl max-h-[90vh] flex flex-col shadow-2xl" onClick={(e)=>e.stopPropagation()}>
+      <div className="bg-white rounded-2xl w-full max-w-6xl max-h-[90vh] flex flex-col shadow-2xl" onClick={(e)=>e.stopPropagation()}>
         <div className="border-b border-gray-200 px-6 py-5 bg-gradient-to-r from-slate-50 to-blue-50 rounded-t-2xl">
           <h3 className="text-xl font-semibold text-[#1e3a8a]">Movimiento de Items</h3>
-          <p className="text-sm text-slate-600 mt-1">Selecciona primero el item y luego completa la asignación para registrarlo en la actividad.</p>
+          <p className="text-sm text-slate-600 mt-1">Selecciona ítem, completa los datos y agrega al listado antes de guardar.</p>
+          <div className="mt-3 flex flex-wrap gap-2 text-xs">
+            <span className="px-2.5 py-1 rounded-full bg-white border text-slate-700">Registros: {movimientosFiltrados.length}</span>
+            <span className="px-2.5 py-1 rounded-full bg-white border text-slate-700">Nuevos: {movimientosNew.length}</span>
+            <span className="px-2.5 py-1 rounded-full bg-white border text-slate-700">Guardados: {movimientosDB.length}</span>
+          </div>
         </div>
+
         <div className="flex-1 overflow-y-auto px-6 py-6 space-y-6">
           <ItemGroupSelector onApply={handleApplyGroup} />
 
           {requiereProveedorTecnico && (
             <div className="rounded-xl border border-blue-100 bg-blue-50 px-4 py-3 text-sm text-blue-800">
-              <strong>Orden sugerido:</strong> Item → Cantidad → Unidad → Estado → Proveedor → Técnico asignado.
+              <strong>Tip UX:</strong> selecciona proveedor y técnico primero para agilizar el registro de varios ítems.
             </div>
           )}
 
-          <div className="grid grid-cols-1 md:grid-cols-6 gap-4 bg-slate-50 border border-slate-200 rounded-xl p-4">
-            <div className="md:col-span-2 relative">
-              <label className="block text-sm mb-2">Item</label>
+          <div className="grid grid-cols-1 md:grid-cols-12 gap-4 bg-slate-50 border border-slate-200 rounded-xl p-4">
+            <div className="md:col-span-4 relative">
+              <label className="block text-xs font-semibold text-gray-600 mb-1">Item</label>
               <input
-                className="w-full px-3 py-2 border rounded-lg bg-white"
-                placeholder="Buscar item"
+                className="w-full px-3 py-2.5 border border-gray-300 rounded-lg bg-white text-sm focus:ring-2 focus:ring-[#1e3a8a]"
+                placeholder="Buscar por código o nombre"
                 value={itemSearch}
                 onChange={(e) => {
                   setItemSearch(e.target.value);
@@ -393,33 +399,81 @@ export default function MovimientoRepuestoModal({ open, onClose, actividad, onSa
                 }}
               />
               {showItemDropdown && itemSearch && (
-                <div className="absolute z-30 bg-white border rounded-lg mt-1 max-h-56 overflow-y-auto shadow-lg w-full">
-                  {itemsFiltrados.map((i) => (
-                    <button key={i.id} type="button" className="block w-full text-left px-3 py-2 hover:bg-blue-50" onClick={() => { setForm((p) => ({ ...p, item: String(i.id) })); setItemSearch(`${i.codigo} - ${i.nombre}`); setShowItemDropdown(false); }}>
-                      {i.codigo} - {i.nombre}
-                    </button>
-                  ))}
+                <div className="absolute z-30 bg-white border border-gray-200 rounded-lg mt-1 max-h-56 overflow-y-auto shadow-lg w-full">
+                  {itemsFiltrados.length === 0 ? (
+                    <p className="px-3 py-2 text-sm text-gray-500">Sin resultados.</p>
+                  ) : (
+                    itemsFiltrados.map((i) => (
+                      <button
+                        key={i.id}
+                        type="button"
+                        className="block w-full text-left px-3 py-2 text-sm hover:bg-blue-50"
+                        onClick={() => {
+                          setForm((p) => ({ ...p, item: String(i.id) }));
+                          setItemSearch(`${i.codigo} - ${i.nombre}`);
+                          setShowItemDropdown(false);
+                        }}
+                      >
+                        {i.codigo} - {i.nombre}
+                      </button>
+                    ))
+                  )}
                 </div>
               )}
             </div>
 
-            <div><label className="block text-sm mb-2">Cantidad</label><input type="number" min={esConsumible ? "0.01" : "1"} step={esConsumible ? "0.01" : "1"} className="w-full px-3 py-2 border rounded" value={form.cantidad} onChange={(e)=>setForm((p)=>({...p,cantidad:e.target.value}))} /></div>
-            <div>{esConsumible ? <><label className="block text-sm mb-2">Unidad</label><select className="w-full px-3 py-2 border rounded" value={form.unidad_conversion} onChange={(e)=>setForm((p)=>({...p,unidad_conversion:e.target.value}))}><option value="">{selectedItem?.unidad_medida_detalle?.nombre ? `Por defecto: ${selectedItem.unidad_medida_detalle.nombre}` : "Selecciona unidad"}</option>{unidadesConsumible.map((u)=><option key={u.id} value={u.id}>{u.nombre}{u.simbolo ? ` (${u.simbolo})` : ""}</option>)}</select></> : <><label className="block text-sm mb-2">Unidad</label><input disabled className="w-full px-3 py-2 border rounded bg-gray-50" value={selectedItem?.unidad_medida_detalle?.nombre || ""} /></>}</div>
-            <div><label className="block text-sm mb-2">Estado</label>{esConsumible ? <input disabled className="w-full px-3 py-2 border rounded bg-gray-50 font-medium" value="NUEVO" /> : <><select className="w-full px-3 py-2 border rounded" value={form.estado_unidad} onChange={(e)=>setForm((p)=>({...p,estado_unidad:e.target.value}))}><option value="">Seleccione estado</option><option value="NUEVO">NUEVO</option><option value="USADO">USADO</option><option value="REPARADO">REPARADO</option></select><p className="text-xs text-gray-500 mt-1">Disponibles: {unidadesDisponiblesCount}</p></>}</div>
+            <div className="md:col-span-2">
+              <label className="block text-xs font-semibold text-gray-600 mb-1">Cantidad</label>
+              <input type="number" min={esConsumible ? "0.01" : "1"} step={esConsumible ? "0.01" : "1"} className="w-full px-3 py-2.5 border border-gray-300 rounded-lg text-sm" value={form.cantidad} onChange={(e)=>setForm((p)=>({...p,cantidad:e.target.value}))} />
+            </div>
+
+            <div className="md:col-span-2">
+              {esConsumible ? (
+                <>
+                  <label className="block text-xs font-semibold text-gray-600 mb-1">Unidad</label>
+                  <select className="w-full px-3 py-2.5 border border-gray-300 rounded-lg text-sm" value={form.unidad_conversion} onChange={(e)=>setForm((p)=>({...p,unidad_conversion:e.target.value}))}>
+                    <option value="">{selectedItem?.unidad_medida_detalle?.nombre ? `Base: ${selectedItem.unidad_medida_detalle.nombre}` : "Selecciona unidad"}</option>
+                    {unidadesConsumible.map((u)=><option key={u.id} value={u.id}>{u.nombre}{u.simbolo ? ` (${u.simbolo})` : ""}</option>)}
+                  </select>
+                </>
+              ) : (
+                <>
+                  <label className="block text-xs font-semibold text-gray-600 mb-1">Unidad</label>
+                  <input disabled className="w-full px-3 py-2.5 border border-gray-300 rounded-lg bg-gray-50 text-sm" value={selectedItem?.unidad_medida_detalle?.nombre || ""} />
+                </>
+              )}
+            </div>
+
+            <div className="md:col-span-2">
+              <label className="block text-xs font-semibold text-gray-600 mb-1">Estado</label>
+              {esConsumible ? (
+                <input disabled className="w-full px-3 py-2.5 border border-gray-300 rounded-lg bg-gray-50 font-medium text-sm" value="NUEVO" />
+              ) : (
+                <>
+                  <select className="w-full px-3 py-2.5 border border-gray-300 rounded-lg text-sm" value={form.estado_unidad} onChange={(e)=>setForm((p)=>({...p,estado_unidad:e.target.value}))}>
+                    <option value="">Seleccione estado</option>
+                    <option value="NUEVO">NUEVO</option>
+                    <option value="USADO">USADO</option>
+                    <option value="REPARADO">REPARADO</option>
+                  </select>
+                  <p className="text-xs text-gray-500 mt-1">Disponibles: {unidadesDisponiblesCount}</p>
+                </>
+              )}
+            </div>
 
             {requiereProveedorTecnico && (
               <>
-                <div>
-                  <label className="block text-sm mb-2">Proveedor</label>
-                  <select className="w-full px-3 py-2 border rounded-lg bg-white" value={form.proveedor} onChange={(e) => setForm((p) => ({ ...p, proveedor: e.target.value }))}>
+                <div className="md:col-span-2">
+                  <label className="block text-xs font-semibold text-gray-600 mb-1">Proveedor</label>
+                  <select className="w-full px-3 py-2.5 border border-gray-300 rounded-lg bg-white text-sm" value={form.proveedor} onChange={(e) => setForm((p) => ({ ...p, proveedor: e.target.value }))}>
                     <option value="">Selecciona proveedor</option>
                     {proveedores.map((p) => (<option key={p.id} value={p.id}>{p.nombre}</option>))}
                   </select>
                 </div>
 
-                <div>
-                  <label className="block text-sm mb-2">Técnico asignado</label>
-                  <select className="w-full px-3 py-2 border rounded-lg bg-white" value={form.tecnico} onChange={(e) => setForm((p) => ({ ...p, tecnico: e.target.value }))}>
+                <div className="md:col-span-2">
+                  <label className="block text-xs font-semibold text-gray-600 mb-1">Técnico asignado</label>
+                  <select className="w-full px-3 py-2.5 border border-gray-300 rounded-lg bg-white text-sm" value={form.tecnico} onChange={(e) => setForm((p) => ({ ...p, tecnico: e.target.value }))}>
                     <option value="">Selecciona técnico</option>
                     {tecnicosAsignados.map((t) => (<option key={t.id} value={t.id}>{t.nombres} {t.apellidos}</option>))}
                   </select>
@@ -427,41 +481,57 @@ export default function MovimientoRepuestoModal({ open, onClose, actividad, onSa
               </>
             )}
 
-            <div className="flex items-end"><button disabled={!canAddMovimiento} className="w-full px-4 py-2 bg-[#84cc16] text-white rounded-lg disabled:bg-gray-300" onClick={handleAddUnidad}>Agregar</button></div>
+            <div className="md:col-span-2 flex items-end">
+              <button disabled={!canAddMovimiento} className="w-full px-4 py-2.5 bg-[#84cc16] text-white rounded-lg text-sm font-medium disabled:bg-gray-300" onClick={handleAddUnidad}>Agregar al listado</button>
+            </div>
           </div>
-          
+
           {esConsumible && selectedItem && (
-            <div className="text-xs text-blue-700 bg-blue-50 border border-blue-100 rounded p-2">
+            <div className="text-xs text-blue-700 bg-blue-50 border border-blue-100 rounded-lg p-3">
               Stock disponible {form.proveedor ? "del proveedor" : "total"} en unidad base ({selectedItem?.unidad_medida_detalle?.nombre || "-"}): <strong>{Number(stockConsumibleProveedor || 0).toFixed(2)}</strong>
             </div>
           )}
 
-          <table className="w-full text-sm">
-            <thead>
-              <tr>
-                <th className="text-left">Código</th>
-                <th className="text-left">Item</th>
-                <th className="text-left">Detalle</th>
-                {requiereProveedorTecnico && <th className="text-left">Técnico</th>}
-                <th className="text-left">Estado</th>
-                <th className="text-left">Acción</th>
-              </tr>
-            </thead>
-            <tbody>
-              {movimientosFiltrados.map((m,i)=>(
-                <tr key={i}>
-                  <td>{m.item_codigo}</td>
-                  <td>{m.item_nombre}</td>
-                  <td>{m.tipo==="CONSUMIBLE"?`${Number(m.cantidad).toFixed(2)} ${m.unidad_medida || ""}`:m.unidad_serie}</td>
-                  {requiereProveedorTecnico && <td>{m.tecnico_nombre || "-"}</td>}
-                  <td>{m.tipo==="CONSUMIBLE"?"NUEVO":m.estado}</td>
-                  <td>{m.id ? <span className="text-gray-400 text-xs">Guardado</span> : <button type="button" className="text-red-600 hover:text-red-800" onClick={()=>handleRemoveMovimiento(i)}>Borrar</button>}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+          <div className="border border-gray-200 rounded-xl overflow-hidden">
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead className="bg-gray-50 border-b border-gray-200">
+                  <tr>
+                    <th className="px-4 py-3 text-left text-xs font-semibold text-gray-700 uppercase">Código</th>
+                    <th className="px-4 py-3 text-left text-xs font-semibold text-gray-700 uppercase">Item</th>
+                    <th className="px-4 py-3 text-left text-xs font-semibold text-gray-700 uppercase">Detalle</th>
+                    {requiereProveedorTecnico && <th className="px-4 py-3 text-left text-xs font-semibold text-gray-700 uppercase">Técnico</th>}
+                    <th className="px-4 py-3 text-left text-xs font-semibold text-gray-700 uppercase">Estado</th>
+                    <th className="px-4 py-3 text-left text-xs font-semibold text-gray-700 uppercase">Acción</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-gray-200 bg-white">
+                  {movimientosFiltrados.length === 0 ? (
+                    <tr>
+                      <td colSpan={requiereProveedorTecnico ? 6 : 5} className="px-4 py-6 text-center text-gray-500">Aún no hay movimientos en el listado.</td>
+                    </tr>
+                  ) : (
+                    movimientosFiltrados.map((m,i)=>(
+                      <tr key={i} className="hover:bg-gray-50">
+                        <td className="px-4 py-3">{m.item_codigo}</td>
+                        <td className="px-4 py-3">{m.item_nombre}</td>
+                        <td className="px-4 py-3">{m.tipo==="CONSUMIBLE"?`${Number(m.cantidad).toFixed(2)} ${m.unidad_medida || ""}`:m.unidad_serie}</td>
+                        {requiereProveedorTecnico && <td className="px-4 py-3">{m.tecnico_nombre || "-"}</td>}
+                        <td className="px-4 py-3">{m.tipo==="CONSUMIBLE"?"NUEVO":m.estado}</td>
+                        <td className="px-4 py-3">{m.id ? <span className="text-gray-400 text-xs">Guardado</span> : <button type="button" className="text-red-600 hover:text-red-800 font-medium" onClick={()=>handleRemoveMovimiento(i)}>Borrar</button>}</td>
+                      </tr>
+                    ))
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </div>
         </div>
-        <div className="border-t px-6 py-4 flex justify-end gap-2"><button className="px-4 py-2 border rounded" onClick={onClose}>Cancelar</button><button className="px-4 py-2 bg-[#1e3a8a] text-white rounded" onClick={handleSave} disabled={loading}>Guardar</button></div>
+
+        <div className="border-t px-6 py-4 flex justify-end gap-2 bg-white">
+          <button className="px-4 py-2.5 border border-gray-300 rounded-lg text-sm" onClick={onClose}>Cancelar</button>
+          <button className="px-4 py-2.5 bg-[#1e3a8a] text-white rounded-lg text-sm font-medium disabled:opacity-60" onClick={handleSave} disabled={loading}>{loading ? "Guardando..." : "Guardar movimientos"}</button>
+        </div>
       </div>
     </div>
   );

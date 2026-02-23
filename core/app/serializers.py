@@ -34,6 +34,7 @@ from .models import (
     ItemGrupo,
     ItemGrupoDetalle,
     LoteConsumible,
+    TipoCambioDiario,
 )
 
 def obtener_unidad_base(dimension):
@@ -458,6 +459,16 @@ class CompraDetalleListSerializer(serializers.ModelSerializer):
     valor_total = serializers.SerializerMethodField()
     costo_unitario = serializers.SerializerMethodField()
     costo_total = serializers.SerializerMethodField()
+    costo_total_pen = serializers.SerializerMethodField()
+    valor_unitario_usd = serializers.SerializerMethodField()
+    valor_total_usd = serializers.SerializerMethodField()
+    costo_unitario_usd = serializers.SerializerMethodField()
+    costo_total_usd = serializers.SerializerMethodField()
+    valor_unitario_eur = serializers.SerializerMethodField()
+    valor_total_eur = serializers.SerializerMethodField()
+    costo_unitario_eur = serializers.SerializerMethodField()
+    costo_total_eur = serializers.SerializerMethodField()
+    tipo_cambio_usado = serializers.SerializerMethodField()
     unidad_medida_nombre = serializers.CharField(
         source="unidad_medida.nombre",
         read_only=True,
@@ -485,10 +496,85 @@ class CompraDetalleListSerializer(serializers.ModelSerializer):
             "valor_total",
             "costo_unitario",
             "costo_total",
+            "costo_total_pen",
+            "valor_unitario_usd",
+            "valor_total_usd",
+            "costo_unitario_usd",
+            "costo_total_usd",
+            "valor_unitario_eur",
+            "valor_total_eur",
+            "costo_unitario_eur",
+            "costo_total_eur",
+            "tipo_cambio_usado",
             "moneda",
             "tipo_comprobante",
             "codigo_comprobante",
         ]
+
+    def _obtener_tipo_cambio(self, obj):
+        return TipoCambioDiario.objects.filter(fecha=obj.compra.fecha).first()
+
+    def _a_pen(self, monto, obj):
+        if obj.moneda == Compra.Moneda.PEN:
+            return monto.quantize(Decimal("0.01"))
+
+        tipo_cambio = self._obtener_tipo_cambio(obj)
+        if not tipo_cambio:
+            return None
+
+        if obj.moneda == Compra.Moneda.USD:
+            if tipo_cambio.compra_usd <= 0:
+                return None
+            return (monto * tipo_cambio.compra_usd).quantize(Decimal("0.01"))
+
+        if obj.moneda == Compra.Moneda.EUR:
+            if tipo_cambio.compra_eur <= 0:
+                return None
+            return (monto * tipo_cambio.compra_eur).quantize(Decimal("0.01"))
+
+        return None
+
+    def _a_usd(self, monto, obj):
+        if obj.moneda == Compra.Moneda.USD:
+            return monto.quantize(Decimal("0.01"))
+
+        tipo_cambio = self._obtener_tipo_cambio(obj)
+        if not tipo_cambio:
+            return None
+
+        if obj.moneda == Compra.Moneda.PEN:
+            if tipo_cambio.compra_usd <= 0:
+                return None
+            return (monto / tipo_cambio.compra_usd).quantize(Decimal("0.01"))
+
+        if obj.moneda == Compra.Moneda.EUR:
+            if tipo_cambio.compra_eur <= 0 or tipo_cambio.compra_usd <= 0:
+                return None
+            monto_pen = monto * tipo_cambio.compra_eur
+            return (monto_pen / tipo_cambio.compra_usd).quantize(Decimal("0.01"))
+
+        return None
+
+    def _a_eur(self, monto, obj):
+        if obj.moneda == Compra.Moneda.EUR:
+            return monto.quantize(Decimal("0.01"))
+
+        tipo_cambio = self._obtener_tipo_cambio(obj)
+        if not tipo_cambio:
+            return None
+
+        if obj.moneda == Compra.Moneda.PEN:
+            if tipo_cambio.compra_eur <= 0:
+                return None
+            return (monto / tipo_cambio.compra_eur).quantize(Decimal("0.01"))
+
+        if obj.moneda == Compra.Moneda.USD:
+            if tipo_cambio.compra_usd <= 0 or tipo_cambio.compra_eur <= 0:
+                return None
+            monto_pen = monto * tipo_cambio.compra_usd
+            return (monto_pen / tipo_cambio.compra_eur).quantize(Decimal("0.01"))
+
+        return None
 
     def get_valor_total(self, obj):
         return obj.valor_unitario * obj.cantidad
@@ -498,6 +584,51 @@ class CompraDetalleListSerializer(serializers.ModelSerializer):
 
     def get_costo_total(self, obj):
         return self.get_costo_unitario(obj) * obj.cantidad
+    
+    def get_costo_total_pen(self, obj):
+        return self._a_pen(self.get_costo_total(obj), obj)
+
+    def get_valor_unitario_usd(self, obj):
+        return self._a_usd(obj.valor_unitario, obj)
+
+    def get_valor_total_usd(self, obj):
+        return self._a_usd(self.get_valor_total(obj), obj)
+
+    def get_costo_unitario_usd(self, obj):
+        return self._a_usd(self.get_costo_unitario(obj), obj)
+
+    def get_costo_total_usd(self, obj):
+        return self._a_usd(self.get_costo_total(obj), obj)
+
+    def get_valor_unitario_eur(self, obj):
+        return self._a_eur(obj.valor_unitario, obj)
+
+    def get_valor_total_eur(self, obj):
+        return self._a_eur(self.get_valor_total(obj), obj)
+
+    def get_costo_unitario_eur(self, obj):
+        return self._a_eur(self.get_costo_unitario(obj), obj)
+
+    def get_costo_total_eur(self, obj):
+        return self._a_eur(self.get_costo_total(obj), obj)
+
+    def get_tipo_cambio_usado(self, obj):
+        tipo_cambio = self._obtener_tipo_cambio(obj)
+        if not tipo_cambio:
+            return None
+        return {
+            "fecha": tipo_cambio.fecha,
+            "compra_usd": tipo_cambio.compra_usd,
+            "venta_usd": tipo_cambio.venta_usd,
+            "compra_eur": tipo_cambio.compra_eur,
+            "venta_eur": tipo_cambio.venta_eur,
+        }
+
+
+class TipoCambioDiarioSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = TipoCambioDiario
+        fields = ["id", "fecha", "compra_usd", "venta_usd", "compra_eur", "venta_eur"]
 
 
 class AlmacenSerializer(serializers.ModelSerializer):
@@ -1282,11 +1413,17 @@ class HistorialUbicacionItemSerializer(serializers.ModelSerializer):
     tipo = serializers.SerializerMethodField()
     nombre = serializers.SerializerMethodField()
     maquinaria = serializers.SerializerMethodField()
+    item_unidad = serializers.IntegerField(source="item_unidad.id", read_only=True)
+    item_unidad_serie = serializers.CharField(source="item_unidad.serie", read_only=True)
+    item_unidad_estado = serializers.CharField(source="item_unidad.estado", read_only=True)
 
     class Meta:
         model = HistorialUbicacionItem
         fields = [
             "id",
+            "item_unidad",
+            "item_unidad_serie",
+            "item_unidad_estado",
             "tipo",
             "nombre",
             "maquinaria",
@@ -1313,8 +1450,52 @@ class HistorialUbicacionItemSerializer(serializers.ModelSerializer):
         return {
             "id": obj.maquinaria.id,
             "codigo": obj.maquinaria.codigo_maquina,
+            "codigo_maquina": obj.maquinaria.codigo_maquina,
             "nombre": obj.maquinaria.nombre,
         }
+
+
+
+class HistorialConsumibleActivoSerializer(serializers.ModelSerializer):
+    lote = serializers.IntegerField(source="lote.id", read_only=True)
+    cantidad_ubicacion = serializers.DecimalField(source="cantidad", max_digits=16, decimal_places=6, read_only=True)
+    ubicacion = serializers.SerializerMethodField()
+    tipo_ubicacion = serializers.SerializerMethodField()
+    almacen_id = serializers.IntegerField(source="almacen.id", read_only=True, default=None)
+    maquinaria_id = serializers.IntegerField(source="maquinaria.id", read_only=True, default=None)
+    trabajador_id = serializers.IntegerField(source="trabajador.id", read_only=True, default=None)
+
+    class Meta:
+        model = HistorialConsumible
+        fields = [
+            "id",
+            "lote",
+            "cantidad_ubicacion",
+            "tipo_ubicacion",
+            "ubicacion",
+            "almacen_id",
+            "maquinaria_id",
+            "trabajador_id",
+            "fecha_inicio",
+        ]
+
+    def get_tipo_ubicacion(self, obj):
+        if obj.maquinaria:
+            return "MAQUINARIA"
+        if obj.almacen:
+            return "ALMACEN"
+        if obj.trabajador:
+            return "TRABAJADOR"
+        return "SIN_UBICACION"
+
+    def get_ubicacion(self, obj):
+        if obj.maquinaria:
+            return f"MAQUINARIA - {obj.maquinaria.codigo_maquina} - {obj.maquinaria.nombre}"
+        if obj.almacen:
+            return f"ALMACEN - {obj.almacen.nombre}"
+        if obj.trabajador:
+            return f"TRABAJADOR - {obj.trabajador.nombres} {obj.trabajador.apellidos}".strip()
+        return "SIN UBICACION"
 
 class ItemDetalleSerializer(serializers.ModelSerializer):
     unidades = serializers.SerializerMethodField()

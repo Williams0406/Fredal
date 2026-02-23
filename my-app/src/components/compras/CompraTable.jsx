@@ -50,6 +50,14 @@ export default function CompraTable({ compras = [] }) {
   }, [comprasFiltradas]);
 
 
+  
+  const formatFecha = (fecha) => {
+    if (!fecha) return "-";
+    const [year, month, day] = String(fecha).split("-");
+    if (!year || !month || !day) return fecha;
+    return `${day}/${month}/${year}`;
+  };
+
   const totalPages = Math.max(1, Math.ceil(comprasFiltradas.length / pageSize));
   const safePage = Math.min(page, totalPages);
   const startIndex = (safePage - 1) * pageSize;
@@ -180,7 +188,9 @@ export default function CompraTable({ compras = [] }) {
                   <th className="px-4 py-3 text-right text-xs font-semibold text-gray-700 uppercase tracking-wider">V. Unit.</th>
                   <th className="px-4 py-3 text-right text-xs font-semibold text-gray-700 uppercase tracking-wider">V. Total</th>
                   <th className="px-4 py-3 text-right text-xs font-semibold text-gray-700 uppercase tracking-wider">C. Unit.</th>
-                  <th className="px-4 py-3 text-right text-xs font-semibold text-gray-700 uppercase tracking-wider">C. Total</th>
+                  <th className="px-4 py-3 text-right text-xs font-semibold text-gray-700 uppercase tracking-wider">C. Total S/.</th>
+                  <th className="px-4 py-3 text-right text-xs font-semibold text-gray-700 uppercase tracking-wider">C. Total $</th>
+                  <th className="px-4 py-3 text-right text-xs font-semibold text-gray-700 uppercase tracking-wider">C. Total €</th>
                   <th className="px-4 py-3 text-center text-xs font-semibold text-gray-700 uppercase tracking-wider">Mon.</th>
                   <th className="px-4 py-3 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider">Comprobante</th>
                 </tr>
@@ -189,7 +199,7 @@ export default function CompraTable({ compras = [] }) {
               <tbody className="divide-y divide-gray-200">
                 {comprasPagina.map((c) => (
                   <tr key={c.id} className="hover:bg-gray-50 transition-colors duration-150">
-                    <td className="px-4 py-3 text-sm text-gray-700 whitespace-nowrap">{new Date(c.fecha).toLocaleDateString("es-PE")}</td>
+                    <td className="px-4 py-3 text-sm text-gray-700 whitespace-nowrap">{formatFecha(c.fecha)}</td>
                     <td className={`px-4 py-3 text-sm font-mono font-semibold whitespace-nowrap ${c.item_volvo ? "bg-yellow-50 text-yellow-900" : "text-gray-900"}`}>
                       {c.item_codigo}
                       {c.item_volvo && <span className="ml-2 px-2 py-0.5 text-xs bg-yellow-200 text-yellow-800 rounded">VOLVO</span>}
@@ -201,7 +211,9 @@ export default function CompraTable({ compras = [] }) {
                     <td className="px-4 py-3 text-sm text-gray-700 text-right whitespace-nowrap">{Number(c.valor_unitario).toFixed(2)}</td>
                     <td className="px-4 py-3 text-sm text-gray-700 text-right whitespace-nowrap">{Number(c.valor_total).toFixed(2)}</td>
                     <td className="px-4 py-3 text-sm text-gray-700 text-right whitespace-nowrap">{Number(c.costo_unitario).toFixed(2)}</td>
-                    <td className="px-4 py-3 text-sm font-semibold text-gray-900 text-right whitespace-nowrap">{Number(c.costo_total).toFixed(2)}</td>
+                    <td className="px-4 py-3 text-sm font-semibold text-gray-900 text-right whitespace-nowrap">{c.costo_total_pen ? Number(c.costo_total_pen).toFixed(2) : "-"}</td>
+                    <td className="px-4 py-3 text-sm text-[#1e3a8a] text-right whitespace-nowrap">{c.costo_total_usd ? Number(c.costo_total_usd).toFixed(2) : "-"}</td>
+                    <td className="px-4 py-3 text-sm text-emerald-700 text-right whitespace-nowrap">{c.costo_total_eur ? Number(c.costo_total_eur).toFixed(2) : "-"}</td>
                     <td className="px-4 py-3 text-center whitespace-nowrap">
                       <span className="px-2 py-1 text-xs font-medium bg-gray-100 text-gray-700 rounded">{c.moneda}</span>
                     </td>

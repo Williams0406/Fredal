@@ -164,6 +164,12 @@ export const itemAPI = {
   historial: (id) =>
     api.get(`/api/items/${id}/historial/`),
 
+  ubicacionesConsumible: (id) =>
+    api.get(`/api/items/${id}/ubicaciones_consumible/`),
+
+  cambiarUbicacionConsumible: (id, data) =>
+    api.post(`/api/items/${id}/cambiar_ubicacion_consumible/`, data),
+
   proveedores: (id) =>
     api.get(`/api/items/${id}/proveedores/`),
 
@@ -252,6 +258,12 @@ export const compraAPI = {
   list: (params) => api.get("/api/compras/", { params }),
   create: (data) => api.post("/api/compras/", data),
   batch: (data) => api.post("/api/compras/batch/", data),
+};
+
+export const tipoCambioAPI = {
+  list: (params) => api.get("/api/tipos-cambio/", { params }),
+  create: (data) => api.post("/api/tipos-cambio/", data),
+  update: (id, data) => api.put(`/api/tipos-cambio/${id}/`, data),
 };
 
 export const movimientoRepuestoAPI = {

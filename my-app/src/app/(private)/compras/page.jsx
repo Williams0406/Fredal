@@ -4,6 +4,7 @@ import { useState, useEffect } from "react";
 import { compraAPI } from "@/lib/api";
 import CompraTable from "@/components/compras/CompraTable";
 import CompraForm from "@/components/compras/CompraForm";
+import TipoCambioModal from "@/components/compras/TipoCambioModal";
 import {
   Package,
   Coins,
@@ -40,8 +41,9 @@ export default function ComprasPage() {
       .filter((c) => c.moneda === "PEN")
       .reduce((sum, c) => sum + Number(c.costo_total), 0),
     totalCostoDolares: compras
-      .filter((c) => c.moneda === "USD")
-      .reduce((sum, c) => sum + Number(c.costo_total), 0),
+      .reduce((sum, c) => sum + Number(c.costo_total_usd || 0), 0),
+    totalCostoEuros: compras
+      .reduce((sum, c) => sum + Number(c.costo_total_eur || 0), 0),
     itemsUnicos: new Set(compras.map((c) => c.item_codigo)).size,
     proveedoresUnicos: new Set(
       compras.filter((c) => c.proveedor_nombre).map((c) => c.proveedor_nombre)
@@ -62,12 +64,15 @@ export default function ComprasPage() {
           </p>
         </div>
 
-        <CompraForm onCreated={() => setRefresh((r) => !r)} />
+        <div className="flex items-center gap-2">
+          <TipoCambioModal onCreated={() => setRefresh((r) => !r)} />
+          <CompraForm onCreated={() => setRefresh((r) => !r)} />
+        </div>
       </div>
 
       {/* KPIs */}
       {!loading && (
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4">
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-6 gap-4">
           <KPICard
             label="Total Compras"
             value={stats.total}
@@ -84,6 +89,13 @@ export default function ComprasPage() {
           <KPICard
             label="Costo Total ($)"
             value={`$ ${stats.totalCostoDolares.toFixed(2)}`}
+            icon={DollarSign}
+            color="green"
+            size="small"
+          />
+          <KPICard
+            label="Costo Total (€)"
+            value={`€ ${stats.totalCostoEuros.toFixed(2)}`}
             icon={DollarSign}
             color="green"
             size="small"

@@ -59,7 +59,22 @@ class Maquinaria(models.Model):
 
         for h in historiales:
             detalle = h.item_unidad.compra_detalle
-            total += detalle.costo_unitario
+            costo_unitario = detalle.costo_unitario
+
+            if detalle.moneda == Compra.Moneda.PEN:
+                total += costo_unitario
+                continue
+
+            tipo_cambio = TipoCambioDiario.objects.filter(fecha=detalle.compra.fecha).first()
+            if not tipo_cambio:
+                continue
+
+            if detalle.moneda == Compra.Moneda.USD and tipo_cambio.compra_usd > 0:
+                total += costo_unitario * tipo_cambio.compra_usd
+                continue
+
+            if detalle.moneda == Compra.Moneda.EUR and tipo_cambio.compra_eur > 0:
+                total += costo_unitario * tipo_cambio.compra_eur
 
         return total
 
@@ -590,6 +605,22 @@ class MovimientoConsumible(models.Model):
 # =========================
 # COMPRAS
 # =========================
+
+class TipoCambioDiario(models.Model):
+    fecha = models.DateField(unique=True)
+    compra_usd = models.DecimalField(max_digits=10, decimal_places=4)
+    venta_usd = models.DecimalField(max_digits=10, decimal_places=4)
+    compra_eur = models.DecimalField(max_digits=10, decimal_places=4)
+    venta_eur = models.DecimalField(max_digits=10, decimal_places=4)
+
+    class Meta:
+        ordering = ["-fecha"]
+
+    def __str__(self):
+        return (
+            f"{self.fecha} | USD C:{self.compra_usd} V:{self.venta_usd} | "
+            f"EUR C:{self.compra_eur} V:{self.venta_eur}"
+        )
 
 class Compra(models.Model):
 
