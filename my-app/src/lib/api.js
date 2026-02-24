@@ -167,6 +167,9 @@ export const itemAPI = {
   ubicacionesConsumible: (id) =>
     api.get(`/api/items/${id}/ubicaciones_consumible/`),
 
+  historialConsumible: (id) =>
+    api.get(`/api/items/${id}/historial_consumible/`),
+  
   cambiarUbicacionConsumible: (id, data) =>
     api.post(`/api/items/${id}/cambiar_ubicacion_consumible/`, data),
 

@@ -10,11 +10,9 @@ export default function MaquinariaResumen({
   onClose,
 }) {
   const [data, setData] = useState(null);
-  const [loading, setLoading] = useState(false);
 
   useEffect(() => {
     if (open && maquinariaId) {
-      setLoading(true);
       maquinariaAPI
         .unidades(maquinariaId)
         .then((res) => {
@@ -22,8 +20,7 @@ export default function MaquinariaResumen({
         })
         .catch((error) => {
           console.error("Error al cargar resumen:", error);
-        })
-        .finally(() => setLoading(false));
+        });
     }
   }, [open, maquinariaId]);
 
@@ -35,7 +32,7 @@ export default function MaquinariaResumen({
       onClose={onClose}
       title="Resumen de Maquinaria"
     >
-      {loading ? (
+      {data === null ? (
         <div className="py-12 text-center">
           <div className="inline-block w-8 h-8 border-4 border-gray-200 border-t-[#1e3a8a] rounded-full animate-spin"></div>
           <p className="text-sm text-gray-600 mt-3">Cargando resumen...</p>
@@ -171,8 +168,11 @@ export default function MaquinariaResumen({
                       <th className="px-4 py-3 text-center text-xs font-semibold text-gray-700 uppercase tracking-wider">
                         Estado
                       </th>
+                      <th className="px-4 py-3 text-center text-xs font-semibold text-gray-700 uppercase tracking-wider">
+                        Cantidad
+                      </th>
                       <th className="px-4 py-3 text-right text-xs font-semibold text-gray-700 uppercase tracking-wider">
-                        Costo Unitario
+                        Costo
                       </th>
                     </tr>
                   </thead>
@@ -183,11 +183,13 @@ export default function MaquinariaResumen({
                         <td className="px-4 py-3">
                           <div>
                             <p className="text-sm font-medium text-gray-900">
-                              {u.item_codigo}
-                            </p>
-                            <p className="text-xs text-gray-600 line-clamp-1">
                               {u.item_nombre}
                             </p>
+                            {u.tipo_insumo !== "CONSUMIBLE" && (
+                              <p className="text-xs text-gray-600 line-clamp-1">
+                                {u.item_codigo}
+                              </p>
+                            )}
                           </div>
                         </td>
 
@@ -203,10 +205,20 @@ export default function MaquinariaResumen({
                           <EstadoBadge estado={u.estado} />
                         </td>
 
+                        {/* Cantidad */}
+                        <td className="px-4 py-3 text-center">
+                          <span className="text-sm text-gray-800">
+                            {Number(u.cantidad ?? 1).toLocaleString("es-PE", {
+                              minimumFractionDigits: 0,
+                              maximumFractionDigits: 6,
+                            })}
+                          </span>
+                        </td>
+
                         {/* Costo */}
                         <td className="px-4 py-3 text-right">
                           <span className="text-sm font-medium text-gray-900">
-                            S/ {Number(u.costo_unitario).toLocaleString("es-PE", {
+                            S/ {Number(u.costo ?? u.costo_unitario).toLocaleString("es-PE", {
                               minimumFractionDigits: 2,
                               maximumFractionDigits: 2,
                             })}

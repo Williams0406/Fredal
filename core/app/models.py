@@ -38,43 +38,56 @@ class Maquinaria(models.Model):
     gasto = models.DecimalField(max_digits=12, decimal_places=2, default=0)
 
     def calcular_centro_costos(self):
-        """
-        Suma el costo unitario real (con IGV)
-        de todas las unidades activas en la maquinaria
-        """
+        """Suma el centro de costos en PEN de repuestos y consumibles activos en la maquinaria."""
 
-        from .models import HistorialUbicacionItem
+        def costo_unitario_pen(detalle):
+            if not detalle:
+                return Decimal("0.00")
 
-        historiales = (
+            costo_unitario = Decimal(detalle.costo_unitario)
+            if detalle.moneda == Compra.Moneda.PEN:
+                return costo_unitario
+
+            tipo_cambio = TipoCambioDiario.objects.filter(fecha=detalle.compra.fecha).first()
+            if not tipo_cambio:
+                return Decimal("0.00")
+
+            if detalle.moneda == Compra.Moneda.USD and tipo_cambio.compra_usd > 0:
+                return costo_unitario * Decimal(tipo_cambio.compra_usd)
+
+            if detalle.moneda == Compra.Moneda.EUR and tipo_cambio.compra_eur > 0:
+                return costo_unitario * Decimal(tipo_cambio.compra_eur)
+
+            return Decimal("0.00")
+
+        historiales_repuesto = (
             HistorialUbicacionItem.objects
-            .select_related("item_unidad__compra_detalle")
+            .select_related("item_unidad__compra_detalle", "item_unidad__compra_detalle__compra")
             .filter(
                 maquinaria=self,
                 fecha_fin__isnull=True,
-                item_unidad__compra_detalle__isnull=False
+                item_unidad__compra_detalle__isnull=False,
+            )
+        )
+
+        historiales_consumible = (
+            HistorialConsumible.objects
+            .select_related("lote__compra_detalle", "lote__compra_detalle__compra")
+            .filter(
+                maquinaria=self,
+                fecha_fin__isnull=True,
+                lote__compra_detalle__isnull=False,
             )
         )
 
         total = Decimal("0.00")
 
-        for h in historiales:
-            detalle = h.item_unidad.compra_detalle
-            costo_unitario = detalle.costo_unitario
+        for h in historiales_repuesto:
+            total += costo_unitario_pen(h.item_unidad.compra_detalle)
 
-            if detalle.moneda == Compra.Moneda.PEN:
-                total += costo_unitario
-                continue
-
-            tipo_cambio = TipoCambioDiario.objects.filter(fecha=detalle.compra.fecha).first()
-            if not tipo_cambio:
-                continue
-
-            if detalle.moneda == Compra.Moneda.USD and tipo_cambio.compra_usd > 0:
-                total += costo_unitario * tipo_cambio.compra_usd
-                continue
-
-            if detalle.moneda == Compra.Moneda.EUR and tipo_cambio.compra_eur > 0:
-                total += costo_unitario * tipo_cambio.compra_eur
+        for h in historiales_consumible:
+            costo_unitario = costo_unitario_pen(h.lote.compra_detalle)
+            total += Decimal(h.cantidad) * costo_unitario
 
         return total
 

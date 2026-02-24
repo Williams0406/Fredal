@@ -420,11 +420,18 @@ class CompraCreateSerializer(serializers.ModelSerializer):
                         cantidad_original,
                         unidad_medida,
                     )
-                    LoteConsumible.objects.create(
+                    lote = LoteConsumible.objects.create(
                         compra_detalle=detalle,
                         item=data["item"],
                         cantidad_inicial=cantidad_convertida,
                         cantidad_disponible=cantidad_convertida,
+                        unidad_medida=data["item"].unidad_medida,
+                        almacen=almacen_principal,
+                    )
+                    HistorialConsumible.objects.create(
+                        lote=lote,
+                        item=data["item"],
+                        cantidad=cantidad_convertida,
                         unidad_medida=data["item"].unidad_medida,
                         almacen=almacen_principal,
                     )
@@ -1163,6 +1170,13 @@ class MovimientoConsumibleSerializer(serializers.ModelSerializer):
                 if not actividad.es_planificada:
                     lote.cantidad_disponible = disponible - descontar
                     lote.save(update_fields=["cantidad_disponible"])
+                
+                if tecnico:
+                    self._descontar_historial_almacen(
+                        item=item,
+                        lote=lote,
+                        cantidad=descontar,
+                    )
 
                 HistorialConsumible.objects.create(
                     lote=lote,
@@ -1184,6 +1198,54 @@ class MovimientoConsumibleSerializer(serializers.ModelSerializer):
             if not actividad.es_planificada:
                 actualizar_stock_item(item)
             return movimiento
+        
+    @staticmethod
+    def _descontar_historial_almacen(item, lote, cantidad):
+        restante = Decimal(cantidad)
+        now = timezone.now()
+
+        while restante > 0:
+            historial_almacen = (
+                HistorialConsumible.objects
+                .select_for_update()
+                .filter(
+                    item=item,
+                    lote=lote,
+                    almacen__isnull=False,
+                    fecha_fin__isnull=True,
+                )
+                .order_by("fecha_inicio", "id")
+                .first()
+            )
+
+            if not historial_almacen:
+                raise serializers.ValidationError(
+                    "No existe historial activo en almacén para asignar este consumible"
+                )
+
+            cantidad_historial = Decimal(historial_almacen.cantidad)
+            descontar = min(cantidad_historial, restante)
+
+            historial_almacen.fecha_fin = now
+            historial_almacen.cantidad = descontar
+            historial_almacen.save(update_fields=["fecha_fin", "cantidad"])
+
+            sobrante = cantidad_historial - descontar
+            if sobrante > 0:
+                historial_restante = HistorialConsumible.objects.create(
+                    lote=historial_almacen.lote,
+                    item=historial_almacen.item,
+                    cantidad=sobrante,
+                    unidad_medida=historial_almacen.unidad_medida,
+                    almacen=historial_almacen.almacen,
+                    orden_trabajo=historial_almacen.orden_trabajo,
+                )
+                HistorialConsumible.objects.filter(pk=historial_restante.pk).update(
+                    fecha_inicio=historial_almacen.fecha_inicio,
+                    fecha_fin=None,
+                )
+
+            restante -= descontar
 
 class ActividadTrabajoSerializer(serializers.ModelSerializer):
     repuestos = MovimientoRepuestoSerializer(many=True, read_only=True)
@@ -1495,6 +1557,45 @@ class HistorialConsumibleActivoSerializer(serializers.ModelSerializer):
             return f"ALMACEN - {obj.almacen.nombre}"
         if obj.trabajador:
             return f"TRABAJADOR - {obj.trabajador.nombres} {obj.trabajador.apellidos}".strip()
+        return "SIN UBICACION"
+
+class HistorialConsumibleHistorialSerializer(serializers.ModelSerializer):
+    lote = serializers.IntegerField(source="lote.id", read_only=True)
+    lote_fecha_ingreso = serializers.DateTimeField(source="lote.fecha_ingreso", read_only=True)
+    orden_trabajo = serializers.CharField(source="orden_trabajo.codigo_orden", read_only=True)
+    ubicacion = serializers.SerializerMethodField()
+    tipo_ubicacion = serializers.SerializerMethodField()
+
+    class Meta:
+        model = HistorialConsumible
+        fields = [
+            "id",
+            "lote",
+            "lote_fecha_ingreso",
+            "cantidad",
+            "tipo_ubicacion",
+            "ubicacion",
+            "orden_trabajo",
+            "fecha_inicio",
+            "fecha_fin",
+        ]
+
+    def get_tipo_ubicacion(self, obj):
+        if obj.maquinaria:
+            return "MAQUINARIA"
+        if obj.almacen:
+            return "ALMACEN"
+        if obj.trabajador:
+            return "TRABAJADOR"
+        return "SIN_UBICACION"
+
+    def get_ubicacion(self, obj):
+        if obj.maquinaria:
+            return f"{obj.maquinaria.codigo_maquina} - {obj.maquinaria.nombre}"
+        if obj.almacen:
+            return obj.almacen.nombre
+        if obj.trabajador:
+            return f"{obj.trabajador.nombres} {obj.trabajador.apellidos}".strip()
         return "SIN UBICACION"
 
 class ItemDetalleSerializer(serializers.ModelSerializer):

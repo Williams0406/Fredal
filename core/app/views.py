@@ -62,6 +62,7 @@ from .serializers import (
     GroupSerializer,
     ItemDetalleSerializer,
     HistorialConsumibleActivoSerializer,
+    HistorialConsumibleHistorialSerializer,
     HistorialUbicacionItemSerializer,
     KardexUnidadSerializer,
     ItemProveedorSerializer,
@@ -222,6 +223,21 @@ class ItemViewSet(viewsets.ModelViewSet):
 
         serializer = HistorialConsumibleActivoSerializer(historial, many=True)
         return Response(serializer.data)
+    
+    @action(detail=True, methods=["get"])
+    def historial_consumible(self, request, pk=None):
+        item = self.get_object()
+
+        historial = (
+            HistorialConsumible.objects
+            .filter(item=item)
+            .select_related("lote", "maquinaria", "almacen", "trabajador", "orden_trabajo")
+            .order_by("lote_id", "fecha_inicio", "id")
+        )
+
+        serializer = HistorialConsumibleHistorialSerializer(historial, many=True)
+        return Response(serializer.data)
+    
 
     # 📍 UBICACIÓN ACTUAL
     @action(detail=True, methods=["get"])
@@ -742,6 +758,21 @@ class MaquinariaViewSet(viewsets.ModelViewSet):
             .order_by("item_unidad__item__codigo")
         )
 
+        historiales_consumible = (
+            HistorialConsumible.objects
+            .select_related(
+                "item",
+                "lote",
+                "lote__compra_detalle",
+                "lote__compra_detalle__compra",
+            )
+            .filter(
+                maquinaria=maquinaria,
+                fecha_fin__isnull=True,
+            )
+            .order_by("item__codigo", "lote_id", "id")
+        )
+
         unidades = []
         centro_costos = Decimal("0.00")
 
@@ -758,7 +789,28 @@ class MaquinariaViewSet(viewsets.ModelViewSet):
                 "item_nombre": unidad.item.nombre,
                 "serie": unidad.serie,
                 "estado": h.estado,
+                "cantidad": Decimal("1"),
                 "costo_unitario": round(costo, 2),
+                "costo": round(costo, 2),
+                "tipo_insumo": unidad.item.tipo_insumo,
+            })
+
+        for h in historiales_consumible:
+            detalle = h.lote.compra_detalle if h.lote else None
+            costo_unitario = self._costo_unitario_pen_por_detalle(detalle)
+            costo_total = Decimal(costo_unitario) * Decimal(h.cantidad)
+            centro_costos += costo_total
+
+            unidades.append({
+                "unidad_id": f"CONS-{h.id}",
+                "item_codigo": h.item.codigo,
+                "item_nombre": h.item.nombre,
+                "serie": f"Lote #{h.lote_id}",
+                "estado": "NUEVO",
+                "cantidad": h.cantidad,
+                "costo_unitario": round(costo_unitario, 2),
+                "costo": round(costo_total, 2),
+                "tipo_insumo": h.item.tipo_insumo,
             })
 
         return Response({
