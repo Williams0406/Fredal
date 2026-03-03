@@ -17,7 +17,7 @@ import {
 
 const PAGE_SIZE_OPTIONS = [10, 20, 50];
 
-export default function ItemTable() {
+export default function ItemTable({ favoriteFilter = "TODOS" }) {
   const [items, setItems] = useState([]);
   const [loading, setLoading] = useState(true);
   const [open, setOpen] = useState(false);
@@ -56,7 +56,7 @@ export default function ItemTable() {
 
   useEffect(() => {
     setPage(1);
-  }, [search, tipoFilter, volvoFilter, stockFilter, pageSize]);
+  }, [search, tipoFilter, volvoFilter, stockFilter, favoriteFilter, pageSize]);
 
   const formatStock = (item) => {
     const stockValue = Number(item.stock ?? 0);
@@ -77,6 +77,7 @@ export default function ItemTable() {
     repuestos: items.filter((i) => i.tipo_insumo === "REPUESTO").length,
     consumibles: items.filter((i) => i.tipo_insumo === "CONSUMIBLE").length,
     volvo: items.filter((i) => i.volvo).length,
+    favoritos: items.filter((i) => i.favorito).length,
     totalUnidades: items.reduce((sum, i) => sum + Number(i.stock ?? 0), 0),
   };
 
@@ -90,6 +91,13 @@ export default function ItemTable() {
       const matchesTipo = tipoFilter === "TODOS" ? true : item.tipo_insumo === tipoFilter;
       const matchesVolvo =
         volvoFilter === "TODOS" ? true : volvoFilter === "SI" ? Boolean(item.volvo) : !item.volvo;
+      
+      const matchesFavorite =
+        favoriteFilter === "TODOS"
+          ? true
+          : favoriteFilter === "SOLO_FAVORITOS"
+          ? Boolean(item.favorito)
+          : !item.favorito;
 
       const rawStock = Number(item.stock ?? 0);
       const matchesStock =
@@ -99,9 +107,9 @@ export default function ItemTable() {
           ? rawStock > 0
           : rawStock <= 0;
 
-      return matchesSearch && matchesTipo && matchesVolvo && matchesStock;
+      return matchesSearch && matchesTipo && matchesVolvo && matchesFavorite && matchesStock;
     });
-  }, [items, search, tipoFilter, volvoFilter, stockFilter]);
+  }, [items, search, tipoFilter, volvoFilter, stockFilter, favoriteFilter]);
 
   const sortedItems = useMemo(() => {
     const list = [...filteredItems];
@@ -147,6 +155,27 @@ export default function ItemTable() {
     setSortDirection("asc");
   };
 
+  const toggleFavorite = async (item) => {
+    const nuevoFavorito = !item.favorito;
+
+    setItems((prev) =>
+      prev.map((current) =>
+        current.id === item.id ? { ...current, favorito: nuevoFavorito } : current
+      )
+    );
+
+    try {
+      await itemAPI.update(item.id, { ...item, favorito: nuevoFavorito });
+    } catch (error) {
+      console.error("No se pudo actualizar favorito:", error);
+      setItems((prev) =>
+        prev.map((current) =>
+          current.id === item.id ? { ...current, favorito: item.favorito } : current
+        )
+      );
+    }
+  };
+
   const clearFilters = () => {
     setSearch("");
     setTipoFilter("TODOS");
@@ -154,15 +183,16 @@ export default function ItemTable() {
     setStockFilter("TODOS");
   };
 
-  const hasFilters = search || tipoFilter !== "TODOS" || volvoFilter !== "TODOS" || stockFilter !== "TODOS";
+  const hasFilters = search || tipoFilter !== "TODOS" || volvoFilter !== "TODOS" || stockFilter !== "TODOS" || favoriteFilter !== "TODOS";
 
   return (
     <div className="space-y-6">
-      <div className="grid grid-cols-1 md:grid-cols-5 gap-6">
+      <div className="grid grid-cols-1 md:grid-cols-6 gap-6">
         <StatCard title="Total Items" value={stats.total} color="text-[#1e3a5f]" bg="bg-blue-50" icon="box" />
         <StatCard title="Repuestos" value={stats.repuestos} color="text-[#1e3a5f]" bg="bg-blue-50" icon="tool" />
         <StatCard title="Consumibles" value={stats.consumibles} color="text-purple-600" bg="bg-purple-50" icon="pack" />
         <StatCard title="Volvo OEM" value={stats.volvo} color="text-yellow-600" bg="bg-yellow-50" icon="badge" />
+        <StatCard title="Favoritos" value={stats.favoritos} color="text-amber-600" bg="bg-amber-50" icon="star" />
         <StatCard title="Unidades" value={stats.totalUnidades} color="text-[#84cc16]" bg="bg-green-50" icon="chart" />
       </div>
 
@@ -306,6 +336,11 @@ export default function ItemTable() {
                                 VOLVO
                               </span>
                             )}
+                            {item.favorito && (
+                              <span className="inline-flex items-center px-2 py-0.5 text-[11px] font-bold bg-amber-100 text-amber-800 rounded border border-amber-300">
+                                ★ Favorito
+                              </span>
+                            )}
                           </div>
                         </td>
 
@@ -340,6 +375,7 @@ export default function ItemTable() {
 
                         <td className="px-6 py-4">
                           <div className="flex items-center justify-center gap-1">
+                            <ActionButton title={item.favorito ? "Quitar de favoritos" : "Marcar como favorito"} icon="favorite" active={item.favorito} onClick={() => toggleFavorite(item)} />
                             <ActionButton title="Editar item" icon="edit" onClick={() => { setEditingItem(item); setOpen(true); }} />
                             <ActionButton title="Ubicación de unidades" icon="location" onClick={() => { setSelectedItem(item.id); setOpenUbicacion(true); }} />
                             <ActionButton title="Historial de movimientos" icon="history" onClick={() => { setSelectedItem(item.id); setOpenHistorial(true); }} />
@@ -444,6 +480,11 @@ const STAT_CONFIG = {
     iconColor: "text-green-700",
     bg: "bg-green-100",
   },
+  star: {
+    icon: BadgeCheck,
+    iconColor: "text-amber-700",
+    bg: "bg-amber-100",
+  },
 };
 
 function StatCard({ title, value, color, icon }) {
@@ -476,7 +517,7 @@ function StatCard({ title, value, color, icon }) {
   );
 }
 
-function ActionButton({ title, icon, onClick }) {
+function ActionButton({ title, icon, onClick, active = false }) {
   const icons = {
     location: (
       <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -501,13 +542,18 @@ function ActionButton({ title, icon, onClick }) {
     ),
     edit: (
       <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
+      </svg>
+    ),
+    favorite: (
+      <svg className="w-4 h-4" fill={active ? "currentColor" : "none"} stroke="currentColor" viewBox="0 0 24 24">
+        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11.049 2.927c.3-.921 1.603-.921 1.902 0l1.08 3.317a1 1 0 00.95.69h3.49c.969 0 1.371 1.24.588 1.81l-2.825 2.053a1 1 0 00-.364 1.118l1.08 3.318c.3.921-.755 1.688-1.54 1.118l-2.824-2.053a1 1 0 00-1.176 0l-2.824 2.053c-.785.57-1.84-.197-1.54-1.118l1.08-3.318a1 1 0 00-.364-1.118L2.98 8.744c-.783-.57-.38-1.81.588-1.81h3.49a1 1 0 00.95-.69l1.08-3.317z" />
       </svg>
     ),
   };
 
   return (
-    <button onClick={onClick} title={title} className="p-2.5 text-gray-500 hover:text-[#1e3a5f] hover:bg-blue-50 rounded-lg transition-all duration-200">
+    <button onClick={onClick} title={title} className={`p-2.5 rounded-lg transition-all duration-200 ${active ? "text-amber-600 bg-amber-50" : "text-gray-500 hover:text-[#1e3a5f] hover:bg-blue-50"}`}>
       {icons[icon]}
     </button>
   );

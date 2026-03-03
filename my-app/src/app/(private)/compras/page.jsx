@@ -17,6 +17,7 @@ export default function ComprasPage() {
   const [refresh, setRefresh] = useState(false);
   const [compras, setCompras] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [deletingCompraId, setDeletingCompraId] = useState(null);
 
   useEffect(() => {
     loadCompras();
@@ -34,7 +35,19 @@ export default function ComprasPage() {
     }
   };
 
-  // Calcular estadísticas
+  const handleDeleteRegistro = async (compraId) => {
+    setDeletingCompraId(compraId);
+    try {
+      await compraAPI.deleteRegistro(compraId);
+      setRefresh((r) => !r);
+    } catch (error) {
+      console.error("Error eliminando registro de compra:", error);
+      alert(error?.response?.data?.detail || "No se pudo eliminar el registro de compra.");
+    } finally {
+      setDeletingCompraId(null);
+    }
+  };
+
   const stats = {
     total: compras.length,
     totalCostoSoles: compras
@@ -52,8 +65,6 @@ export default function ComprasPage() {
 
   return (
     <div className="space-y-6">
-      
-      {/* Header */}
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-2xl font-semibold text-[#1e3a8a]">
@@ -70,52 +81,17 @@ export default function ComprasPage() {
         </div>
       </div>
 
-      {/* KPIs */}
       {!loading && (
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-6 gap-4">
-          <KPICard
-            label="Total Compras"
-            value={stats.total}
-            icon={Package}
-            color="blue"
-          />
-          <KPICard
-            label="Costo Total (S/)"
-            value={`S/ ${stats.totalCostoSoles.toFixed(2)}`}
-            icon={Coins}
-            color="green"
-            size="small"
-          />
-          <KPICard
-            label="Costo Total ($)"
-            value={`$ ${stats.totalCostoDolares.toFixed(2)}`}
-            icon={DollarSign}
-            color="green"
-            size="small"
-          />
-          <KPICard
-            label="Costo Total (€)"
-            value={`€ ${stats.totalCostoEuros.toFixed(2)}`}
-            icon={DollarSign}
-            color="green"
-            size="small"
-          />
-          <KPICard
-            label="Items Únicos"
-            value={stats.itemsUnicos}
-            icon={Wrench}
-            color="gray"
-          />
-          <KPICard
-            label="Proveedores"
-            value={stats.proveedoresUnicos}
-            icon={Building2}
-            color="gray"
-          />
+          <KPICard label="Total Compras" value={stats.total} icon={Package} color="blue" />
+          <KPICard label="Costo Total (S/)" value={`S/ ${stats.totalCostoSoles.toFixed(2)}`} icon={Coins} color="green" size="small" />
+          <KPICard label="Costo Total ($)" value={`$ ${stats.totalCostoDolares.toFixed(2)}`} icon={DollarSign} color="green" size="small" />
+          <KPICard label="Costo Total (€)" value={`€ ${stats.totalCostoEuros.toFixed(2)}`} icon={DollarSign} color="green" size="small" />
+          <KPICard label="Items Únicos" value={stats.itemsUnicos} icon={Wrench} color="gray" />
+          <KPICard label="Proveedores" value={stats.proveedoresUnicos} icon={Building2} color="gray" />
         </div>
       )}
 
-      {/* Tabla de compras */}
       {loading ? (
         <div className="flex items-center justify-center py-16">
           <div className="text-center">
@@ -124,13 +100,12 @@ export default function ComprasPage() {
           </div>
         </div>
       ) : (
-        <CompraTable refresh={refresh} compras={compras} />
+        <CompraTable compras={compras} onDeleteRegistro={handleDeleteRegistro} deletingCompraId={deletingCompraId} />
       )}
     </div>
   );
 }
 
-// Componente KPI Card
 function KPICard({ label, value, icon: Icon, color, size = "normal" }) {
   const colorClasses = {
     blue: "text-[#1e3a8a]",
@@ -145,11 +120,7 @@ function KPICard({ label, value, icon: Icon, color, size = "normal" }) {
           <Icon className="w-5 h-5 text-gray-600" />
         </div>
 
-        <span
-          className={`${
-            size === "small" ? "text-lg" : "text-3xl"
-          } font-semibold ${colorClasses[color]}`}
-        >
+        <span className={`${size === "small" ? "text-lg" : "text-3xl"} font-semibold ${colorClasses[color]}`}>
           {value}
         </span>
       </div>

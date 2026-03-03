@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 
-export default function ItemGroupsAccordion({ groups, onDelete }) {
+export default function ItemGroupsAccordion({ groups, onDelete, onEdit }) {
   const [openGroup, setOpenGroup] = useState(null);
 
   if (!groups.length) {
@@ -33,7 +33,8 @@ export default function ItemGroupsAccordion({ groups, onDelete }) {
                     </li>
                   ))}
                 </ul>
-                <div className="flex justify-end">
+                <div className="flex justify-end gap-3">
+                  <button type="button" onClick={() => onEdit?.(group)} className="text-sm text-[#1e3a8a] hover:text-blue-700">Editar grupo</button>
                   <button type="button" onClick={() => onDelete?.(group.id)} className="text-sm text-red-600 hover:text-red-700">Eliminar grupo</button>
                 </div>
               </div>

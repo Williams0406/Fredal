@@ -268,6 +268,7 @@ class Item(TimeStampedModel):
         decimal_places=6,
         default=0,
     )
+    favorito = models.BooleanField(default=False)
     volvo = models.BooleanField(default=False)
     ultimo_correlativo = models.PositiveIntegerField(default=0)
 

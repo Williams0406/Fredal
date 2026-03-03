@@ -261,6 +261,7 @@ export const compraAPI = {
   list: (params) => api.get("/api/compras/", { params }),
   create: (data) => api.post("/api/compras/", data),
   batch: (data) => api.post("/api/compras/batch/", data),
+  deleteRegistro: (compraId) => api.post("/api/compras/eliminar-registro/", { compra_id: compraId }),
 };
 
 export const tipoCambioAPI = {

@@ -6,6 +6,7 @@ import ItemGroupManager from "@/components/items/ItemGroupManager";
 
 export default function ItemsPage() {
   const [view, setView] = useState("items");
+  const [favoriteFilter, setFavoriteFilter] = useState("TODOS");
 
   return (
     <div className="min-h-screen bg-gray-50">
@@ -45,9 +46,35 @@ export default function ItemsPage() {
         </div>
       </div>
 
+      <div className="mt-4 flex flex-wrap items-center gap-2">
+        <span className="text-sm font-medium text-gray-600">Visualización:</span>
+        <button
+          type="button"
+          onClick={() => setFavoriteFilter("TODOS")}
+          className={`px-3 py-1.5 rounded-full text-sm border transition-colors ${
+            favoriteFilter === "TODOS"
+              ? "bg-slate-900 text-white border-slate-900"
+              : "bg-white text-gray-700 border-gray-300 hover:bg-gray-50"
+          }`}
+        >
+          Todos
+        </button>
+        <button
+          type="button"
+          onClick={() => setFavoriteFilter("SOLO_FAVORITOS")}
+          className={`px-3 py-1.5 rounded-full text-sm border transition-colors ${
+            favoriteFilter === "SOLO_FAVORITOS"
+              ? "bg-amber-500 text-white border-amber-500"
+              : "bg-white text-gray-700 border-gray-300 hover:bg-gray-50"
+          }`}
+        >
+          ★ Solo favoritos
+        </button>
+      </div>
+
       {/* CONTENIDO PRINCIPAL */}
       <div className="px-8 py-6">
-        {view === "items" ? <ItemTable /> : <ItemGroupManager />}
+        {view === "items" ? <ItemTable favoriteFilter={favoriteFilter} /> : <ItemGroupManager />}
       </div>
     </div>
   );

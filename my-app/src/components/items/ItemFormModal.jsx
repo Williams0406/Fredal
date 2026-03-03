@@ -15,6 +15,7 @@ export default function ItemFormModal({ open, onClose, onSaved, item }) {
     dimension: "",
     unidad_medida: "",
     volvo: false,
+    favorito: false,
   });
   const [dimensiones, setDimensiones] = useState([]);
   const [unidades, setUnidades] = useState([]);
@@ -65,6 +66,7 @@ export default function ItemFormModal({ open, onClose, onSaved, item }) {
         dimension: item?.dimension ? String(item.dimension) : "",
         unidad_medida: item?.unidad_medida ? String(item.unidad_medida) : "",
         volvo: Boolean(item?.volvo),
+        favorito: Boolean(item?.favorito),
       });
       setAutoCode(false);
       setError("");
@@ -77,6 +79,7 @@ export default function ItemFormModal({ open, onClose, onSaved, item }) {
       dimension: "",
       unidad_medida: "",
       volvo: false,
+      favorito: false,
     });
     setAutoCode(true);
     setError("");
@@ -350,6 +353,28 @@ export default function ItemFormModal({ open, onClose, onSaved, item }) {
               <li>Los consumibles deben elegir una dimensión.</li>
               <li>Los repuestos usan la dimensión CANTIDAD y la unidad base por defecto.</li>
             </ul>
+          </div>
+
+          <div className="p-4 bg-amber-50 border border-amber-200 rounded-lg">
+            <label className="flex items-center gap-3 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={form.favorito}
+                onChange={() =>
+                  setForm({ ...form, favorito: !form.favorito })
+                }
+                className="w-4 h-4 text-amber-600 border-gray-300 rounded 
+                         focus:ring-2 focus:ring-amber-500"
+              />
+              <div>
+                <span className="text-sm font-medium text-amber-900">
+                  Marcar como favorito
+                </span>
+                <p className="text-xs text-amber-700 mt-0.5">
+                  Destaca este item para encontrarlo más rápido en la tabla
+                </p>
+              </div>
+            </label>
           </div>
 
           {/* Repuesto Volvo */}

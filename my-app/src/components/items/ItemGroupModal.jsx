@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { itemAPI, itemGrupoAPI, unidadMedidaAPI } from "@/lib/api";
 
 const emptyRow = {
@@ -9,7 +9,7 @@ const emptyRow = {
   unidadId: "",
 };
 
-export default function ItemGroupModal({ onClose, onCreated }) {
+export default function ItemGroupModal({ onClose, onSaved, mode = "create", group = null }) {
   const [groupName, setGroupName] = useState("");
   const [rows, setRows] = useState([{ ...emptyRow }]);
   const [items, setItems] = useState([]);
@@ -17,13 +17,31 @@ export default function ItemGroupModal({ onClose, onCreated }) {
   const [error, setError] = useState("");
   const [saving, setSaving] = useState(false);
 
+  const isEdit = mode === "edit" && !!group?.id;
+
   useEffect(() => {
     itemAPI.list().then((res) => setItems(res.data));
     unidadMedidaAPI.list().then((res) => setUnits(res.data));
   }, []);
 
+  useEffect(() => {
+    if (!isEdit) return;
+    setGroupName(group.nombre || "");
+    const detailRows = (group.items || []).map((detail) => ({
+      itemId: String(detail.item),
+      cantidad: Number(detail.cantidad || 1),
+      unidadId: detail.unidad_medida ? String(detail.unidad_medida) : "",
+    }));
+    setRows(detailRows.length ? detailRows : [{ ...emptyRow }]);
+  }, [group, isEdit]);
+
   const unitsByDimension = (dimensionId) =>
     units.filter((unit) => unit.dimension === dimensionId);
+
+  const usedItemIds = useMemo(
+    () => rows.map((row) => row.itemId).filter(Boolean),
+    [rows]
+  );
 
   const updateRow = (index, field, value) => {
     setRows((prev) => {
@@ -58,8 +76,12 @@ export default function ItemGroupModal({ onClose, onCreated }) {
 
     setSaving(true);
     try {
-      await itemGrupoAPI.create({ nombre: groupName.trim(), items: payloadItems });
-      onCreated?.();
+      if (isEdit) {
+        await itemGrupoAPI.update(group.id, { nombre: groupName.trim(), items: payloadItems });
+      } else {
+        await itemGrupoAPI.create({ nombre: groupName.trim(), items: payloadItems });
+      }
+      onSaved?.();
       onClose?.();
     } catch (err) {
       setError(err.response?.data?.detail || "No se pudo guardar el grupo.");
@@ -72,7 +94,7 @@ export default function ItemGroupModal({ onClose, onCreated }) {
     <div className="fixed inset-0 z-[80] bg-black/40 flex items-center justify-center p-4" onClick={onClose}>
       <div className="bg-white rounded-xl w-full max-w-4xl max-h-[90vh] flex flex-col" onClick={(event) => event.stopPropagation()}>
         <div className="border-b px-6 py-4 flex items-center justify-between">
-          <h3 className="text-lg font-semibold text-[#1e3a8a]">Crear grupo de items mixto</h3>
+          <h3 className="text-lg font-semibold text-[#1e3a8a]">{isEdit ? "Editar grupo de items" : "Crear grupo de items mixto"}</h3>
           <button onClick={onClose} className="text-gray-500 hover:text-gray-700">✕</button>
         </div>
 
@@ -95,9 +117,14 @@ export default function ItemGroupModal({ onClose, onCreated }) {
                     <label className="block text-xs font-medium text-gray-600 mb-1">Item</label>
                     <select className="w-full border rounded-lg px-3 py-2 bg-white" value={row.itemId} onChange={(event) => updateRow(index, "itemId", event.target.value)}>
                       <option value="">Selecciona un item</option>
-                      {items.map((item) => (
-                        <option key={item.id} value={item.id}>{item.codigo} - {item.nombre} ({item.tipo_insumo})</option>
-                      ))}
+                      {items.map((item) => {
+                        const blocked = usedItemIds.includes(String(item.id)) && String(item.id) !== String(row.itemId);
+                        return (
+                          <option key={item.id} value={item.id} disabled={blocked}>
+                            {item.codigo} - {item.nombre} ({item.tipo_insumo})
+                          </option>
+                        );
+                      })}
                     </select>
                   </div>
                   <div className="md:col-span-2">
@@ -126,7 +153,7 @@ export default function ItemGroupModal({ onClose, onCreated }) {
 
         <div className="border-t px-6 py-4 flex justify-end gap-3 bg-gray-50 rounded-b-xl">
           <button className="px-4 py-2 border rounded-lg" onClick={onClose}>Cancelar</button>
-          <button className="px-4 py-2 bg-[#1e3a8a] text-white rounded-lg disabled:opacity-50" onClick={handleSubmit} disabled={saving}>Guardar grupo</button>
+          <button className="px-4 py-2 bg-[#1e3a8a] text-white rounded-lg disabled:opacity-50" onClick={handleSubmit} disabled={saving}>{isEdit ? "Actualizar grupo" : "Guardar grupo"}</button>
         </div>
       </div>
     </div>

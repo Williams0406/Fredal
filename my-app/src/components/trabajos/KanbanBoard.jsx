@@ -29,6 +29,8 @@ export default function KanbanBoard({
   onEdit,
   onDelete,
   onView,
+  tecnicoLookup = {},
+  maquinariaLookup = {},
 }) {
   return (
     <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
@@ -46,6 +48,8 @@ export default function KanbanBoard({
             onEdit={onEdit}
             onDelete={onDelete}
             onView={onView}
+            tecnicoLookup={tecnicoLookup}
+            maquinariaLookup={maquinariaLookup}
           />
         );
       })}

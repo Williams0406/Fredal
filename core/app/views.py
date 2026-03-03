@@ -14,6 +14,7 @@ from django.db.models import Avg, Sum
 from decimal import Decimal
 from itertools import chain
 from datetime import datetime, time
+from django.db import transaction
 
 
 from .models import (
@@ -844,6 +845,41 @@ class CompraViewSet(viewsets.ModelViewSet):
         serializer.is_valid(raise_exception=True)
         serializer.save()
         return Response(serializer.data, status=status.HTTP_201_CREATED)
+
+
+    @action(detail=False, methods=["post"], url_path="eliminar-registro")
+    def eliminar_registro(self, request):
+        compra_id = request.data.get("compra_id")
+        if not compra_id:
+            return Response({"detail": "Debes enviar compra_id."}, status=status.HTTP_400_BAD_REQUEST)
+
+        try:
+            compra = Compra.objects.prefetch_related("detalles__item").get(pk=compra_id)
+        except Compra.DoesNotExist:
+            return Response({"detail": "Compra no encontrada."}, status=status.HTTP_404_NOT_FOUND)
+
+        with transaction.atomic():
+            detalles = list(compra.detalles.select_related("item"))
+
+            for detalle in detalles:
+                item = detalle.item
+
+                if item.tipo_insumo == Item.TipoInsumo.REPUESTO:
+                    unidades = ItemUnidad.objects.filter(compra_detalle=detalle)
+                    HistorialUbicacionItem.objects.filter(item_unidad__in=unidades).delete()
+                    MovimientoRepuesto.objects.filter(item_unidad__in=unidades).delete()
+                    unidades.delete()
+                else:
+                    lotes = LoteConsumible.objects.filter(compra_detalle=detalle)
+                    HistorialConsumible.objects.filter(lote__in=lotes).delete()
+                    MovimientoConsumible.objects.filter(item=item).delete()
+                    lotes.delete()
+
+                detalle.delete()
+
+            compra.delete()
+
+        return Response(status=status.HTTP_204_NO_CONTENT)
 
 class TrabajadorViewSet(viewsets.ModelViewSet):
     queryset = Trabajador.objects.all()

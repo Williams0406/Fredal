@@ -7,6 +7,8 @@ export default function KanbanColumn({
   onEdit,
   onDelete,
   onView,
+  tecnicoLookup = {},
+  maquinariaLookup = {},
 }) {
   // Colores según el estado (Fredal: borde izquierdo por estado)
   const colorClasses = {
@@ -74,6 +76,8 @@ export default function KanbanColumn({
               onEdit={onEdit}
               onDelete={onDelete}
               onView={onView}
+              tecnicoLookup={tecnicoLookup}
+              maquinariaLookup={maquinariaLookup}
             />
           ))
         )}

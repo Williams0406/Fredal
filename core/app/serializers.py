@@ -177,6 +177,7 @@ class ItemSerializer(serializers.ModelSerializer):
             "dimension_detalle",
             "unidad_medida",
             "unidad_medida_detalle",
+            "favorito",
             "volvo",
             "unidades_disponibles",
             "stock",
@@ -439,6 +440,8 @@ class CompraCreateSerializer(serializers.ModelSerializer):
             return compra
 
 class CompraDetalleListSerializer(serializers.ModelSerializer):
+    compra_id = serializers.IntegerField(source="compra.id", read_only=True)
+
     # Item
     item_nombre = serializers.CharField(source="item.nombre", read_only=True)
     item_codigo = serializers.CharField(source="item.codigo", read_only=True)
@@ -491,6 +494,7 @@ class CompraDetalleListSerializer(serializers.ModelSerializer):
         model = CompraDetalle
         fields = [
             "id",
+            "compra_id",
             "fecha",
             "item_nombre",
             "item_codigo",
