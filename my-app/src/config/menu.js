@@ -15,13 +15,13 @@ export const MENU_ITEMS = [
   {
     label: "Trabajos",
     path: "/trabajos",
-    roles: ["Tecnico", "Jefe de Tecnicos", "admin"],
+    roles: ["Tecnico", "Jefe de Tecnicos", "admin", "ManageCompras", "Jefe de Almaceneros", "Almacenero"],
   },
 
   {
     label: "Compras",
     path: "/compras",
-    roles: ["ManageCompras", "admin"],
+    roles: ["ManageCompras", "admin", "Jefe de Almaceneros", "Almacenero"],
   },
 
   {

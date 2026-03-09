@@ -144,6 +144,8 @@ class ItemPermission(BasePermission):
     Reglas:
     - Admin / Jefe de Almaceneros → CRUD
     - Almacenero → ver
+    - Tecnico → ver
+    - ManageCompras → ver (necesita ítems para gestionar compras)
     """
 
     def has_permission(self, request, view):
@@ -162,6 +164,10 @@ class ItemPermission(BasePermission):
             return request.method in SAFE_METHODS
 
         if user_in_group(user, "Tecnico"):
+            return request.method in SAFE_METHODS
+
+        # ✅ ManageCompras necesita ver ítems para asociarlos a compras
+        if user_in_group(user, "ManageCompras"):
             return request.method in SAFE_METHODS
 
         return False
@@ -187,4 +193,41 @@ class CatalogoPermission(BasePermission):
         if user.is_staff:
             return True
 
+        return request.method in SAFE_METHODS
+
+class ProveedorPermission(BasePermission):
+    """
+    Proveedores:
+    - Admin / ManageCompras / Jefe de Almaceneros → CRUD
+    - Otros autenticados → solo lectura
+    """
+    def has_permission(self, request, view):
+        user = request.user
+        if not user or not user.is_authenticated:
+            return False
+        if user.is_staff:
+            return True
+        if user_in_group(user, "ManageCompras"):
+            return True
+        if user_in_group(user, "Jefe de Almaceneros"):
+            return True
+        # Resto: solo lectura
+        return request.method in SAFE_METHODS
+
+
+class TipoCambioPermission(BasePermission):
+    """
+    Tipo de cambio:
+    - Admin / ManageCompras → CRUD
+    - Otros autenticados → solo lectura (necesitan el TC para conversiones)
+    """
+    def has_permission(self, request, view):
+        user = request.user
+        if not user or not user.is_authenticated:
+            return False
+        if user.is_staff:
+            return True
+        if user_in_group(user, "ManageCompras"):
+            return True
+        # Lectura libre para cualquier autenticado (dashboards la necesitan)
         return request.method in SAFE_METHODS

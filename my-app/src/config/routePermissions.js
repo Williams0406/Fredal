@@ -12,11 +12,11 @@ export const ROUTE_PERMISSIONS = [
   },
   {
     path: "/trabajos",
-    roles: ["Tecnico", "Jefe de Tecnicos", "admin"],
+    roles: ["Tecnico", "Jefe de Tecnicos", "admin", "ManageCompras", "Jefe de Almaceneros", "Almacenero"],
   },
   {
     path: "/items",
-    roles: ["Almacenero", "Jefe de Almaceneros", "admin"],
+    roles: ["Almacenero", "Jefe de Almaceneros", "admin", "ManageCompras"],
   },
   {
     path: "/usuarios",
