@@ -1,11 +1,13 @@
 // app/(auth)/login.jsx
 import { useState } from 'react';
+import { useRouter } from 'expo-router';
 import { View, Text, TextInput, TouchableOpacity,
          Alert, KeyboardAvoidingView, Platform } from 'react-native';
 import { useAuthStore } from '../../store/authStore';
 
 export default function LoginScreen() {
   const { login } = useAuthStore();
+  const router = useRouter();
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
@@ -18,6 +20,7 @@ export default function LoginScreen() {
     setLoading(true);
     try {
       await login(username, password);
+      router.replace('/(tabs)/');
     } catch {
       Alert.alert('Error', 'Credenciales inválidas');
     } finally { setLoading(false); }

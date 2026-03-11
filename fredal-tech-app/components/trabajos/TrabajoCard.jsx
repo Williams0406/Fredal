@@ -7,6 +7,12 @@ const PRIORIDAD_STYLE = {
   EMERGENCIA: { bg: '#fef2f2', text: '#b91c1c' },
 };
 
+const ESTATUS_LABEL = {
+  PENDIENTE: 'Pendiente',
+  EN_PROCESO: 'En Proceso',
+  FINALIZADO: 'Finalizado',
+};
+
 const BORDER_COLOR = {
   PENDIENTE:  '#9ca3af',
   EN_PROCESO: '#1e3a8a',
@@ -18,8 +24,13 @@ export default function TrabajoCard({ trabajo, onPress }) {
   const borderColor = BORDER_COLOR[trabajo.estatus] || '#9ca3af';
 
   const actividades = trabajo.actividades || [];
+  const tecnicosCount = Array.isArray(trabajo.tecnicos) ? trabajo.tecnicos.length : 0;
   const tiposActividad = [...new Set(actividades.map(a => a.tipo_actividad).filter(Boolean))];
   const tiposMant = [...new Set(actividades.map(a => a.tipo_mantenimiento).filter(Boolean))];
+  const itemsAsignados = [...new Set(actividades.flatMap((a) => [
+    ...(a.repuestos || []).map((i) => i.item_nombre),
+    ...(a.consumibles || []).map((i) => i.item_nombre),
+  ]).filter(Boolean))];
 
   return (
     <TouchableOpacity
@@ -70,7 +81,36 @@ export default function TrabajoCard({ trabajo, onPress }) {
             📍 {trabajo.lugar === 'CAMPO' ? 'Campo' : 'Taller'}
           </Text>
         ) : null}
+        <Text style={{ fontSize: 12, color: '#4b5563' }}>
+          📌 {ESTATUS_LABEL[trabajo.estatus] || trabajo.estatus}
+        </Text>
       </View>
+
+      <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 10, marginBottom: 6 }}>
+        <Text style={{ fontSize: 12, color: '#4b5563' }}>
+          🧩 {actividades.length} actividades
+        </Text>
+        {tecnicosCount > 0 ? (
+          <Text style={{ fontSize: 12, color: '#4b5563' }}>
+            👷 {tecnicosCount} técnico{tecnicosCount > 1 ? 's' : ''}
+          </Text>
+        ) : null}
+      </View>
+
+      {itemsAsignados.length > 0 ? (
+        <View style={{ marginTop: 6 }}>
+          <Text style={{ fontSize: 11, color: '#6b7280' }} numberOfLines={1}>
+            📦 Items: {itemsAsignados.slice(0, 2).join(', ')}
+            {itemsAsignados.length > 2 ? ` +${itemsAsignados.length - 2}` : ''}
+          </Text>
+        </View>
+      ) : null}
+
+      {trabajo.observaciones ? (
+        <Text style={{ marginTop: 6, fontSize: 11, color: '#6b7280' }} numberOfLines={2}>
+          📝 {trabajo.observaciones}
+        </Text>
+      ) : null}
 
       {/* Actividades badges */}
       {tiposActividad.length > 0 ? (

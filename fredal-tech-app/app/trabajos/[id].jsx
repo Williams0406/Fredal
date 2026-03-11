@@ -5,7 +5,7 @@ import {
   SafeAreaView, ActivityIndicator, Alert,
 } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
-import { useTrabajo } from '../../hooks/useTrabajos';
+import { usePatchTrabajo, useTrabajo } from '../../hooks/useTrabajos';
 import { useActividades, useDeleteActividad } from '../../hooks/useActividades';
 import ActividadFormModal from '../../components/actividades/ActividadFormModal';
 import FinalizarModal from '../../components/trabajos/FinalizarModal';
@@ -132,6 +132,7 @@ export default function TrabajoDetalleScreen() {
 
   const { data: trabajo, isLoading } = useTrabajo(trabajoId);
   const { data: actividades = [] } = useActividades(trabajoId);
+  const patchTrabajoMut = usePatchTrabajo();
 
   const [showActModal, setShowActModal]     = useState(false);
   const [showFinModal, setShowFinModal]     = useState(false);
@@ -139,6 +140,23 @@ export default function TrabajoDetalleScreen() {
 
   const handleAddMovimiento = (actividad) => {
     setActividadSeleccionada(actividad);
+  };
+
+  const handleIniciarTrabajo = () => {
+    patchTrabajoMut.mutate(
+      { id: trabajoId, data: { estatus: 'EN_PROCESO' } },
+      {
+        onSuccess: () => {
+          Alert.alert('Trabajo iniciado', 'La orden ahora está en proceso.');
+        },
+        onError: (err) => {
+          Alert.alert(
+            'Error',
+            err?.response?.data?.detail || 'No se pudo iniciar el trabajo'
+          );
+        },
+      }
+    );
   };
 
   if (isLoading) return (
@@ -150,6 +168,8 @@ export default function TrabajoDetalleScreen() {
   if (!trabajo) return null;
 
   const esFinalizado = trabajo.estatus === 'FINALIZADO';
+  const esPendiente = trabajo.estatus === 'PENDIENTE';
+  const esEnProceso = trabajo.estatus === 'EN_PROCESO';
   const pStyle = PRIORIDAD_STYLE[trabajo.prioridad] || PRIORIDAD_STYLE.REGULAR;
   const eStyle = ESTATUS_STYLE[trabajo.estatus] || ESTATUS_STYLE.PENDIENTE;
 
@@ -215,7 +235,7 @@ export default function TrabajoDetalleScreen() {
           <Text style={{ fontSize: 17, fontWeight: 'bold', color: '#1e3a8a' }}>
             Actividades ({actividades.length})
           </Text>
-          {!esFinalizado ? (
+          {esEnProceso ? (
             <TouchableOpacity
               style={{ backgroundColor: '#1e3a8a', paddingHorizontal: 14, paddingVertical: 8, borderRadius: 8 }}
               onPress={() => setShowActModal(true)}
@@ -229,7 +249,7 @@ export default function TrabajoDetalleScreen() {
           <View style={{ alignItems: 'center', paddingVertical: 32, backgroundColor: 'white', borderRadius: 12, borderWidth: 1, borderColor: '#e5e7eb' }}>
             <Text style={{ fontSize: 32, marginBottom: 8 }}>📋</Text>
             <Text style={{ color: '#6b7280' }}>Sin actividades registradas</Text>
-            {!esFinalizado ? (
+            {esEnProceso ? (
               <Text style={{ color: '#9ca3af', fontSize: 12, marginTop: 4 }}>
                 Toca "+ Agregar" para registrar una actividad
               </Text>
@@ -241,7 +261,7 @@ export default function TrabajoDetalleScreen() {
               key={act.id}
               actividad={act}
               trabajoId={trabajoId}
-              readonly={esFinalizado}
+              readonly={!esEnProceso}
               onAddMovimiento={handleAddMovimiento}
             />
           ))
@@ -250,17 +270,31 @@ export default function TrabajoDetalleScreen() {
         <View style={{ height: 24 }} />
       </ScrollView>
 
-      {/* Footer: Finalizar */}
+      {/* Footer: Acciones por estado */}
       {!esFinalizado ? (
         <View style={{ padding: 16, backgroundColor: 'white', borderTopWidth: 1, borderTopColor: '#e5e7eb' }}>
-          <TouchableOpacity
-            style={{ backgroundColor: '#84cc16', paddingVertical: 16, borderRadius: 12, alignItems: 'center' }}
-            onPress={() => setShowFinModal(true)}
-          >
-            <Text style={{ color: 'white', fontWeight: 'bold', fontSize: 15 }}>
-              ✓ Finalizar Orden
-            </Text>
-          </TouchableOpacity>
+          {esPendiente ? (
+            <TouchableOpacity
+              style={{ backgroundColor: '#84cc16', paddingVertical: 16, borderRadius: 12, alignItems: 'center' }}
+              onPress={handleIniciarTrabajo}
+              disabled={patchTrabajoMut.isPending}
+            >
+              <Text style={{ color: 'white', fontWeight: 'bold', fontSize: 15 }}>
+                {patchTrabajoMut.isPending ? 'Iniciando...' : '▶ Iniciar Trabajo'}
+              </Text>
+            </TouchableOpacity>
+          ) : null}
+
+          {esEnProceso ? (
+            <TouchableOpacity
+              style={{ backgroundColor: '#dc2626', paddingVertical: 16, borderRadius: 12, alignItems: 'center' }}
+              onPress={() => setShowFinModal(true)}
+            >
+              <Text style={{ color: 'white', fontWeight: 'bold', fontSize: 15 }}>
+                ✓ Finalizar Orden
+              </Text>
+            </TouchableOpacity>
+          ) : null}
         </View>
       ) : null}
 

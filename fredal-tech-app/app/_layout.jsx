@@ -1,5 +1,5 @@
 // app/_layout.jsx
-import { Slot, useRouter, useSegments } from 'expo-router';
+import { Slot, usePathname, useRouter, useSegments } from 'expo-router';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { useEffect, useState } from 'react';
 import { useAuthStore } from '../store/authStore';
@@ -12,6 +12,7 @@ function AuthGuard() {
   const { user, isLoading, loadUser } = useAuthStore();
   const router = useRouter();
   const segments = useSegments();
+  const pathname = usePathname();
   const [ready, setReady] = useState(false);
 
   useEffect(() => {
@@ -21,14 +22,15 @@ function AuthGuard() {
   useEffect(() => {
     if (!ready || isLoading) return;
 
-    const inAuth = segments[0] === '(auth)';
+    const firstSegment = segments[0];
+    const inAuth = firstSegment === '(auth)' || firstSegment === 'login' || pathname === '/login';
 
     if (!user && !inAuth) {
       router.replace('/(auth)/login');
     } else if (user && inAuth) {
       router.replace('/(tabs)/');
     }
-  }, [ready, user, isLoading, segments]);
+  }, [ready, user, isLoading, segments, pathname]);
 
   return <Slot />;
 }

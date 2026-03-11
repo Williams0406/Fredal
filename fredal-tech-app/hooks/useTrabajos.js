@@ -27,7 +27,10 @@ export const usePatchTrabajo = () => {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: ({ id, data }) => trabajoAPI.patch(id, data),
-    onSuccess: () => qc.invalidateQueries({ queryKey: TRABAJOS_KEY }),
+    onSuccess: (_, { id }) => {
+      qc.invalidateQueries({ queryKey: TRABAJOS_KEY });
+      qc.invalidateQueries({ queryKey: ['trabajo', id] });
+    },
   });
 };
 
