@@ -1,54 +1,163 @@
-import { useMemo, useState } from 'react';
+import { useMemo, useRef, useState } from 'react';
 import {
-  View, Text, TouchableOpacity, Modal, ScrollView,
-  TextInput, ActivityIndicator,
+  ActivityIndicator,
+  Pressable,
+  StyleSheet,
+  Text,
+  TextInput,
+  View,
 } from 'react-native';
+import { Ionicons } from '@expo/vector-icons';
 import { useFinalizarTrabajo } from '../../hooks/useTrabajos';
+import AppSheet from '../ui/AppSheet';
+import { colors, radius } from '../../lib/theme';
 
 const ESTADOS_EQUIPO = [
-  { value: 'OPERATIVO', label: '✓ Operativo' },
-  { value: 'INOPERATIVO', label: '✗ Inoperativo' },
+  { value: 'OPERATIVO', label: 'Operativo', description: 'Queda disponible para seguir operando.' },
+  { value: 'INOPERATIVO', label: 'Inoperativo', description: 'Requiere nueva revisión o intervención.' },
 ];
 
 const getCurrentTime = () => new Date().toTimeString().slice(0, 5);
+const EMPTY_TIME = { hour: '', minute: '' };
+
+function padTimeUnit(value) {
+  return String(value).padStart(2, '0');
+}
+
+function normalizeTimeValue(value) {
+  if (!value) return '';
+
+  const rawValue = String(value);
+  const candidate = rawValue.includes('T') ? rawValue.split('T').pop() : rawValue;
+  const match = candidate.match(/(\d{1,2}):(\d{1,2})/);
+
+  if (!match) return '';
+
+  const hour = Math.min(Number(match[1]), 23);
+  const minute = Math.min(Number(match[2]), 59);
+
+  if (Number.isNaN(hour) || Number.isNaN(minute)) return '';
+
+  return `${padTimeUnit(hour)}:${padTimeUnit(minute)}`;
+}
+
+function toTimeParts(value) {
+  const normalized = normalizeTimeValue(value);
+
+  if (!normalized) return EMPTY_TIME;
+
+  const [hour, minute] = normalized.split(':');
+  return { hour, minute };
+}
+
+function buildTimeValue(parts) {
+  const hour = String(parts?.hour || '').replace(/\D/g, '').slice(0, 2);
+  const minute = String(parts?.minute || '').replace(/\D/g, '').slice(0, 2);
+
+  if (hour.length !== 2 || minute.length !== 2) return '';
+
+  const hourValue = Number(hour);
+  const minuteValue = Number(minute);
+
+  if (
+    Number.isNaN(hourValue) ||
+    Number.isNaN(minuteValue) ||
+    hourValue > 23 ||
+    minuteValue > 59
+  ) {
+    return '';
+  }
+
+  return `${padTimeUnit(hourValue)}:${padTimeUnit(minuteValue)}`;
+}
+
+function sanitizeTimePart(value) {
+  return String(value || '').replace(/\D/g, '').slice(0, 2);
+}
+
+function finalizeTimePart(value, part) {
+  const digits = sanitizeTimePart(value);
+  if (!digits) return '';
+
+  const max = part === 'hour' ? 23 : 59;
+  return padTimeUnit(Math.min(Number(digits), max));
+}
+
+function getTimePreview(parts) {
+  const hour = parts?.hour ? parts.hour.padStart(2, '0') : 'HH';
+  const minute = parts?.minute ? parts.minute.padStart(2, '0') : 'MM';
+  return `${hour}:${minute}`;
+}
 
 function calcularDuracion(inicio, fin) {
   const [h1, m1] = inicio.split(':').map(Number);
   const [h2, m2] = fin.split(':').map(Number);
-
-  const totalMinutos = (h2 * 60 + m2) - (h1 * 60 + m1);
+  const totalMinutos = h2 * 60 + m2 - (h1 * 60 + m1);
   const horas = Math.floor(totalMinutos / 60);
   const minutos = totalMinutos % 60;
-
   return `${horas}h ${minutos}m`;
 }
 
 export default function FinalizarModal({ trabajo, onClose, onFinalizado }) {
   const finalizarMut = useFinalizarTrabajo();
-
   const [form, setForm] = useState({
-    hora_inicio: trabajo?.hora_inicio || getCurrentTime(),
-    hora_fin: trabajo?.hora_fin || '',
+    hora_inicio: toTimeParts(trabajo?.hora_inicio || getCurrentTime()),
+    hora_fin: toTimeParts(trabajo?.hora_fin || ''),
     horometro: trabajo?.horometro ? String(trabajo.horometro) : '',
     estado_equipo: trabajo?.estado_equipo || '',
   });
   const [error, setError] = useState('');
 
   const saving = finalizarMut.isPending;
+  const horaInicio = useMemo(() => buildTimeValue(form.hora_inicio), [form.hora_inicio]);
+  const horaFin = useMemo(() => buildTimeValue(form.hora_fin), [form.hora_fin]);
 
   const duracion = useMemo(() => {
-    if (!form.hora_inicio || !form.hora_fin) return '';
-    if (form.hora_inicio >= form.hora_fin) return '';
-    return calcularDuracion(form.hora_inicio, form.hora_fin);
-  }, [form.hora_inicio, form.hora_fin]);
+    if (!horaInicio || !horaFin) return '';
+    if (horaInicio >= horaFin) return '';
+    return calcularDuracion(horaInicio, horaFin);
+  }, [horaFin, horaInicio]);
 
   const handleChange = (field, value) => {
     setForm((prev) => ({ ...prev, [field]: value }));
     if (error) setError('');
   };
 
+  const handleTimePartChange = (field, part, value) => {
+    const nextValue = sanitizeTimePart(value);
+
+    setForm((prev) => ({
+      ...prev,
+      [field]: {
+        ...prev[field],
+        [part]: nextValue,
+      },
+    }));
+
+    if (error) setError('');
+  };
+
+  const handleTimePartBlur = (field, part) => {
+    setForm((prev) => ({
+      ...prev,
+      [field]: {
+        ...prev[field],
+        [part]: finalizeTimePart(prev[field]?.[part], part),
+      },
+    }));
+  };
+
+  const handleSetCurrentTime = (field) => {
+    setForm((prev) => ({
+      ...prev,
+      [field]: toTimeParts(getCurrentTime()),
+    }));
+
+    if (error) setError('');
+  };
+
   const handleSubmit = () => {
-    if (!form.hora_inicio || !form.hora_fin) {
+    if (!horaInicio || !horaFin) {
       setError('Las horas de inicio y fin son obligatorias');
       return;
     }
@@ -59,12 +168,12 @@ export default function FinalizarModal({ trabajo, onClose, onFinalizado }) {
     }
 
     if (!form.estado_equipo) {
-      setError('El estado del equipo es obligatorio');
+      setError('Selecciona el estado final del equipo');
       return;
     }
 
-    if (form.hora_inicio >= form.hora_fin) {
-      setError('La hora de fin debe ser posterior a la hora de inicio');
+    if (horaInicio >= horaFin) {
+      setError('La hora de fin debe ser posterior a la de inicio');
       return;
     }
 
@@ -72,8 +181,8 @@ export default function FinalizarModal({ trabajo, onClose, onFinalizado }) {
       {
         id: trabajo.id,
         data: {
-          hora_inicio: form.hora_inicio,
-          hora_fin: form.hora_fin,
+          hora_inicio: horaInicio,
+          hora_fin: horaFin,
           horometro: Number(form.horometro),
           estado_equipo: form.estado_equipo,
         },
@@ -91,153 +200,494 @@ export default function FinalizarModal({ trabajo, onClose, onFinalizado }) {
   };
 
   return (
-    <Modal visible transparent animationType='slide' onRequestClose={onClose}>
-      <View style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.4)', justifyContent: 'flex-end' }}>
-        <View style={{ backgroundColor: 'white', borderTopLeftRadius: 20, borderTopRightRadius: 20, maxHeight: '92%' }}>
-          <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', padding: 20, borderBottomWidth: 1, borderBottomColor: '#e5e7eb' }}>
-            <View>
-              <Text style={{ fontSize: 18, fontWeight: 'bold', color: '#1e3a8a' }}>
-                Finalizar Orden de Trabajo
-              </Text>
-              <Text style={{ fontSize: 12, color: '#6b7280', marginTop: 4 }}>
-                {trabajo?.codigo_orden}
-              </Text>
-            </View>
-            <TouchableOpacity onPress={onClose} disabled={saving}>
-              <Text style={{ fontSize: 22, color: '#6b7280' }}>✕</Text>
-            </TouchableOpacity>
-          </View>
+    <AppSheet
+      visible
+      onClose={onClose}
+      icon='checkmark-done-outline'
+      title='Finalizar orden'
+      subtitle={trabajo?.codigo_orden}
+      footer={
+        <View style={styles.footerRow}>
+          <Pressable style={styles.cancelButton} onPress={onClose} disabled={saving}>
+            <Text style={styles.cancelText}>Cancelar</Text>
+          </Pressable>
 
-          <ScrollView style={{ padding: 20 }} keyboardShouldPersistTaps='handled'>
-            <View style={{ backgroundColor: '#fefce8', borderWidth: 1, borderColor: '#fde68a', padding: 12, borderRadius: 10, marginBottom: 14 }}>
-              <Text style={{ color: '#854d0e', fontWeight: '700', fontSize: 13 }}>⚠ Acción irreversible</Text>
-              <Text style={{ color: '#a16207', fontSize: 12, marginTop: 4 }}>
-                Una vez finalizada la orden, no podrás modificar ni agregar actividades.
-              </Text>
-            </View>
-
-            {error ? (
-              <View style={{ backgroundColor: '#fef2f2', borderWidth: 1, borderColor: '#fecaca', padding: 12, borderRadius: 10, marginBottom: 14 }}>
-                <Text style={{ color: '#b91c1c', fontSize: 13 }}>{error}</Text>
-              </View>
-            ) : null}
-
-            <View style={{ flexDirection: 'row', gap: 10, marginBottom: 14 }}>
-              <View style={{ flex: 1 }}>
-                <Text style={{ fontSize: 13, fontWeight: '600', color: '#374151', marginBottom: 6 }}>Hora de inicio *</Text>
-                <TextInput
-                  value={form.hora_inicio}
-                  onChangeText={(v) => handleChange('hora_inicio', v)}
-                  placeholder='HH:MM'
-                  placeholderTextColor='#9ca3af'
-                  style={{ borderWidth: 1, borderColor: '#d1d5db', borderRadius: 10, paddingHorizontal: 12, paddingVertical: 10, color: '#111827' }}
-                />
-              </View>
-              <View style={{ flex: 1 }}>
-                <Text style={{ fontSize: 13, fontWeight: '600', color: '#374151', marginBottom: 6 }}>Hora de fin *</Text>
-                <TextInput
-                  value={form.hora_fin}
-                  onChangeText={(v) => handleChange('hora_fin', v)}
-                  placeholder='HH:MM'
-                  placeholderTextColor='#9ca3af'
-                  style={{ borderWidth: 1, borderColor: '#d1d5db', borderRadius: 10, paddingHorizontal: 12, paddingVertical: 10, color: '#111827' }}
-                />
-              </View>
-            </View>
-
-            {duracion ? (
-              <View style={{ backgroundColor: '#eff6ff', borderWidth: 1, borderColor: '#bfdbfe', padding: 10, borderRadius: 10, marginBottom: 14 }}>
-                <Text style={{ color: '#1e3a8a', fontSize: 13 }}>
-                  <Text style={{ fontWeight: '700' }}>Duración:</Text> {duracion}
-                </Text>
-              </View>
-            ) : null}
-
-            <View style={{ marginBottom: 14 }}>
-              <Text style={{ fontSize: 13, fontWeight: '600', color: '#374151', marginBottom: 6 }}>Horómetro (horas) *</Text>
-              <TextInput
-                value={form.horometro}
-                onChangeText={(v) => handleChange('horometro', v)}
-                keyboardType='numeric'
-                placeholder='Ej: 1250.5'
-                placeholderTextColor='#9ca3af'
-                style={{ borderWidth: 1, borderColor: '#d1d5db', borderRadius: 10, paddingHorizontal: 12, paddingVertical: 10, color: '#111827' }}
-              />
-              <Text style={{ fontSize: 12, color: '#6b7280', marginTop: 5 }}>Horas acumuladas de uso del equipo</Text>
-            </View>
-
-            <View style={{ marginBottom: 14 }}>
-              <Text style={{ fontSize: 13, fontWeight: '600', color: '#374151', marginBottom: 8 }}>Estado del equipo *</Text>
-              <View style={{ flexDirection: 'row', gap: 8 }}>
-                {ESTADOS_EQUIPO.map((opt) => {
-                  const selected = form.estado_equipo === opt.value;
-                  return (
-                    <TouchableOpacity
-                      key={opt.value}
-                      onPress={() => handleChange('estado_equipo', opt.value)}
-                      style={{
-                        flex: 1,
-                        paddingVertical: 10,
-                        borderRadius: 10,
-                        borderWidth: 1.5,
-                        borderColor: selected ? '#1e3a8a' : '#d1d5db',
-                        backgroundColor: selected ? '#1e3a8a' : 'white',
-                        alignItems: 'center',
-                      }}
-                    >
-                      <Text style={{ color: selected ? 'white' : '#374151', fontWeight: selected ? '700' : '500' }}>
-                        {opt.label}
-                      </Text>
-                    </TouchableOpacity>
-                  );
-                })}
-              </View>
-            </View>
-
-            {form.estado_equipo === 'OPERATIVO' ? (
-              <View style={{ backgroundColor: '#f0fdf4', borderWidth: 1, borderColor: '#bbf7d0', padding: 10, borderRadius: 10, marginBottom: 14 }}>
-                <Text style={{ color: '#166534', fontSize: 13 }}>✓ El equipo quedará disponible para nuevas asignaciones.</Text>
-              </View>
-            ) : null}
-
-            {form.estado_equipo === 'INOPERATIVO' ? (
-              <View style={{ backgroundColor: '#fef2f2', borderWidth: 1, borderColor: '#fecaca', padding: 10, borderRadius: 10, marginBottom: 14 }}>
-                <Text style={{ color: '#991b1b', fontSize: 13 }}>✗ El equipo no estará disponible hasta nueva revisión.</Text>
-              </View>
-            ) : null}
-          </ScrollView>
-
-          <View style={{ flexDirection: 'row', gap: 10, padding: 20, borderTopWidth: 1, borderTopColor: '#e5e7eb' }}>
-            <TouchableOpacity
-              onPress={onClose}
-              disabled={saving}
-              style={{ flex: 1, paddingVertical: 14, borderRadius: 10, alignItems: 'center', borderWidth: 1, borderColor: '#d1d5db' }}
-            >
-              <Text style={{ color: '#374151', fontWeight: '600' }}>Cancelar</Text>
-            </TouchableOpacity>
-
-            <TouchableOpacity
-              onPress={handleSubmit}
-              disabled={saving}
-              style={{
-                flex: 1.6,
-                paddingVertical: 14,
-                borderRadius: 10,
-                alignItems: 'center',
-                justifyContent: 'center',
-                flexDirection: 'row',
-                gap: 8,
-                backgroundColor: saving ? '#9ca3af' : '#dc2626',
-              }}
-            >
-              {saving ? <ActivityIndicator size='small' color='white' /> : null}
-              <Text style={{ color: 'white', fontWeight: '700' }}>
-                {saving ? 'Finalizando...' : 'Finalizar Orden'}
-              </Text>
-            </TouchableOpacity>
-          </View>
+          <Pressable style={[styles.submitButton, saving ? styles.submitButtonDisabled : null]} onPress={handleSubmit} disabled={saving}>
+            {saving ? (
+              <ActivityIndicator size='small' color={colors.white} />
+            ) : (
+              <Ionicons name='checkmark-done-outline' size={17} color={colors.white} />
+            )}
+            <Text style={styles.submitText}>
+              {saving ? 'Finalizando...' : 'Cerrar orden'}
+            </Text>
+          </Pressable>
+        </View>
+      }
+    >
+      <View style={styles.warningCard}>
+        <Ionicons name='alert-circle-outline' size={18} color={colors.amber} />
+        <View style={{ flex: 1 }}>
+          <Text style={styles.warningTitle}>Acción irreversible</Text>
+          <Text style={styles.warningText}>
+            Después del cierre no podrás registrar más actividades ni materiales.
+          </Text>
         </View>
       </View>
-    </Modal>
+
+      {error ? (
+        <View style={styles.errorCard}>
+          <Ionicons name='close-circle-outline' size={18} color={colors.red} />
+          <Text style={styles.errorText}>{error}</Text>
+        </View>
+      ) : null}
+
+      <View style={styles.block}>
+        <Text style={styles.blockTitle}>Ventana de ejecución</Text>
+        <View style={styles.timeFieldStack}>
+          <TimeField
+            label='Hora de inicio *'
+            icon='play-circle-outline'
+            parts={form.hora_inicio}
+            onChangePart={(part, value) => handleTimePartChange('hora_inicio', part, value)}
+            onBlurPart={(part) => handleTimePartBlur('hora_inicio', part)}
+            onUseCurrent={() => handleSetCurrentTime('hora_inicio')}
+            helper='Solo ajusta horas y minutos. El formato se completa automáticamente.'
+          />
+          <TimeField
+            label='Hora de fin *'
+            icon='stop-circle-outline'
+            parts={form.hora_fin}
+            onChangePart={(part, value) => handleTimePartChange('hora_fin', part, value)}
+            onBlurPart={(part) => handleTimePartBlur('hora_fin', part)}
+            onUseCurrent={() => handleSetCurrentTime('hora_fin')}
+            helper='Ideal para registrar el cierre real sin escribir los dos puntos.'
+          />
+        </View>
+      </View>
+
+      {duracion ? (
+        <View style={styles.durationCard}>
+          <Ionicons name='time-outline' size={16} color={colors.navy} />
+          <Text style={styles.durationText}>Duración estimada: {duracion}</Text>
+        </View>
+      ) : null}
+
+      <View style={styles.block}>
+        <InputField
+          label='Horómetro (horas) *'
+          value={form.horometro}
+          onChangeText={(value) => handleChange('horometro', value)}
+          placeholder='Ej. 1250.5'
+          keyboardType='numeric'
+          helper='Horas acumuladas del equipo al momento del cierre.'
+        />
+      </View>
+
+      <View style={styles.block}>
+        <Text style={styles.blockTitle}>Estado final del equipo</Text>
+        <View style={styles.optionStack}>
+          {ESTADOS_EQUIPO.map((option) => {
+            const selected = form.estado_equipo === option.value;
+            return (
+              <Pressable
+                key={option.value}
+                style={[styles.statusOption, selected ? styles.statusOptionSelected : null]}
+                onPress={() => handleChange('estado_equipo', option.value)}
+              >
+                <View style={styles.statusIconWrap}>
+                  <Ionicons
+                    name={option.value === 'OPERATIVO' ? 'checkmark-circle-outline' : 'close-circle-outline'}
+                    size={18}
+                    color={selected ? colors.navy : colors.textMuted}
+                  />
+                </View>
+                <View style={{ flex: 1 }}>
+                  <Text style={[styles.statusTitle, selected ? styles.statusTitleSelected : null]}>
+                    {option.label}
+                  </Text>
+                  <Text style={[styles.statusDescription, selected ? styles.statusDescriptionSelected : null]}>
+                    {option.description}
+                  </Text>
+                </View>
+                {selected ? <Ionicons name='checkmark-circle' size={18} color={colors.navy} /> : null}
+              </Pressable>
+            );
+          })}
+        </View>
+      </View>
+    </AppSheet>
   );
 }
+
+function InputField({ label, helper, ...props }) {
+  return (
+    <View style={{ flex: 1 }}>
+      <Text style={[styles.fieldLabel, styles.inputFieldLabel]}>{label}</Text>
+      <TextInput
+        {...props}
+        placeholderTextColor={colors.textSoft}
+        style={styles.input}
+      />
+      {helper ? <Text style={styles.helperText}>{helper}</Text> : null}
+    </View>
+  );
+}
+
+function TimeField({ label, icon, parts, helper, onChangePart, onBlurPart, onUseCurrent }) {
+  const hourRef = useRef(null);
+  const minuteRef = useRef(null);
+  const [focusedPart, setFocusedPart] = useState('');
+
+  return (
+    <View style={styles.timeFieldCard}>
+      <View style={styles.timeFieldHeader}>
+        <View style={styles.timeFieldTitleRow}>
+          <View style={styles.timeIconWrap}>
+            <Ionicons name={icon} size={16} color={colors.navy} />
+          </View>
+          <View style={{ flex: 1 }}>
+            <Text style={styles.fieldLabel}>{label}</Text>
+            <Text style={styles.timePreview}>{getTimePreview(parts)}</Text>
+          </View>
+        </View>
+
+        <Pressable style={styles.timeNowButton} onPress={onUseCurrent}>
+          <Ionicons name='time-outline' size={14} color={colors.navy} />
+          <Text style={styles.timeNowText}>Ahora</Text>
+        </Pressable>
+      </View>
+
+      <View style={styles.timeEditorRow}>
+        <Pressable
+          style={[
+            styles.timeSegment,
+            focusedPart === 'hour' ? styles.timeSegmentActive : null,
+          ]}
+          onPress={() => hourRef.current?.focus()}
+        >
+          <Text style={styles.timeSegmentLabel}>Hora</Text>
+          <TextInput
+            ref={hourRef}
+            value={parts.hour}
+            onChangeText={(value) => {
+              const nextValue = sanitizeTimePart(value);
+              onChangePart('hour', nextValue);
+              if (nextValue.length === 2) {
+                minuteRef.current?.focus();
+              }
+            }}
+            onFocus={() => setFocusedPart('hour')}
+            onBlur={() => {
+              setFocusedPart((current) => (current === 'hour' ? '' : current));
+              onBlurPart('hour');
+            }}
+            keyboardType='number-pad'
+            maxLength={2}
+            placeholder='HH'
+            placeholderTextColor={colors.textSoft}
+            style={styles.timeSegmentInput}
+            textAlign='center'
+            selectTextOnFocus
+          />
+        </Pressable>
+
+        <Text style={styles.timeSeparator}>:</Text>
+
+        <Pressable
+          style={[
+            styles.timeSegment,
+            focusedPart === 'minute' ? styles.timeSegmentActive : null,
+          ]}
+          onPress={() => minuteRef.current?.focus()}
+        >
+          <Text style={styles.timeSegmentLabel}>Min</Text>
+          <TextInput
+            ref={minuteRef}
+            value={parts.minute}
+            onChangeText={(value) => onChangePart('minute', sanitizeTimePart(value))}
+            onFocus={() => setFocusedPart('minute')}
+            onBlur={() => {
+              setFocusedPart((current) => (current === 'minute' ? '' : current));
+              onBlurPart('minute');
+            }}
+            keyboardType='number-pad'
+            maxLength={2}
+            placeholder='MM'
+            placeholderTextColor={colors.textSoft}
+            style={styles.timeSegmentInput}
+            textAlign='center'
+            selectTextOnFocus
+          />
+        </Pressable>
+      </View>
+
+      {helper ? <Text style={styles.helperText}>{helper}</Text> : null}
+    </View>
+  );
+}
+
+const styles = StyleSheet.create({
+  footerRow: {
+    flexDirection: 'row',
+    gap: 12,
+  },
+  cancelButton: {
+    flex: 1,
+    minHeight: 52,
+    borderRadius: radius.md,
+    borderWidth: 1,
+    borderColor: colors.borderStrong,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: colors.white,
+  },
+  cancelText: {
+    fontSize: 14,
+    fontWeight: '700',
+    color: colors.textMuted,
+  },
+  submitButton: {
+    flex: 1.5,
+    minHeight: 52,
+    borderRadius: radius.md,
+    backgroundColor: colors.red,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+  },
+  submitButtonDisabled: {
+    opacity: 0.7,
+  },
+  submitText: {
+    fontSize: 14,
+    fontWeight: '800',
+    color: colors.white,
+  },
+  warningCard: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 10,
+    borderRadius: radius.lg,
+    backgroundColor: colors.amberSoft,
+    padding: 14,
+    marginBottom: 16,
+  },
+  warningTitle: {
+    fontSize: 13,
+    fontWeight: '800',
+    color: colors.amber,
+  },
+  warningText: {
+    marginTop: 4,
+    fontSize: 13,
+    lineHeight: 20,
+    color: colors.amber,
+  },
+  errorCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    borderRadius: radius.md,
+    backgroundColor: colors.redSoft,
+    padding: 14,
+    marginBottom: 16,
+  },
+  errorText: {
+    flex: 1,
+    fontSize: 13,
+    color: colors.red,
+    fontWeight: '700',
+  },
+  block: {
+    marginBottom: 16,
+  },
+  blockTitle: {
+    marginBottom: 10,
+    fontSize: 12,
+    fontWeight: '700',
+    textTransform: 'uppercase',
+    letterSpacing: 0.8,
+    color: colors.textMuted,
+  },
+  fieldLabel: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: colors.text,
+  },
+  inputFieldLabel: {
+    marginBottom: 8,
+  },
+  timeFieldStack: {
+    gap: 12,
+  },
+  timeFieldCard: {
+    borderRadius: radius.lg,
+    borderWidth: 1,
+    borderColor: colors.border,
+    backgroundColor: colors.surfaceMuted,
+    padding: 14,
+  },
+  timeFieldHeader: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    justifyContent: 'space-between',
+    gap: 12,
+  },
+  timeFieldTitleRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    flex: 1,
+  },
+  timeIconWrap: {
+    width: 34,
+    height: 34,
+    borderRadius: 12,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: colors.navySoft,
+  },
+  timePreview: {
+    marginTop: 3,
+    fontSize: 12,
+    fontWeight: '700',
+    letterSpacing: 1.2,
+    color: colors.navy,
+  },
+  timeNowButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    borderRadius: radius.pill,
+    backgroundColor: colors.white,
+    borderWidth: 1,
+    borderColor: '#BFD2FF',
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+  },
+  timeNowText: {
+    fontSize: 12,
+    fontWeight: '800',
+    color: colors.navy,
+  },
+  timeEditorRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 10,
+    marginTop: 14,
+  },
+  timeSegment: {
+    flex: 1,
+    minHeight: 96,
+    borderRadius: radius.md,
+    borderWidth: 1,
+    borderColor: colors.border,
+    backgroundColor: colors.white,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 12,
+    paddingVertical: 14,
+  },
+  timeSegmentActive: {
+    borderColor: '#8FB5FF',
+    backgroundColor: colors.navySoft,
+  },
+  timeSegmentLabel: {
+    fontSize: 12,
+    fontWeight: '700',
+    textTransform: 'uppercase',
+    letterSpacing: 0.8,
+    color: colors.textMuted,
+  },
+  timeSegmentInput: {
+    width: '100%',
+    marginTop: 8,
+    paddingVertical: 0,
+    fontSize: 30,
+    fontWeight: '800',
+    letterSpacing: 1.5,
+    color: colors.text,
+  },
+  timeSeparator: {
+    marginTop: 18,
+    fontSize: 28,
+    fontWeight: '800',
+    color: colors.navy,
+  },
+  input: {
+    minHeight: 52,
+    borderWidth: 1,
+    borderColor: colors.border,
+    borderRadius: radius.md,
+    backgroundColor: colors.white,
+    paddingHorizontal: 16,
+    fontSize: 15,
+    color: colors.text,
+  },
+  helperText: {
+    marginTop: 6,
+    fontSize: 12,
+    color: colors.textMuted,
+  },
+  durationCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    borderRadius: radius.md,
+    backgroundColor: colors.navySoft,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    marginBottom: 16,
+  },
+  durationText: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: colors.navy,
+  },
+  optionStack: {
+    gap: 10,
+  },
+  statusOption: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    borderRadius: radius.md,
+    borderWidth: 1,
+    borderColor: colors.border,
+    backgroundColor: colors.white,
+    paddingHorizontal: 16,
+    paddingVertical: 14,
+  },
+  statusOptionSelected: {
+    borderColor: '#BFD2FF',
+    backgroundColor: colors.navySoft,
+  },
+  statusIconWrap: {
+    width: 38,
+    height: 38,
+    borderRadius: 14,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: colors.surfaceMuted,
+  },
+  statusTitle: {
+    fontSize: 14,
+    fontWeight: '800',
+    color: colors.text,
+  },
+  statusTitleSelected: {
+    color: colors.navy,
+  },
+  statusDescription: {
+    marginTop: 4,
+    fontSize: 12,
+    lineHeight: 18,
+    color: colors.textMuted,
+  },
+  statusDescriptionSelected: {
+    color: colors.navy,
+  },
+});

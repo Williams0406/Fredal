@@ -1,0 +1,33 @@
+# Proyectos hermanos - NO pertenecen al build móvil
+my-app
+core
+venv
+
+# Git
+.git
+
+# Carpetas de build/cache en cualquier nivel
+**/node_modules
+**/.expo
+**/.next
+**/dist
+**/build
+**/coverage
+**/__pycache__
+
+# Archivos pesados innecesarios
+**/*.log
+**/*.map
+**/*.pyc
+**/*.pyd
+
+# Assets crudos
+assets/raw
+
+# Variables de entorno
+.env.local
+.env*.local
+
+# Sistema
+.DS_Store
+Thumbs.db

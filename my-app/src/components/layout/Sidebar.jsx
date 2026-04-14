@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import Image from "next/image";
 import { usePathname } from "next/navigation";
 import { useAuth } from "@/context/AuthContext";
 import { MENU_ITEMS } from "@/config/menu";
@@ -31,9 +32,21 @@ export default function Sidebar({ collapsed, onToggle, onMobileClose }) {
       {/* ── Header / Logo ── */}
       <div className="px-4 py-4 border-b border-white/10 flex items-center justify-between">
         {!collapsed && (
-          <div>
-            <h1 className="text-xl font-bold tracking-wide">FREDAL</h1>
-            <p className="text-xs text-white/50 font-medium">Peruvian Group</p>
+          <div className="flex items-center gap-3">
+            <img
+              src="/logo/logo.png"
+              alt="Fredal Logo"
+              className="w-20 h-20 rounded-md object-contain"
+            />
+
+            {!collapsed && (
+              <div>
+                <h1 className="text-xl font-bold tracking-wide">FREDAL</h1>
+                <p className="text-xs text-white/50 font-medium">
+                  Peruvian Group
+                </p>
+              </div>
+            )}
           </div>
         )}
 

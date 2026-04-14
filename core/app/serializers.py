@@ -7,6 +7,7 @@ from django.db import transaction
 from django.db.models import Sum
 from django.utils import timezone
 from rest_framework.exceptions import ValidationError
+from .permissions import can_manage_planned_activities
 
 from .models import (
     Item,
@@ -786,6 +787,11 @@ class MovimientoRepuestoSerializer(serializers.ModelSerializer):
     def validate(self, data):
         unidad = data["item_unidad"]
         actividad = data["actividad"]
+        request = self.context.get("request")
+        if actividad.es_planificada and not can_manage_planned_activities(getattr(request, "user", None)):
+            raise serializers.ValidationError(
+                "Solo Jefe de Almaceneros, Almacenero o admin pueden registrar materiales en actividades planificadas"
+            )
 
         if actividad.orden.estatus == OrdenTrabajo.Estatus.FINALIZADO:
             raise serializers.ValidationError(
@@ -1036,6 +1042,11 @@ class MovimientoConsumibleSerializer(serializers.ModelSerializer):
     def validate(self, data):
         actividad = data["actividad"]
         item = data["item"]
+        request = self.context.get("request")
+        if actividad.es_planificada and not can_manage_planned_activities(getattr(request, "user", None)):
+            raise serializers.ValidationError(
+                "Solo Jefe de Almaceneros, Almacenero o admin pueden registrar materiales en actividades planificadas"
+            )
 
         if actividad.orden.estatus == OrdenTrabajo.Estatus.FINALIZADO:
             raise serializers.ValidationError(

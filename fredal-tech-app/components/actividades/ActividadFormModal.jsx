@@ -1,22 +1,25 @@
-// components/actividades/ActividadFormModal.jsx
 import { useState } from 'react';
-import { View, Text, Modal, ScrollView,
-         TouchableOpacity, Alert } from 'react-native';
+import { ActivityIndicator, Alert, Pressable, StyleSheet, Text, View } from 'react-native';
+import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 import { useCreateActividad } from '../../hooks/useActividades';
 import AppSelect from '../ui/AppSelect';
 import AppTextArea from '../ui/AppTextArea';
+import AppSheet from '../ui/AppSheet';
+import { colors, radius } from '../../lib/theme';
 
-const TIPO_ACT = [{ value: 'REVISION', label: 'Revisión' },
-                  { value: 'MANTENIMIENTO', label: 'Mantenimiento' }];
+const TIPO_ACT = [
+  { value: 'REVISION', label: 'Revisión' },
+  { value: 'MANTENIMIENTO', label: 'Mantenimiento' },
+];
+
 const TIPO_MANT = [
   { value: 'PREVENTIVO', label: 'Preventivo' },
   { value: 'CORRECTIVO', label: 'Correctivo' },
   { value: 'PREDICTIVO', label: 'Predictivo' },
 ];
-const SUB_PREV = ['PM1','PM2','PM3','PM4'].map(v => ({ value: v, label: v }));
-const SUB_CORR = ['LEVE','MEDIANO','GRAVE'].map(v => ({ value: v, label: v }));
 
-// Props: { trabajoId, onClose }
+const SUB_PREV = ['PM1', 'PM2', 'PM3', 'PM4'].map((value) => ({ value, label: value }));
+const SUB_CORR = ['LEVE', 'MEDIANO', 'GRAVE'].map((value) => ({ value, label: value }));
 
 export default function ActividadFormModal({ trabajoId, onClose }) {
   const [tipoAct, setTipoAct] = useState('');
@@ -25,72 +28,302 @@ export default function ActividadFormModal({ trabajoId, onClose }) {
   const [desc, setDesc] = useState('');
   const createAct = useCreateActividad(trabajoId);
 
-  const subtipoOpts = tipoMant === 'PREVENTIVO' ? SUB_PREV :
-    (tipoMant === 'CORRECTIVO' || tipoMant === 'PREDICTIVO') ? SUB_CORR : [];
+  const subtipoOpts =
+    tipoMant === 'PREVENTIVO'
+      ? SUB_PREV
+      : tipoMant === 'CORRECTIVO' || tipoMant === 'PREDICTIVO'
+        ? SUB_CORR
+        : [];
 
-  const canSave = tipoAct === 'REVISION' ||
+  const canSave =
+    tipoAct === 'REVISION' ||
     (tipoAct === 'MANTENIMIENTO' && tipoMant && subtipo);
 
   const handleSave = async () => {
     if (!canSave) return;
+
     try {
       await createAct.mutateAsync({
-        orden: trabajoId, tipo_actividad: tipoAct,
+        orden: trabajoId,
+        tipo_actividad: tipoAct,
         tipo_mantenimiento: tipoAct === 'MANTENIMIENTO' ? tipoMant : undefined,
         subtipo: tipoAct === 'MANTENIMIENTO' ? subtipo : undefined,
-        descripcion: desc, es_planificada: false,
+        descripcion: desc,
+        es_planificada: false,
       });
       onClose();
-    } catch { Alert.alert('Error', 'No se pudo guardar la actividad'); }
+    } catch {
+      Alert.alert('Error', 'No se pudo guardar la actividad');
+    }
   };
 
   return (
-    <Modal visible animationType='slide' transparent>
-      <View className='flex-1 justify-end bg-black/40'>
-        <View className='bg-white rounded-t-3xl max-h-[90%]'>
-          {/* Header */}
-          <View className='flex-row items-center justify-between p-5
-                         border-b border-gray-200'>
-            <Text className='text-xl font-bold text-[#1e3a8a]'>
-              Nueva Actividad
-            </Text>
-            <TouchableOpacity onPress={onClose}>
-              <Text className='text-gray-400 text-2xl'>✕</Text>
-            </TouchableOpacity>
-          </View>
-          <ScrollView className='p-5' keyboardShouldPersistTaps='handled'>
-            <AppSelect label='Tipo de actividad *' options={TIPO_ACT}
-              value={tipoAct} onChange={v => { setTipoAct(v); setTipoMant(''); setSubtipo(''); }} />
-            {tipoAct === 'MANTENIMIENTO' && (
-              <>
-                <AppSelect label='Tipo de mantenimiento *' options={TIPO_MANT}
-                  value={tipoMant} onChange={v => { setTipoMant(v); setSubtipo(''); }} />
-                {tipoMant && (
-                  <AppSelect label='Subtipo *' options={subtipoOpts}
-                    value={subtipo} onChange={setSubtipo} />
-                )}
-              </>
+    <AppSheet
+      visible
+      onClose={onClose}
+      icon='create-outline'
+      title='Registrar actividad'
+      subtitle='Documenta la ejecución real realizada en esta orden'
+      footer={
+        <View style={styles.footerRow}>
+          <Pressable style={styles.cancelButton} onPress={onClose}>
+            <Text style={styles.cancelText}>Cancelar</Text>
+          </Pressable>
+          <Pressable
+            style={[styles.saveButton, !canSave || createAct.isPending ? styles.saveButtonDisabled : null]}
+            onPress={handleSave}
+            disabled={!canSave || createAct.isPending}
+          >
+            {createAct.isPending ? (
+              <ActivityIndicator size='small' color={colors.white} />
+            ) : (
+              <Ionicons name='save-outline' size={16} color={colors.white} />
             )}
-            <AppTextArea label='Descripción (opcional)' value={desc}
-              onChange={setDesc} placeholder='Detalla la actividad...' />
-          </ScrollView>
-          {/* Footer */}
-          <View className='p-5 border-t border-gray-200 flex-row gap-3'>
-            <TouchableOpacity className='flex-1 py-3.5 rounded-xl
-              border border-gray-300 items-center' onPress={onClose}>
-              <Text className='text-gray-700 font-semibold'>Cancelar</Text>
-            </TouchableOpacity>
-            <TouchableOpacity
-              className={`flex-1 py-3.5 rounded-xl items-center
-                ${canSave ? 'bg-[#1e3a8a]' : 'bg-gray-300'}`}
-              onPress={handleSave} disabled={!canSave || createAct.isPending}>
-              <Text className='text-white font-semibold'>
-                {createAct.isPending ? 'Guardando...' : 'Guardar'}
-              </Text>
-            </TouchableOpacity>
-          </View>
+            <Text style={styles.saveText}>
+              {createAct.isPending ? 'Guardando...' : 'Guardar actividad'}
+            </Text>
+          </Pressable>
+        </View>
+      }
+    >
+      <View style={styles.block}>
+        <Text style={styles.blockTitle}>Tipo de actividad</Text>
+        <View style={styles.optionGrid}>
+          {TIPO_ACT.map((option) => {
+            const selected = tipoAct === option.value;
+            const isMaintenance = option.value === 'MANTENIMIENTO';
+
+            return (
+              <Pressable
+                key={option.value}
+                style={[
+                  styles.choiceCard,
+                  selected ? styles.choiceCardSelected : null,
+                ]}
+                onPress={() => {
+                  setTipoAct(option.value);
+                  setTipoMant('');
+                  setSubtipo('');
+                }}
+              >
+                <View
+                  style={[
+                    styles.choiceIconWrap,
+                    selected ? styles.choiceIconWrapSelected : null,
+                  ]}
+                >
+                  {isMaintenance ? (
+                    <MaterialCommunityIcons
+                      name='wrench-outline'
+                      size={20}
+                      color={selected ? colors.white : colors.navy}
+                    />
+                  ) : (
+                    <Ionicons
+                      name='search-outline'
+                      size={20}
+                      color={selected ? colors.white : colors.navy}
+                    />
+                  )}
+                </View>
+                <Text style={[styles.choiceTitle, selected ? styles.choiceTitleSelected : null]}>
+                  {option.label}
+                </Text>
+                <Text style={[styles.choiceSubtitle, selected ? styles.choiceSubtitleSelected : null]}>
+                  {isMaintenance ? 'Con tipo y subtipo técnico' : 'Sin materiales ni mantenimiento'}
+                </Text>
+              </Pressable>
+            );
+          })}
         </View>
       </View>
-    </Modal>
+
+      {tipoAct === 'MANTENIMIENTO' ? (
+        <View style={styles.block}>
+          <Text style={styles.blockTitle}>Clasificación del mantenimiento</Text>
+          <View style={styles.stack}>
+            {TIPO_MANT.map((option) => {
+              const selected = tipoMant === option.value;
+              return (
+                <Pressable
+                  key={option.value}
+                  style={[styles.rowOption, selected ? styles.rowOptionSelected : null]}
+                  onPress={() => {
+                    setTipoMant(option.value);
+                    setSubtipo('');
+                  }}
+                >
+                  <View style={styles.rowOptionTextWrap}>
+                    <Text style={[styles.rowOptionTitle, selected ? styles.rowOptionTitleSelected : null]}>
+                      {option.label}
+                    </Text>
+                    <Text style={[styles.rowOptionMeta, selected ? styles.rowOptionMetaSelected : null]}>
+                      {option.value === 'PREVENTIVO'
+                        ? 'Planificado por ciclo o mantenimiento periódico'
+                        : option.value === 'CORRECTIVO'
+                          ? 'Atiende una falla existente'
+                          : 'Basado en comportamiento o condición'}
+                    </Text>
+                  </View>
+                  {selected ? <Ionicons name='checkmark-circle' size={18} color={colors.navy} /> : null}
+                </Pressable>
+              );
+            })}
+          </View>
+
+          {tipoMant ? (
+            <AppSelect
+              label='Subtipo *'
+              options={subtipoOpts}
+              value={subtipo}
+              onChange={setSubtipo}
+            />
+          ) : null}
+        </View>
+      ) : null}
+
+      <View style={styles.block}>
+        <AppTextArea
+          label='Descripción'
+          value={desc}
+          onChange={setDesc}
+          placeholder='Describe lo que realizaste, hallazgos o notas técnicas...'
+        />
+      </View>
+    </AppSheet>
   );
 }
+
+const styles = StyleSheet.create({
+  footerRow: {
+    flexDirection: 'row',
+    gap: 12,
+  },
+  cancelButton: {
+    flex: 1,
+    minHeight: 52,
+    borderRadius: radius.md,
+    borderWidth: 1,
+    borderColor: colors.borderStrong,
+    backgroundColor: colors.white,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  cancelText: {
+    fontSize: 14,
+    fontWeight: '700',
+    color: colors.textMuted,
+  },
+  saveButton: {
+    flex: 1.5,
+    minHeight: 52,
+    borderRadius: radius.md,
+    backgroundColor: colors.navy,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+  },
+  saveButtonDisabled: {
+    backgroundColor: colors.textSoft,
+  },
+  saveText: {
+    fontSize: 14,
+    fontWeight: '800',
+    color: colors.white,
+  },
+  block: {
+    marginBottom: 18,
+  },
+  blockTitle: {
+    marginBottom: 10,
+    fontSize: 12,
+    fontWeight: '700',
+    textTransform: 'uppercase',
+    letterSpacing: 0.8,
+    color: colors.textMuted,
+  },
+  optionGrid: {
+    gap: 12,
+  },
+  choiceCard: {
+    borderRadius: radius.lg,
+    borderWidth: 1,
+    borderColor: colors.border,
+    backgroundColor: colors.surfaceMuted,
+    padding: 16,
+  },
+  choiceCardSelected: {
+    borderColor: '#BFD2FF',
+    backgroundColor: colors.navySoft,
+  },
+  choiceIconWrap: {
+    width: 42,
+    height: 42,
+    borderRadius: 16,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: colors.white,
+  },
+  choiceIconWrapSelected: {
+    backgroundColor: colors.navy,
+  },
+  choiceTitle: {
+    marginTop: 12,
+    fontSize: 15,
+    fontWeight: '800',
+    color: colors.text,
+  },
+  choiceTitleSelected: {
+    color: colors.navy,
+  },
+  choiceSubtitle: {
+    marginTop: 6,
+    fontSize: 13,
+    lineHeight: 20,
+    color: colors.textMuted,
+  },
+  choiceSubtitleSelected: {
+    color: colors.navy,
+  },
+  stack: {
+    gap: 10,
+    marginBottom: 14,
+  },
+  rowOption: {
+    borderRadius: radius.md,
+    borderWidth: 1,
+    borderColor: colors.border,
+    backgroundColor: colors.white,
+    paddingHorizontal: 16,
+    paddingVertical: 14,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 12,
+  },
+  rowOptionSelected: {
+    borderColor: '#BFD2FF',
+    backgroundColor: colors.navySoft,
+  },
+  rowOptionTextWrap: {
+    flex: 1,
+  },
+  rowOptionTitle: {
+    fontSize: 14,
+    fontWeight: '800',
+    color: colors.text,
+  },
+  rowOptionTitleSelected: {
+    color: colors.navy,
+  },
+  rowOptionMeta: {
+    marginTop: 4,
+    fontSize: 12,
+    lineHeight: 18,
+    color: colors.textMuted,
+  },
+  rowOptionMetaSelected: {
+    color: colors.navy,
+  },
+});

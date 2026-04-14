@@ -85,6 +85,7 @@ from .permissions import (
     TrabajoPermission,
     CompraPermission,
     CambioEquipoPermission,
+    can_manage_planned_activities,
 )
 
 class UserViewSet(viewsets.ModelViewSet):
@@ -945,8 +946,22 @@ class ActividadTrabajoViewSet(viewsets.ModelViewSet):
     filter_backends = [DjangoFilterBackend]
     filterset_fields = ["orden"]
 
+    @staticmethod
+    def _planned_activity_message():
+        return (
+            "Solo Jefe de Almaceneros, Almacenero o admin pueden "
+            "registrar o modificar actividades planificadas"
+        )
+
     def perform_create(self, serializer):
         user = self.request.user
+        es_planificada = serializer.validated_data.get("es_planificada", False)
+
+        if es_planificada:
+            if not can_manage_planned_activities(user):
+                raise PermissionDenied(self._planned_activity_message())
+            serializer.save()
+            return
 
         if user.groups.filter(name="Tecnico").exists():
             try:
@@ -962,6 +977,25 @@ class ActividadTrabajoViewSet(viewsets.ModelViewSet):
                 )
 
         serializer.save()
+
+    def perform_update(self, serializer):
+        user = self.request.user
+        actividad = serializer.instance
+        target_es_planificada = serializer.validated_data.get(
+            "es_planificada", actividad.es_planificada
+        )
+
+        if actividad.es_planificada or target_es_planificada:
+            if not can_manage_planned_activities(user):
+                raise PermissionDenied(self._planned_activity_message())
+
+        serializer.save()
+
+    def perform_destroy(self, instance):
+        if instance.es_planificada and not can_manage_planned_activities(self.request.user):
+            raise PermissionDenied(self._planned_activity_message())
+
+        instance.delete()
 
 class MovimientoRepuestoViewSet(viewsets.ModelViewSet):
     queryset = MovimientoRepuesto.objects.all()

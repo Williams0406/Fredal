@@ -1,23 +1,45 @@
-// components/ui/AppTextArea.jsx
-import { View, Text, TextInput } from 'react-native';
+import { StyleSheet, Text, TextInput, View } from 'react-native';
+import { colors, radius, shadows } from '../../lib/theme';
 
 export default function AppTextArea({ label, value, onChange, placeholder, rows = 4 }) {
   return (
-    <View className='mb-4'>
-      {label && (
-        <Text className='text-sm font-medium text-gray-700 mb-2'>{label}</Text>
-      )}
+    <View style={styles.container}>
+      {label ? <Text style={styles.label}>{label}</Text> : null}
       <TextInput
-        className='border border-gray-300 rounded-xl px-4 py-3 text-gray-900'
+        style={[styles.input, { minHeight: rows * 28 }]}
         value={value}
         onChangeText={onChange}
         placeholder={placeholder}
-        placeholderTextColor='#9ca3af'
+        placeholderTextColor={colors.textSoft}
         multiline
         numberOfLines={rows}
         textAlignVertical='top'
-        style={{ minHeight: rows * 24 }}
       />
     </View>
   );
 }
+
+const styles = StyleSheet.create({
+  container: {
+    marginBottom: 16,
+  },
+  label: {
+    marginBottom: 8,
+    fontSize: 12,
+    fontWeight: '700',
+    textTransform: 'uppercase',
+    letterSpacing: 0.8,
+    color: colors.textMuted,
+  },
+  input: {
+    borderWidth: 1,
+    borderColor: colors.border,
+    borderRadius: radius.md,
+    paddingHorizontal: 16,
+    paddingVertical: 14,
+    backgroundColor: colors.surface,
+    color: colors.text,
+    fontSize: 15,
+    ...shadows.soft,
+  },
+});

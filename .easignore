@@ -1,0 +1,36 @@
+# Crear el .easignore en la carpeta padre (Alejandro/)
+@"
+# Proyectos hermanos
+my-app
+core
+venv
+
+# Git
+.git
+
+# Cache y builds
+**/node_modules
+**/.expo
+**/.next
+**/dist
+**/build
+**/coverage
+**/__pycache__
+
+# Archivos pesados
+**/*.log
+**/*.map
+**/*.pyc
+**/*.pyd
+
+# Assets crudos
+fredal-tech-app/assets/raw
+
+# Entorno
+.env.local
+.env*.local
+
+# Sistema
+.DS_Store
+Thumbs.db
+"@ | Out-File -FilePath ".\..\easignore_temp.txt" -Encoding utf8

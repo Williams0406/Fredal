@@ -10,6 +10,20 @@ def user_in_group(user, group_name):
     return user.groups.filter(name=group_name).exists()
 
 
+def user_in_any_group(user, group_names):
+    return user.groups.filter(name__in=group_names).exists()
+
+
+def can_manage_planned_activities(user):
+    if not user or not user.is_authenticated:
+        return False
+
+    if user.is_staff:
+        return True
+
+    return user_in_any_group(user, ["Jefe de Almaceneros", "Almacenero"])
+
+
 # ==========================
 # Permisos base
 # ==========================
