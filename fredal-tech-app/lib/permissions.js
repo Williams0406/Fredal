@@ -11,3 +11,6 @@ export const isAdminUser = (user) =>
 
 export const canManagePlannedActivities = (user) =>
   isAdminUser(user) || hasAnyRole(user, [ROLES.JEFE_ALMACEN, ROLES.ALMACENERO]);
+
+export const canCreateTrabajo = (user) =>
+  isAdminUser(user) || hasAnyRole(user, [ROLES.JEFE_ALMACEN, ROLES.JEFE_TECNICOS]);

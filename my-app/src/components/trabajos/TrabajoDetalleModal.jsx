@@ -36,6 +36,8 @@ const ESTADOS_EQUIPO = [
   { value: "INOPERATIVO", label: "Inoperativo" },
 ];
 
+const ROLES_ASIGNABLES = ["tecnico", "jefe de tecnicos"];
+
 export default function TrabajoDetalleModal({ open, trabajoId, onClose, onUpdated }) {
   const { roles: currentUserRoles } = useAuth();
 
@@ -75,15 +77,14 @@ export default function TrabajoDetalleModal({ open, trabajoId, onClose, onUpdate
     return String(role.name || role.nombre || role).toLowerCase().trim();
   };
 
+  const tieneRolAsignable = (roles = []) => {
+    const rolesArray = Array.isArray(roles) ? roles : [roles];
+    return rolesArray.map(normalizeRole).some((role) => ROLES_ASIGNABLES.includes(role));
+  };
+
   const tecnicosFiltrados = tecnicos.filter((t) => {
-    // Intentamos obtener roles de varias fuentes posibles que vienen de tu serializador
     const rolesData = t.usuario?.roles || t.roles || rolesPorTrabajador[t.id] || [];
-    const rolesArray = Array.isArray(rolesData) ? rolesData : [rolesData];
-    
-    const rolesNormalizados = rolesArray.map(normalizeRole);
-    
-    // Verifica si tiene el rol o si al menos es un trabajador activo
-    return rolesNormalizados.some(r => r === "tecnico" || r === "jefe de tecnicos") || rolesNormalizados.length === 0;
+    return tieneRolAsignable(rolesData);
   });
 
   const canAssignTecnicos = currentUserRoles
@@ -111,7 +112,11 @@ export default function TrabajoDetalleModal({ open, trabajoId, onClose, onUpdate
       ubicacionClienteAPI.list(),
     ]).then(([tRes, actRes, tecRes, userRes, maqRes, ubiRes]) => {
       const rolesMap = (userRes.data || []).reduce((acc, user) => {
-        const trabajadorId = user.trabajador?.id ?? user.trabajador_id ?? user.trabajador;
+        const trabajadorId =
+          user.trabajador_id ??
+          user.trabajador?.id ??
+          user.trabajador ??
+          user.perfil?.trabajador?.id;
         if (!trabajadorId) return acc;
         const roles = Array.isArray(user.roles) ? user.roles : [];
         acc[trabajadorId] = roles.map(normalizeRole).filter(Boolean);
@@ -881,6 +886,36 @@ function ActividadCard({
                   </>
                 )}
               </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {!actividad.es_planificada && actividad.evidencias?.length > 0 && (
+        <div className="mt-3 border-t border-gray-100 pt-3">
+          <p className="text-xs font-medium text-gray-700 mb-2">
+            Evidencia fotografica:
+          </p>
+          <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
+            {actividad.evidencias.map((evidencia) => (
+              <a
+                key={evidencia.id}
+                href={evidencia.url}
+                target="_blank"
+                rel="noreferrer"
+                className="overflow-hidden rounded-lg border border-gray-200 bg-gray-50 transition hover:-translate-y-0.5 hover:shadow-sm"
+              >
+                <img
+                  src={evidencia.url}
+                  alt={evidencia.nombre || `Evidencia ${evidencia.id}`}
+                  className="h-28 w-full object-cover"
+                />
+                <div className="px-2 py-2">
+                  <p className="truncate text-[11px] font-medium text-gray-600">
+                    {evidencia.nombre || `Evidencia ${evidencia.id}`}
+                  </p>
+                </div>
+              </a>
             ))}
           </div>
         </div>

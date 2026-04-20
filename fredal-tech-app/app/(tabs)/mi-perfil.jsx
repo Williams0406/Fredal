@@ -1,11 +1,13 @@
-import { Pressable, SafeAreaView, StyleSheet, Text, View } from 'react-native';
-import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
+import { Pressable, SafeAreaView, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Ionicons } from '@expo/vector-icons';
 import { StatusBar } from 'expo-status-bar';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useAuthStore } from '../../store/authStore';
 import { colors, radius, shadows } from '../../lib/theme';
 
 export default function MiPerfilScreen() {
   const { user, logout } = useAuthStore();
+  const insets = useSafeAreaInsets();
 
   const displayName = user?.trabajador
     ? `${user.trabajador.nombres} ${user.trabajador.apellidos}`
@@ -15,62 +17,70 @@ export default function MiPerfilScreen() {
     <SafeAreaView style={styles.safeArea}>
       <StatusBar style='light' />
 
-      <View style={styles.hero}>
-        <View style={styles.heroGlowLeft} />
-        <View style={styles.heroGlowRight} />
+      <ScrollView
+        showsVerticalScrollIndicator={false}
+        contentContainerStyle={[
+          styles.scrollContent,
+          { paddingBottom: 110 + insets.bottom },
+        ]}
+      >
+        <View style={styles.hero}>
+          <View style={styles.heroGlowLeft} />
+          <View style={styles.heroGlowRight} />
 
-        <Text style={styles.heroEyebrow}>Mi perfil</Text>
-        <Text style={styles.heroTitle}>Cuenta técnica</Text>
-        <Text style={styles.heroSubtitle}>
-          Consulta tu identidad operativa y cierra sesión de forma segura.
-        </Text>
-      </View>
-
-      <View style={styles.content}>
-        <View style={styles.profileCard}>
-          <View style={styles.avatarWrap}>
-            <Text style={styles.avatarText}>
-              {(user?.username || 'U').charAt(0).toUpperCase()}
-            </Text>
-          </View>
-
-          <Text style={styles.name}>{displayName}</Text>
-          <Text style={styles.roles}>{user?.roles?.join(', ') || 'Sin rol asignado'}</Text>
-
-          <View style={styles.infoStack}>
-            <InfoTile
-              icon='person-outline'
-              label='Usuario'
-              value={user?.username || '—'}
-            />
-            <InfoTile
-              icon='mail-outline'
-              label='Email'
-              value={user?.email || 'No disponible'}
-            />
-            <InfoTile
-              icon='shield-checkmark-outline'
-              label='Rol principal'
-              value={user?.roles?.[0] || 'Sin rol'}
-            />
-          </View>
+          <Text style={styles.heroEyebrow}>Mi perfil</Text>
+          <Text style={styles.heroTitle}>Cuenta técnica</Text>
+          <Text style={styles.heroSubtitle}>
+            Consulta tu identidad operativa y cierra sesión de forma segura.
+          </Text>
         </View>
 
-        <View style={styles.tipCard}>
-          <Ionicons name='shield-checkmark-outline' size={22} color={colors.navy} />
-          <View style={{ flex: 1 }}>
-            <Text style={styles.tipTitle}>Sesión segura</Text>
-            <Text style={styles.tipText}>
-              Cierra sesión cuando termines tu jornada o si cambias de dispositivo.
-            </Text>
-          </View>
-        </View>
+        <View style={styles.content}>
+          <View style={styles.profileCard}>
+            <View style={styles.avatarWrap}>
+              <Text style={styles.avatarText}>
+                {(user?.username || 'U').charAt(0).toUpperCase()}
+              </Text>
+            </View>
 
-        <Pressable style={styles.logoutButton} onPress={logout}>
-          <Ionicons name='log-out-outline' size={18} color={colors.white} />
-          <Text style={styles.logoutText}>Cerrar sesión</Text>
-        </Pressable>
-      </View>
+            <Text style={styles.name}>{displayName}</Text>
+            <Text style={styles.roles}>{user?.roles?.join(', ') || 'Sin rol asignado'}</Text>
+
+            <View style={styles.infoStack}>
+              <InfoTile
+                icon='person-outline'
+                label='Usuario'
+                value={user?.username || '-'}
+              />
+              <InfoTile
+                icon='mail-outline'
+                label='Email'
+                value={user?.email || 'No disponible'}
+              />
+              <InfoTile
+                icon='shield-checkmark-outline'
+                label='Rol principal'
+                value={user?.roles?.[0] || 'Sin rol'}
+              />
+            </View>
+          </View>
+
+          <View style={styles.tipCard}>
+            <Ionicons name='shield-checkmark-outline' size={22} color={colors.navy} />
+            <View style={styles.tipContent}>
+              <Text style={styles.tipTitle}>Sesión segura</Text>
+              <Text style={styles.tipText}>
+                Cierra sesión cuando termines tu jornada o si cambias de dispositivo.
+              </Text>
+            </View>
+          </View>
+
+          <Pressable style={styles.logoutButton} onPress={logout}>
+            <Ionicons name='log-out-outline' size={18} color={colors.white} />
+            <Text style={styles.logoutText}>Cerrar sesión</Text>
+          </Pressable>
+        </View>
+      </ScrollView>
     </SafeAreaView>
   );
 }
@@ -81,7 +91,7 @@ function InfoTile({ icon, label, value }) {
       <View style={styles.infoIconWrap}>
         <Ionicons name={icon} size={18} color={colors.navy} />
       </View>
-      <View style={{ flex: 1 }}>
+      <View style={styles.infoBody}>
         <Text style={styles.infoLabel}>{label}</Text>
         <Text style={styles.infoValue}>{value}</Text>
       </View>
@@ -93,6 +103,9 @@ const styles = StyleSheet.create({
   safeArea: {
     flex: 1,
     backgroundColor: colors.background,
+  },
+  scrollContent: {
+    flexGrow: 1,
   },
   hero: {
     position: 'relative',
@@ -140,10 +153,8 @@ const styles = StyleSheet.create({
     color: 'rgba(255,255,255,0.72)',
   },
   content: {
-    flex: 1,
     paddingHorizontal: 16,
     paddingTop: 16,
-    paddingBottom: 120,
   },
   profileCard: {
     alignItems: 'center',
@@ -203,6 +214,9 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     backgroundColor: colors.white,
   },
+  infoBody: {
+    flex: 1,
+  },
   infoLabel: {
     fontSize: 12,
     fontWeight: '800',
@@ -224,6 +238,9 @@ const styles = StyleSheet.create({
     borderRadius: radius.lg,
     backgroundColor: colors.navySoft,
     padding: 16,
+  },
+  tipContent: {
+    flex: 1,
   },
   tipTitle: {
     fontSize: 14,

@@ -253,6 +253,19 @@ export const actividadTrabajoAPI = {
   update: (id, data) =>
     api.put(`/api/actividades/${id}/`, data),
 
+  subirEvidencias: (id, files) => {
+    const formData = new FormData();
+    files.forEach((file) => {
+      formData.append("imagenes", file);
+    });
+
+    return api.post(`/api/actividades/${id}/subir-evidencias/`, formData, {
+      headers: {
+        "Content-Type": "multipart/form-data",
+      },
+    });
+  },
+
   delete: (id) =>
     api.delete(`/api/actividades/${id}/`),
 };

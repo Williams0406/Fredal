@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import {
+  actividadTrabajoAPI,
   itemAPI,
   movimientoConsumibleAPI,
   movimientoRepuestoAPI,
@@ -11,6 +12,22 @@ import {
   unidadRelacionAPI,
 } from "@/lib/api";
 import ItemGroupSelector from "@/components/items/ItemGroupSelector";
+
+const MAX_EVIDENCIAS_PENDIENTES = 10;
+const MAX_EVIDENCIA_SIZE_MB = 10;
+const MAX_EVIDENCIA_SIZE_BYTES = MAX_EVIDENCIA_SIZE_MB * 1024 * 1024;
+
+const createPendingEvidence = (file) => ({
+  id: `${file.name}-${file.size}-${file.lastModified}-${Math.random().toString(36).slice(2)}`,
+  file,
+  previewUrl: URL.createObjectURL(file),
+});
+
+const formatFileSize = (bytes) => {
+  if (!bytes) return "0 KB";
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+};
 
 export default function MovimientoRepuestoModal({ open, onClose, actividad, onSaved }) {
   const [items, setItems] = useState([]);
@@ -25,6 +42,9 @@ export default function MovimientoRepuestoModal({ open, onClose, actividad, onSa
   const [itemSearch, setItemSearch] = useState("");
   const [showItemDropdown, setShowItemDropdown] = useState(false);
   const [stockConsumibleProveedor, setStockConsumibleProveedor] = useState(0);
+  const [evidenciasGuardadas, setEvidenciasGuardadas] = useState([]);
+  const [evidenciasPendientes, setEvidenciasPendientes] = useState([]);
+  const [evidenciaError, setEvidenciaError] = useState("");
 
   const [form, setForm] = useState({
     proveedor: "",
@@ -37,6 +57,7 @@ export default function MovimientoRepuestoModal({ open, onClose, actividad, onSa
 
   const movimientos = [...movimientosDB, ...movimientosNew];
   const esActividadPlanificada = Boolean(actividad?.es_planificada);
+  const esActividadRealizada = !esActividadPlanificada;
   const requiereProveedorTecnico = esActividadPlanificada;
   const selectedItem = items.find((i) => String(i.id) === String(form.item));
   const esConsumible = selectedItem?.tipo_insumo === "CONSUMIBLE";
@@ -52,8 +73,10 @@ export default function MovimientoRepuestoModal({ open, onClose, actividad, onSa
   const movimientosFiltrados = movimientos.filter(
     (m) => m.tipo === "CONSUMIBLE" || m.estado !== "INOPERATIVO"
   );
+  
+  useEffect(() => {
+    if (!open) return;
 
-  const resetForm = () => {
     setForm({
       proveedor: "",
       tecnico: "",
@@ -67,11 +90,18 @@ export default function MovimientoRepuestoModal({ open, onClose, actividad, onSa
     setMovimientosDB([]);
     setItemSearch("");
     setStockConsumibleProveedor(0);
-  };
-  
-  useEffect(() => {
-    if (open) resetForm();
-  }, [open]);
+    setEvidenciasPendientes([]);
+    setEvidenciasGuardadas(Array.isArray(actividad?.evidencias) ? actividad.evidencias : []);
+    setEvidenciaError("");
+  }, [open, actividad]);
+
+  useEffect(() => () => {
+    evidenciasPendientes.forEach((evidencia) => {
+      if (evidencia.previewUrl) {
+        URL.revokeObjectURL(evidencia.previewUrl);
+      }
+    });
+  }, [evidenciasPendientes]);
 
   useEffect(() => {
     itemAPI.proveedoresDisponibles().then((res) => setProveedores(res.data || []));
@@ -92,10 +122,19 @@ export default function MovimientoRepuestoModal({ open, onClose, actividad, onSa
   }, [open, actividad?.orden]);
 
   useEffect(() => {
+    if (!actividad?.id) {
+      setItems([]);
+      return;
+    }
+
     itemAPI
-      .list({ ...(form.proveedor ? { proveedor: form.proveedor } : {}), disponibles: 1 })
+      .list({
+        actividad: actividad.id,
+        ...(form.proveedor ? { proveedor: form.proveedor } : {}),
+        disponibles: 1,
+      })
       .then((res) => setItems(res.data || []));
-  }, [form.proveedor]);
+  }, [actividad?.id, form.proveedor]);
 
   useEffect(() => {
     if (!form.item || selectedItem?.tipo_insumo === "CONSUMIBLE") {
@@ -120,9 +159,12 @@ export default function MovimientoRepuestoModal({ open, onClose, actividad, onSa
     }
 
     itemAPI
-      .lotesDisponibles(form.item, { ...(form.proveedor ? { proveedor: form.proveedor } : {}) })
+      .lotesDisponibles(form.item, {
+        actividad: actividad.id,
+        ...(form.proveedor ? { proveedor: form.proveedor } : {}),
+      })
       .then((res) => setStockConsumibleProveedor(Number(res.data?.cantidad_disponible || 0)));
-  }, [form.item, form.proveedor, selectedItem]);
+  }, [form.item, form.proveedor, actividad?.id, selectedItem]);
 
   useEffect(() => {
     if (!actividad?.id) return;
@@ -327,9 +369,68 @@ export default function MovimientoRepuestoModal({ open, onClose, actividad, onSa
     setMovimientosNew((prev) => prev.filter((m) => m !== movimiento));
   };
 
+  const handleEvidenciasChange = (event) => {
+    const selectedFiles = Array.from(event.target.files || []);
+    event.target.value = "";
+
+    if (!selectedFiles.length) return;
+
+    const invalidFiles = selectedFiles.filter((file) => !file.type.startsWith("image/"));
+    if (invalidFiles.length) {
+      setEvidenciaError("Solo se permiten archivos de imagen como evidencia.");
+      return;
+    }
+
+    const oversizedFiles = selectedFiles.filter((file) => file.size > MAX_EVIDENCIA_SIZE_BYTES);
+    if (oversizedFiles.length) {
+      setEvidenciaError(`Cada imagen debe pesar como maximo ${MAX_EVIDENCIA_SIZE_MB} MB.`);
+      return;
+    }
+
+    setEvidenciaError("");
+
+    setEvidenciasPendientes((prev) => {
+      const existingKeys = new Set(
+        prev.map((entry) => `${entry.file.name}-${entry.file.size}-${entry.file.lastModified}`)
+      );
+
+      const remainingSlots = Math.max(MAX_EVIDENCIAS_PENDIENTES - prev.length, 0);
+      const filesToAdd = selectedFiles
+        .filter((file) => !existingKeys.has(`${file.name}-${file.size}-${file.lastModified}`))
+        .slice(0, remainingSlots);
+
+      if (filesToAdd.length < selectedFiles.length) {
+        setEvidenciaError(
+          `Se admiten hasta ${MAX_EVIDENCIAS_PENDIENTES} evidencias pendientes por carga.`
+        );
+      }
+
+      return [...prev, ...filesToAdd.map(createPendingEvidence)];
+    });
+  };
+
+  const handleRemovePendingEvidence = (evidenciaId) => {
+    setEvidenciasPendientes((prev) => {
+      const evidencia = prev.find((entry) => entry.id === evidenciaId);
+      if (evidencia?.previewUrl) {
+        URL.revokeObjectURL(evidencia.previewUrl);
+      }
+      return prev.filter((entry) => entry.id !== evidenciaId);
+    });
+  };
+
   const handleSave = async () => {
     setLoading(true);
     try {
+      if (esActividadRealizada && evidenciasPendientes.length) {
+        const uploadRes = await actividadTrabajoAPI.subirEvidencias(
+          actividad.id,
+          evidenciasPendientes.map((entry) => entry.file)
+        );
+        setEvidenciasGuardadas(uploadRes.data?.evidencias || []);
+        setEvidenciasPendientes([]);
+      }
+
       const nuevos = movimientos.filter((m) => !m.id);
       for (const m of nuevos) {
         if (m.tipo === "CONSUMIBLE") {
@@ -353,7 +454,10 @@ export default function MovimientoRepuestoModal({ open, onClose, actividad, onSa
       onClose();
     } catch (error) {
       console.error(error);
-      alert("Error al guardar movimientos");
+      alert(
+        error.response?.data?.detail ||
+          "Error al guardar movimientos o evidencias"
+      );
     } finally {
       setLoading(false);
     }
@@ -362,6 +466,7 @@ export default function MovimientoRepuestoModal({ open, onClose, actividad, onSa
   const itemsFiltrados = items.filter((i) => `${i.codigo} ${i.nombre}`.toLowerCase().includes(itemSearch.toLowerCase()));
 
   const canAddMovimiento = !requiereProveedorTecnico || (form.proveedor && form.tecnico);
+  const totalEvidencias = evidenciasGuardadas.length + evidenciasPendientes.length;
 
   return (
     <div className="fixed inset-0 bg-black/40 z-[60] flex items-center justify-center p-4" onClick={onClose}>
@@ -373,6 +478,7 @@ export default function MovimientoRepuestoModal({ open, onClose, actividad, onSa
             <span className="px-2.5 py-1 rounded-full bg-white border text-slate-700">Registros: {movimientosFiltrados.length}</span>
             <span className="px-2.5 py-1 rounded-full bg-white border text-slate-700">Nuevos: {movimientosNew.length}</span>
             <span className="px-2.5 py-1 rounded-full bg-white border text-slate-700">Guardados: {movimientosDB.length}</span>
+            {esActividadRealizada && <span className="px-2.5 py-1 rounded-full bg-white border text-slate-700">Evidencias: {totalEvidencias}</span>}
           </div>
         </div>
 
@@ -526,6 +632,98 @@ export default function MovimientoRepuestoModal({ open, onClose, actividad, onSa
               </table>
             </div>
           </div>
+
+          {esActividadRealizada && (
+            <div className="rounded-xl border border-slate-200 bg-slate-50 p-4 space-y-4">
+              <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
+                <div>
+                  <h4 className="text-sm font-semibold text-slate-800">Evidencias de trabajo</h4>
+                  <p className="text-xs text-slate-600">
+                    Puedes adjuntar varias fotos para respaldar la actividad realizada. En Railway usa Cloudinary si las variables estan configuradas; en local guarda en `media/`.
+                  </p>
+                </div>
+
+                <label className="inline-flex cursor-pointer items-center justify-center rounded-lg border border-dashed border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-700 hover:border-[#1e3a8a] hover:text-[#1e3a8a]">
+                  Agregar imagenes
+                  <input
+                    type="file"
+                    accept="image/*"
+                    multiple
+                    className="hidden"
+                    onChange={handleEvidenciasChange}
+                  />
+                </label>
+              </div>
+
+              {evidenciaError && (
+                <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
+                  {evidenciaError}
+                </div>
+              )}
+
+              {evidenciasPendientes.length > 0 && (
+                <div className="space-y-2">
+                  <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+                    Pendientes por subir
+                  </p>
+                  <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
+                    {evidenciasPendientes.map((evidencia) => (
+                      <div key={evidencia.id} className="overflow-hidden rounded-xl border border-blue-100 bg-white shadow-sm">
+                        <img
+                          src={evidencia.previewUrl}
+                          alt={evidencia.file.name}
+                          className="h-32 w-full object-cover"
+                        />
+                        <div className="space-y-2 p-3">
+                          <p className="truncate text-xs font-medium text-slate-700">{evidencia.file.name}</p>
+                          <div className="flex items-center justify-between gap-2 text-[11px] text-slate-500">
+                            <span>{formatFileSize(evidencia.file.size)}</span>
+                            <button
+                              type="button"
+                              className="font-medium text-red-600 hover:text-red-800"
+                              onClick={() => handleRemovePendingEvidence(evidencia.id)}
+                            >
+                              Quitar
+                            </button>
+                          </div>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {evidenciasGuardadas.length > 0 && (
+                <div className="space-y-2">
+                  <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+                    Evidencias guardadas
+                  </p>
+                  <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
+                    {evidenciasGuardadas.map((evidencia) => (
+                      <a
+                        key={evidencia.id}
+                        href={evidencia.url}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm transition hover:-translate-y-0.5 hover:shadow-md"
+                      >
+                        <img
+                          src={evidencia.url}
+                          alt={evidencia.nombre || `Evidencia ${evidencia.id}`}
+                          className="h-32 w-full object-cover"
+                        />
+                        <div className="p-3">
+                          <p className="truncate text-xs font-medium text-slate-700">
+                            {evidencia.nombre || `Evidencia ${evidencia.id}`}
+                          </p>
+                        </div>
+                      </a>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
         </div>
 
         <div className="border-t px-6 py-4 flex justify-end gap-2 bg-white">

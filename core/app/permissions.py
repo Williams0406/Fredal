@@ -85,8 +85,11 @@ class TrabajoPermission(BasePermission):
         if user_in_group(user, "Jefe de Tecnicos"):
             return True
 
+        if user_in_group(user, "Jefe de Almaceneros"):
+            return True
+
         if user_in_group(user, "Tecnico"):
-            return request.method in ["GET", "HEAD", "OPTIONS", "POST", "PUT", "PATCH"]
+            return request.method in ["GET", "HEAD", "OPTIONS", "PUT", "PATCH"]
 
         return request.method in SAFE_METHODS
 

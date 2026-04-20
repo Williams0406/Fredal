@@ -15,28 +15,68 @@ import {
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { StatusBar } from 'expo-status-bar';
-import { useAuthStore } from '../../store/authStore';
+import { registroAPI } from '../../lib/api';
 import { colors, radius, shadows } from '../../lib/theme';
 
-export default function LoginScreen() {
-  const { login } = useAuthStore();
+const getErrorMessage = (error) =>
+  error?.response?.data?.detail ||
+  error?.response?.data?.error ||
+  'No se pudo crear el usuario. Verifica el codigo de registro.';
+
+export default function RegisterScreen() {
   const router = useRouter();
-  const [username, setUsername] = useState('');
-  const [password, setPassword] = useState('');
+  const [form, setForm] = useState({
+    codigo: '',
+    username: '',
+    password: '',
+  });
+  const [confirmPassword, setConfirmPassword] = useState('');
+  const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
 
-  const handleLogin = async () => {
-    if (!username || !password) {
-      Alert.alert('Error', 'Completa usuario y contraseña');
+  const updateField = (field, value) => {
+    setForm((current) => ({ ...current, [field]: value }));
+    if (error) setError('');
+  };
+
+  const handleRegister = async () => {
+    setError('');
+
+    if (!form.codigo.trim()) {
+      setError('El codigo de registro es obligatorio.');
+      return;
+    }
+
+    if (!form.username.trim()) {
+      setError('El nombre de usuario es obligatorio.');
+      return;
+    }
+
+    if (form.password.length < 6) {
+      setError('La contrasena debe tener al menos 6 caracteres.');
+      return;
+    }
+
+    if (form.password !== confirmPassword) {
+      setError('Las contrasenas no coinciden.');
       return;
     }
 
     setLoading(true);
     try {
-      await login(username, password);
-      router.replace('/(tabs)/');
-    } catch {
-      Alert.alert('Error', 'Credenciales inválidas');
+      await registroAPI.registerWithCode({
+        codigo: form.codigo.trim(),
+        username: form.username.trim(),
+        password: form.password,
+      });
+
+      Alert.alert(
+        'Cuenta creada',
+        'Usuario creado exitosamente. Ahora puedes iniciar sesion.',
+        [{ text: 'Ir a login', onPress: () => router.replace('/(auth)/login') }]
+      );
+    } catch (registerError) {
+      setError(getErrorMessage(registerError));
     } finally {
       setLoading(false);
     }
@@ -59,62 +99,89 @@ export default function LoginScreen() {
           <View style={styles.heroGlowBottom} />
 
           <View style={styles.header}>
-            <View style={styles.brandChip}>
-              <Ionicons name='shield-checkmark-outline' size={16} color={colors.navy} />
-              <Text style={styles.brandChipText}>Fredal Mobile</Text>
-            </View>
+            <Pressable style={styles.backChip} onPress={() => router.back()}>
+              <Ionicons name='arrow-back' size={16} color={colors.navy} />
+              <Text style={styles.backChipText}>Volver</Text>
+            </Pressable>
 
             <View style={styles.brandCard}>
               <Text style={styles.brandTitle}>FREDAL</Text>
-              <Text style={styles.brandSubtitle}>Operación técnica en campo</Text>
+              <Text style={styles.brandSubtitle}>Alta de usuario movil</Text>
             </View>
 
-            <Text style={styles.heroTitle}>Acceso del equipo técnico</Text>
+            <Text style={styles.heroTitle}>Crear cuenta con codigo</Text>
             <Text style={styles.heroText}>
-              Ingresa para consultar tus órdenes, registrar actividades y cerrar trabajos desde el móvil.
+              Usa el codigo entregado por administracion para activar tu acceso desde el telefono.
             </Text>
           </View>
 
           <View style={styles.formCard}>
-            <Text style={styles.formTitle}>Iniciar sesión</Text>
+            <Text style={styles.formTitle}>Registro de usuario</Text>
             <Text style={styles.formText}>
-              Usa tus credenciales corporativas para entrar al panel operativo.
+              Completa los datos y luego vuelve al login para ingresar al panel operativo.
             </Text>
+
+            {error ? (
+              <View style={styles.errorCard}>
+                <Ionicons name='alert-circle-outline' size={18} color={colors.red} />
+                <Text style={styles.errorText}>{error}</Text>
+              </View>
+            ) : null}
+
+            <InputRow
+              icon='key-outline'
+              placeholder='Codigo de registro'
+              value={form.codigo}
+              onChangeText={(value) => updateField('codigo', value.toUpperCase())}
+              autoCapitalize='characters'
+              autoCorrect={false}
+            />
 
             <InputRow
               icon='person-outline'
-              placeholder='Usuario'
-              value={username}
-              onChangeText={setUsername}
+              placeholder='Nombre de usuario'
+              value={form.username}
+              onChangeText={(value) => updateField('username', value)}
               autoCapitalize='none'
               autoCorrect={false}
             />
 
             <InputRow
               icon='lock-closed-outline'
-              placeholder='Contraseña'
-              value={password}
-              onChangeText={setPassword}
+              placeholder='Contrasena'
+              value={form.password}
+              onChangeText={(value) => updateField('password', value)}
+              secureTextEntry
+            />
+
+            <InputRow
+              icon='shield-checkmark-outline'
+              placeholder='Confirmar contrasena'
+              value={confirmPassword}
+              onChangeText={(value) => {
+                setConfirmPassword(value);
+                if (error) setError('');
+              }}
               secureTextEntry
             />
 
             <Pressable
               style={[styles.submitButton, loading ? styles.submitButtonDisabled : null]}
-              onPress={handleLogin}
+              onPress={handleRegister}
               disabled={loading}
             >
               {loading ? (
                 <ActivityIndicator size='small' color={colors.white} />
               ) : (
-                <Ionicons name='arrow-forward' size={18} color={colors.white} />
+                <Ionicons name='person-add-outline' size={18} color={colors.white} />
               )}
               <Text style={styles.submitText}>
-                {loading ? 'Ingresando...' : 'Entrar al panel'}
+                {loading ? 'Creando cuenta...' : 'Crear cuenta'}
               </Text>
             </Pressable>
 
-            <Pressable style={styles.secondaryButton} onPress={() => router.push('/(auth)/register')}>
-              <Text style={styles.secondaryButtonText}>Crear cuenta con codigo</Text>
+            <Pressable style={styles.secondaryButton} onPress={() => router.replace('/(auth)/login')}>
+              <Text style={styles.secondaryButtonText}>Ya tengo cuenta, ir a login</Text>
             </Pressable>
           </View>
         </ScrollView>
@@ -174,7 +241,7 @@ const styles = StyleSheet.create({
   header: {
     paddingTop: 18,
   },
-  brandChip: {
+  backChip: {
     alignSelf: 'flex-start',
     flexDirection: 'row',
     alignItems: 'center',
@@ -184,7 +251,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 12,
     paddingVertical: 7,
   },
-  brandChipText: {
+  backChipText: {
     fontSize: 12,
     fontWeight: '800',
     color: colors.navy,
@@ -236,6 +303,24 @@ const styles = StyleSheet.create({
     fontSize: 14,
     lineHeight: 22,
     color: colors.textMuted,
+  },
+  errorCard: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 10,
+    borderRadius: radius.md,
+    borderWidth: 1,
+    borderColor: '#F3C4C0',
+    backgroundColor: colors.redSoft,
+    padding: 14,
+    marginBottom: 14,
+  },
+  errorText: {
+    flex: 1,
+    fontSize: 13,
+    lineHeight: 20,
+    color: colors.red,
+    fontWeight: '600',
   },
   inputWrap: {
     minHeight: 56,

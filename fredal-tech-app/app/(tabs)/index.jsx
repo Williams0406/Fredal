@@ -11,12 +11,14 @@ import {
   View,
 } from 'react-native';
 import { useRouter } from 'expo-router';
-import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
+import { Ionicons } from '@expo/vector-icons';
 import { StatusBar } from 'expo-status-bar';
 import { useTrabajos } from '../../hooks/useTrabajos';
 import TrabajoCard from '../../components/trabajos/TrabajoCard';
+import TrabajoFormSheet from '../../components/trabajos/TrabajoFormSheet';
 import { useAuthStore } from '../../store/authStore';
 import { colors, formatStatusLabel, getStatusPalette, radius, shadows } from '../../lib/theme';
+import { canCreateTrabajo as canCreateTrabajoByRole } from '../../lib/permissions';
 
 const TABS = [
   { key: 'PENDIENTE', label: 'Pendientes', icon: 'time-outline' },
@@ -29,6 +31,7 @@ export default function TrabajosScreen() {
   const { user } = useAuthStore();
   const [activeTab, setActiveTab] = useState('EN_PROCESO');
   const [query, setQuery] = useState('');
+  const [showCreateSheet, setShowCreateSheet] = useState(false);
   const { data: trabajos = [], isLoading, refetch, isFetching } = useTrabajos();
 
   const summary = useMemo(() => {
@@ -65,6 +68,7 @@ export default function TrabajosScreen() {
   }, [trabajos, activeTab, query]);
 
   const currentStatus = getStatusPalette(activeTab);
+  const canCreateTrabajo = canCreateTrabajoByRole(user);
   const firstName =
     user?.trabajador?.nombres?.split(' ')?.[0] ||
     user?.username ||
@@ -108,6 +112,15 @@ export default function TrabajosScreen() {
                     Seguimiento claro de lo pendiente, lo que está en curso y lo que ya cerraste.
                   </Text>
                 </View>
+                {canCreateTrabajo ? (
+                  <Pressable
+                    style={styles.createButton}
+                    onPress={() => setShowCreateSheet(true)}
+                  >
+                    <Ionicons name='add' size={18} color={colors.navy} />
+                    <Text style={styles.createButtonText}>Nueva OT</Text>
+                  </Pressable>
+                ) : null}
               </View>
 
               <View style={styles.searchWrap}>
@@ -208,6 +221,17 @@ export default function TrabajosScreen() {
           )
         }
       />
+
+      <TrabajoFormSheet
+        visible={showCreateSheet}
+        onClose={() => setShowCreateSheet(false)}
+        onCreated={(trabajo) => {
+          setShowCreateSheet(false);
+          if (trabajo?.id) {
+            router.push(`/trabajos/${trabajo.id}`);
+          }
+        }}
+      />
     </SafeAreaView>
   );
 }
@@ -273,6 +297,22 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'flex-start',
     justifyContent: 'space-between',
+    gap: 12,
+  },
+  createButton: {
+    minHeight: 44,
+    paddingHorizontal: 14,
+    borderRadius: radius.pill,
+    backgroundColor: colors.white,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+  },
+  createButtonText: {
+    fontSize: 13,
+    fontWeight: '800',
+    color: colors.navy,
   },
   heroChip: {
     alignSelf: 'flex-start',

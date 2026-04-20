@@ -59,7 +59,7 @@ export default function MovimientoModal({ actividad, trabajoId, onClose }) {
   useEffect(() => {
     setLoading(true);
     Promise.all([
-      itemAPI.list({ disponibles: 1 }),
+      itemAPI.list({ actividad: actividad?.id, disponibles: 1 }),
       trabajoAPI.retrieve(trabajoId),
       trabajadorAPI.list(),
     ])
@@ -70,7 +70,7 @@ export default function MovimientoModal({ actividad, trabajoId, onClose }) {
       })
       .catch(() => setError('No se pudieron cargar los materiales disponibles'))
       .finally(() => setLoading(false));
-  }, [trabajoId]);
+  }, [actividad?.id, trabajoId]);
 
   useEffect(() => {
     setError('');
@@ -92,7 +92,7 @@ export default function MovimientoModal({ actividad, trabajoId, onClose }) {
     }
 
     itemAPI
-      .lotesDisponibles(form.item)
+      .lotesDisponibles(form.item, { actividad: actividad.id })
       .then((response) => setStockConsumible(Number(response.data?.cantidad_disponible || 0)))
       .catch(() => setStockConsumible(0));
     setUnidades([]);

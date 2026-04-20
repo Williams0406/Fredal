@@ -23,6 +23,16 @@ export const useTrabajo = (id) =>
     enabled: !!id,
   });
 
+export const useCreateTrabajo = () => {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (data) => trabajoAPI.create(data),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: TRABAJOS_KEY });
+    },
+  });
+};
+
 export const usePatchTrabajo = () => {
   const qc = useQueryClient();
   return useMutation({

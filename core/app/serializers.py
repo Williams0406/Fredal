@@ -18,6 +18,7 @@ from .models import (
     Trabajador,
     PerfilUsuario,
     ActividadTrabajo,
+    ActividadTrabajoEvidencia,
     MovimientoRepuesto,
     MovimientoConsumible,
     OrdenTrabajo,
@@ -129,6 +130,7 @@ class UserSerializer(serializers.ModelSerializer):
     trabajador = serializers.PrimaryKeyRelatedField(
         queryset=Trabajador.objects.all(), write_only=True
     )
+    trabajador_id = serializers.SerializerMethodField()
     roles = serializers.SerializerMethodField()
 
     class Meta:
@@ -141,9 +143,16 @@ class UserSerializer(serializers.ModelSerializer):
             "is_active",
             "groups",
             "trabajador",
+            "trabajador_id",
             "roles",
         ]
         
+    def get_trabajador_id(self, obj):
+        try:
+            return obj.perfil.trabajador_id
+        except (AttributeError, PerfilUsuario.DoesNotExist):
+            return None
+
     def get_roles(self, obj):
         return list(obj.groups.values_list("name", flat=True))
 
@@ -1262,7 +1271,21 @@ class MovimientoConsumibleSerializer(serializers.ModelSerializer):
 
             restante -= descontar
 
+
+class ActividadTrabajoEvidenciaSerializer(serializers.ModelSerializer):
+    url = serializers.ImageField(source="imagen", read_only=True)
+    nombre = serializers.SerializerMethodField()
+
+    class Meta:
+        model = ActividadTrabajoEvidencia
+        fields = ["id", "url", "nombre", "created_at"]
+        read_only_fields = fields
+
+    def get_nombre(self, obj):
+        return obj.imagen.name.split("/")[-1]
+
 class ActividadTrabajoSerializer(serializers.ModelSerializer):
+    evidencias = ActividadTrabajoEvidenciaSerializer(many=True, read_only=True)
     repuestos = MovimientoRepuestoSerializer(many=True, read_only=True)
     consumibles = MovimientoConsumibleSerializer(many=True, read_only=True)
 

@@ -6,6 +6,7 @@ from rest_framework.exceptions import PermissionDenied
 from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework.decorators import action
+from rest_framework.parsers import FormParser, MultiPartParser
 from rest_framework import status
 from django.utils import timezone
 from datetime import timedelta
@@ -25,6 +26,7 @@ from .models import (
     Trabajador,
     OrdenTrabajo,
     ActividadTrabajo,
+    ActividadTrabajoEvidencia,
     MovimientoRepuesto,
     MovimientoConsumible,
     CodigoRegistro,
@@ -54,6 +56,7 @@ from .serializers import (
     MeSerializer,
     OrdenTrabajoSerializer,
     ActividadTrabajoSerializer,
+    ActividadTrabajoEvidenciaSerializer,
     MovimientoRepuestoSerializer,
     MovimientoConsumibleSerializer,
     MaquinariaDetalleSerializer,
@@ -116,36 +119,106 @@ class ItemViewSet(viewsets.ModelViewSet):
     serializer_class = ItemSerializer
     permission_classes = [ItemPermission]
 
+    @staticmethod
+    def _estados_disponibles_unidad():
+        return [
+            ItemUnidad.Estado.NUEVO,
+            ItemUnidad.Estado.USADO,
+            ItemUnidad.Estado.REPARADO,
+        ]
+
+    def _get_trabajador_request(self):
+        user = getattr(self.request, "user", None)
+        if not user or not user.is_authenticated:
+            return None
+
+        try:
+            return user.perfil.trabajador
+        except (AttributeError, PerfilUsuario.DoesNotExist):
+            return None
+
+    def _get_actividad_request(self):
+        actividad_id = self.request.query_params.get("actividad")
+        if not actividad_id:
+            return None
+
+        return (
+            ActividadTrabajo.objects
+            .select_related("orden")
+            .filter(id=actividad_id)
+            .first()
+        )
+
+    def _get_queryset_con_stock(self, queryset, proveedor_id=None):
+        repuestos = queryset.filter(
+            tipo_insumo=Item.TipoInsumo.REPUESTO,
+            unidades__historial__almacen__isnull=False,
+            unidades__historial__fecha_fin__isnull=True,
+            unidades__estado__in=self._estados_disponibles_unidad(),
+        ).exclude(unidades__estado=ItemUnidad.Estado.INOPERATIVO)
+
+        consumibles = queryset.filter(
+            tipo_insumo=Item.TipoInsumo.CONSUMIBLE,
+            loteconsumible__cantidad_disponible__gt=0,
+        )
+
+        if proveedor_id:
+            repuestos = repuestos.filter(
+                unidades__compra_detalle__compra__proveedor_id=proveedor_id
+            )
+            consumibles = consumibles.filter(
+                loteconsumible__compra_detalle__compra__proveedor_id=proveedor_id
+            )
+
+        return (repuestos | consumibles).distinct()
+
+    def _get_item_ids_asignados_usuario(self, actividad, trabajador=None):
+        repuestos = HistorialUbicacionItem.objects.filter(
+            orden_trabajo=actividad.orden,
+            fecha_fin__isnull=True,
+            trabajador__isnull=False,
+            item_unidad__estado__in=self._estados_disponibles_unidad(),
+        ).exclude(item_unidad__estado=ItemUnidad.Estado.INOPERATIVO)
+
+        consumibles = HistorialConsumible.objects.filter(
+            orden_trabajo=actividad.orden,
+            fecha_fin__isnull=True,
+            trabajador__isnull=False,
+            cantidad__gt=0,
+        )
+
+        if trabajador:
+            repuestos = repuestos.filter(trabajador=trabajador)
+            consumibles = consumibles.filter(trabajador=trabajador)
+
+        repuesto_ids = repuestos.values_list("item_unidad__item_id", flat=True)
+        consumible_ids = consumibles.values_list("item_id", flat=True)
+        return set(repuesto_ids).union(set(consumible_ids))
+
     def get_queryset(self):
         queryset = super().get_queryset()
         proveedor_id = self.request.query_params.get("proveedor")
         solo_disponibles = self.request.query_params.get("disponibles") == "1"
+        actividad = self._get_actividad_request()
+        trabajador = self._get_trabajador_request()
 
         if proveedor_id:
             queryset = queryset.filter(
                 compradetalle__compra__proveedor_id=proveedor_id
             ).distinct()
 
-        if proveedor_id and solo_disponibles:
-            repuestos = queryset.filter(
-                tipo_insumo=Item.TipoInsumo.REPUESTO,
-                unidades__compra_detalle__compra__proveedor_id=proveedor_id,
-                unidades__historial__almacen__isnull=False,
-                unidades__historial__fecha_fin__isnull=True,
-                unidades__estado__in=[
-                    ItemUnidad.Estado.NUEVO,
-                    ItemUnidad.Estado.USADO,
-                    ItemUnidad.Estado.REPARADO,
-                ],
+        if solo_disponibles:
+            queryset = self._get_queryset_con_stock(
+                queryset,
+                proveedor_id=proveedor_id,
             )
 
-            consumibles = queryset.filter(
-                tipo_insumo=Item.TipoInsumo.CONSUMIBLE,
-                loteconsumible__compra_detalle__compra__proveedor_id=proveedor_id,
-                loteconsumible__cantidad_disponible__gt=0,
+        if actividad and not actividad.es_planificada:
+            item_ids_asignados = self._get_item_ids_asignados_usuario(
+                actividad,
+                trabajador=trabajador,
             )
-
-            queryset = (repuestos | consumibles).distinct()
+            queryset = queryset.filter(id__in=item_ids_asignados)
 
         return queryset
 
@@ -350,6 +423,7 @@ class ItemViewSet(viewsets.ModelViewSet):
         item = self.get_object()
         actividad_id = request.query_params.get("actividad")
         proveedor_id = request.query_params.get("proveedor")
+        trabajador = self._get_trabajador_request()
 
         if not actividad_id:
             return Response([])
@@ -371,11 +445,7 @@ class ItemViewSet(viewsets.ModelViewSet):
                 ItemUnidad.objects
                 .filter(
                     item=item,
-                    estado__in=[
-                        ItemUnidad.Estado.NUEVO,
-                        ItemUnidad.Estado.USADO,
-                        ItemUnidad.Estado.REPARADO,
-                    ],
+                    estado__in=self._estados_disponibles_unidad(),
                     historial__almacen__isnull=False,
                     historial__fecha_fin__isnull=True,
                 )
@@ -397,48 +467,33 @@ class ItemViewSet(viewsets.ModelViewSet):
                 for u in unidades
             ])
 
-        unidades_planificadas_ids = list(
-            MovimientoRepuesto.objects
-            .filter(
-                actividad__orden=actividad.orden,
-                actividad__es_planificada=True,
-                item_unidad__item=item,
-            )
-            .values_list("item_unidad_id", flat=True)
-        )
-
-        if not unidades_planificadas_ids:
-            return Response([])
-
-        historial_ids = list(
+        historiales = (
             HistorialUbicacionItem.objects
             .filter(
                 orden_trabajo=actividad.orden,
-                item_unidad_id__in=unidades_planificadas_ids,
+                fecha_fin__isnull=True,
+                trabajador__isnull=False,
+                item_unidad__item=item,
+                item_unidad__estado__in=self._estados_disponibles_unidad(),
             )
+            .exclude(item_unidad__estado=ItemUnidad.Estado.INOPERATIVO)
             .order_by("fecha_inicio", "id")
-            .values_list("item_unidad_id", flat=True)
         )
+
+        if trabajador:
+            historiales = historiales.filter(trabajador=trabajador)
 
         unidades_ordenadas_ids = []
         vistos = set()
-        for unidad_id in historial_ids:
-            if unidad_id in vistos:
-                continue
-            vistos.add(unidad_id)
-            unidades_ordenadas_ids.append(unidad_id)
+        unidades_por_id = {}
 
-        unidades_por_id = {
-            u.id: u
-            for u in ItemUnidad.objects.filter(
-                id__in=unidades_ordenadas_ids,
-                estado__in=[
-                    ItemUnidad.Estado.NUEVO,
-                    ItemUnidad.Estado.USADO,
-                    ItemUnidad.Estado.REPARADO,
-                ],
-            ).exclude(estado=ItemUnidad.Estado.INOPERATIVO)
-        }
+        for historial in historiales.select_related("item_unidad"):
+            unidad = historial.item_unidad
+            if unidad.id in vistos:
+                continue
+            vistos.add(unidad.id)
+            unidades_ordenadas_ids.append(unidad.id)
+            unidades_por_id[unidad.id] = unidad
 
         return Response([
             {
@@ -454,9 +509,38 @@ class ItemViewSet(viewsets.ModelViewSet):
     def lotes_disponibles(self, request, pk=None):
         item = self.get_object()
         proveedor_id = request.query_params.get("proveedor")
+        actividad_id = request.query_params.get("actividad")
+        trabajador = self._get_trabajador_request()
 
         if item.tipo_insumo != Item.TipoInsumo.CONSUMIBLE:
             return Response({"cantidad_disponible": 0})
+
+        actividad = None
+        if actividad_id:
+            actividad = (
+                ActividadTrabajo.objects
+                .select_related("orden")
+                .filter(id=actividad_id)
+                .first()
+            )
+
+        if actividad and not actividad.es_planificada:
+            historiales = HistorialConsumible.objects.filter(
+                orden_trabajo=actividad.orden,
+                item=item,
+                fecha_fin__isnull=True,
+                trabajador__isnull=False,
+                cantidad__gt=0,
+            )
+
+            if trabajador:
+                historiales = historiales.filter(trabajador=trabajador)
+
+            total_asignado = historiales.aggregate(total=Sum("cantidad")).get("total") or Decimal("0")
+            return Response({
+                "cantidad_disponible": total_asignado,
+                "unidad_medida": item.unidad_medida.nombre if item.unidad_medida else "",
+            })
 
         lotes = LoteConsumible.objects.filter(item=item, cantidad_disponible__gt=0)
         if proveedor_id:
@@ -996,6 +1080,38 @@ class ActividadTrabajoViewSet(viewsets.ModelViewSet):
             raise PermissionDenied(self._planned_activity_message())
 
         instance.delete()
+
+    @action(
+        detail=True,
+        methods=["post"],
+        url_path="subir-evidencias",
+        parser_classes=[MultiPartParser, FormParser],
+    )
+    def subir_evidencias(self, request, pk=None):
+        actividad = self.get_object()
+
+        if actividad.es_planificada:
+            return Response(
+                {"detail": "Solo las actividades realizadas pueden guardar evidencias."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        imagenes = request.FILES.getlist("imagenes")
+        if not imagenes:
+            return Response(
+                {"detail": "Debes adjuntar al menos una imagen."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        with transaction.atomic():
+            for imagen in imagenes:
+                ActividadTrabajoEvidencia.objects.create(
+                    actividad=actividad,
+                    imagen=imagen,
+                )
+
+        serializer = self.get_serializer(actividad)
+        return Response(serializer.data, status=status.HTTP_201_CREATED)
 
 class MovimientoRepuestoViewSet(viewsets.ModelViewSet):
     queryset = MovimientoRepuesto.objects.all()

@@ -56,9 +56,17 @@ export const authAPI = {
   },
 };
 
+export const registroAPI = {
+  registerWithCode: async (data) => {
+    const res = await axios.post(`${API_URL}/api/registro/`, data);
+    return res.data;
+  },
+};
+
 // ── Trabajos ──────────────────────────────────────────────────────
 export const trabajoAPI = {
   list:     (params) => api.get('/api/trabajos/', { params }),
+  create:   (data) => api.post('/api/trabajos/', data),
   retrieve: (id)     => api.get(`/api/trabajos/${id}/`),
   patch:    (id, data) => api.patch(`/api/trabajos/${id}/`, data),
   finalizar: (id, data) =>
@@ -85,6 +93,18 @@ export const itemAPI = {
 // ── Trabajadores ──────────────────────────────────────────────────
 export const trabajadorAPI = {
   list: () => api.get('/api/trabajadores/'),
+};
+
+export const maquinariaAPI = {
+  list: () => api.get('/api/maquinarias/'),
+};
+
+export const ubicacionClienteAPI = {
+  list: (params) => api.get('/api/ubicaciones-cliente/', { params }),
+};
+
+export const userAPI = {
+  list: () => api.get('/api/users/'),
 };
 
 // ── Movimientos ───────────────────────────────────────────────────

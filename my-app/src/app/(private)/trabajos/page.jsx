@@ -35,6 +35,18 @@ const prettyLabel = (value = "") =>
     .toLowerCase()
     .replace(/\b\w/g, (char) => char.toUpperCase());
 
+const formatTrabajoFecha = (value) => {
+  if (!value) return "-";
+
+  if (/^\d{4}-\d{2}-\d{2}$/.test(value)) {
+    const [year, month, day] = value.split("-");
+    return `${day}/${month}/${year}`;
+  }
+
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? value : date.toLocaleDateString("es-PE");
+};
+
 export default function TrabajosPage() {
   const { roles, trabajador } = useAuth();
   const [trabajos, setTrabajos] = useState([]);
@@ -46,6 +58,7 @@ export default function TrabajosPage() {
   const [detalleId, setDetalleId] = useState(null);
   const [loading, setLoading] = useState(true);
   const [filtros, setFiltros] = useState(initialFilters);
+  const [viewMode, setViewMode] = useState("kanban");
 
   const loadTrabajos = async () => {
     setLoading(true);
@@ -226,24 +239,34 @@ export default function TrabajosPage() {
 
   return (
     <div className="space-y-6">
-      <div className="flex items-center justify-between">
+      <div className="flex items-center justify-between gap-3">
         <div>
           <h1 className="text-2xl font-semibold text-[#1e3a8a]">Órdenes de Trabajo</h1>
           <p className="text-sm text-gray-500 mt-1">Gestión y seguimiento de mantenimiento</p>
         </div>
 
-        <button
-          className="bg-[#1e3a8a] text-white px-5 py-2.5 rounded-lg text-sm font-medium hover:bg-[#1e3a8a]/90 transition-all duration-200 flex items-center gap-2 disabled:opacity-60 disabled:cursor-not-allowed"
-          disabled={isTecnico}
-          onClick={() => {
-            if (isTecnico) return;
-            setSelected(null);
-            setModalOpen(true);
-          }}
-        >
-          <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" /></svg>
-          Nueva Orden
-        </button>
+        <div className="flex items-center gap-3">
+          <button
+            type="button"
+            onClick={() => setViewMode((prev) => (prev === "kanban" ? "table" : "kanban"))}
+            className="px-4 py-2.5 rounded-lg text-sm font-medium border border-gray-300 bg-white text-gray-700 hover:bg-gray-50 transition-all duration-200"
+          >
+            {viewMode === "kanban" ? "Ver como tabla" : "Ver como kanban"}
+          </button>
+
+          <button
+            className="bg-[#1e3a8a] text-white px-5 py-2.5 rounded-lg text-sm font-medium hover:bg-[#1e3a8a]/90 transition-all duration-200 flex items-center gap-2 disabled:opacity-60 disabled:cursor-not-allowed"
+            disabled={isTecnico}
+            onClick={() => {
+              if (isTecnico) return;
+              setSelected(null);
+              setModalOpen(true);
+            }}
+          >
+            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" /></svg>
+            Nueva Orden
+          </button>
+        </div>
       </div>
 
       {isTecnico && (
@@ -358,6 +381,12 @@ export default function TrabajosPage() {
             <p className="text-sm text-gray-600">Cargando órdenes de trabajo...</p>
           </div>
         </div>
+      ) : viewMode === "table" ? (
+        <TrabajosTableView
+          trabajos={trabajosFiltrados}
+          onView={handleView}
+          maquinariaLookup={maquinariaLookup}
+        />
       ) : (
         <KanbanBoard
           trabajos={trabajosFiltrados}
@@ -401,6 +430,101 @@ export default function TrabajosPage() {
           );
         }}
       />
+    </div>
+  );
+}
+
+function TrabajosTableView({ trabajos, onView, maquinariaLookup = {} }) {
+  const prioridadStyles = {
+    REGULAR: "bg-gray-100 text-gray-700",
+    URGENTE: "bg-yellow-50 text-yellow-700",
+    EMERGENCIA: "bg-red-50 text-red-700",
+  };
+
+  const estadoStyles = {
+    PENDIENTE: "bg-gray-100 text-gray-700",
+    EN_PROCESO: "bg-blue-50 text-[#1e3a8a]",
+    FINALIZADO: "bg-lime-50 text-[#4d7c0f]",
+  };
+
+  if (trabajos.length === 0) {
+    return (
+      <div className="bg-white rounded-xl border border-gray-200 py-12 px-6 text-center">
+        <p className="text-sm font-medium text-gray-700">No hay ordenes para mostrar en tabla.</p>
+        <p className="text-xs text-gray-500 mt-1">Ajusta los filtros o crea una nueva orden.</p>
+      </div>
+    );
+  }
+
+  return (
+    <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
+      <div className="px-4 py-3 border-b border-gray-200 bg-gray-50 flex items-center justify-between gap-3">
+        <div>
+          <p className="text-sm font-semibold text-gray-800">Vista de tabla</p>
+          <p className="text-xs text-gray-500">Haz clic en una fila para abrir el detalle de la orden.</p>
+        </div>
+        <span className="px-2.5 py-1 rounded-full bg-white border border-gray-200 text-xs font-medium text-gray-600">
+          {trabajos.length} ordenes
+        </span>
+      </div>
+
+      <div className="overflow-x-auto">
+        <table className="w-full min-w-[760px] text-sm">
+          <thead className="bg-gray-50 border-b border-gray-200">
+            <tr>
+              <th className="px-4 py-3 text-left text-xs font-semibold text-gray-700 uppercase">Maquinaria</th>
+              <th className="px-4 py-3 text-left text-xs font-semibold text-gray-700 uppercase">Fecha</th>
+              <th className="px-4 py-3 text-left text-xs font-semibold text-gray-700 uppercase">Prioridad</th>
+              <th className="px-4 py-3 text-left text-xs font-semibold text-gray-700 uppercase">Lugar</th>
+              <th className="px-4 py-3 text-left text-xs font-semibold text-gray-700 uppercase">Estado</th>
+            </tr>
+          </thead>
+
+          <tbody className="divide-y divide-gray-200 bg-white">
+            {trabajos.map((trabajo) => {
+              const maquinariaTexto =
+                trabajo.maquinaria_nombre ||
+                maquinariaLookup[trabajo.maquinaria] ||
+                "Sin maquinaria";
+
+              return (
+                <tr
+                  key={trabajo.id}
+                  role="button"
+                  tabIndex={0}
+                  onClick={() => onView(trabajo)}
+                  onKeyDown={(event) => {
+                    if (event.key === "Enter" || event.key === " ") {
+                      event.preventDefault();
+                      onView(trabajo);
+                    }
+                  }}
+                  className="cursor-pointer hover:bg-blue-50/60 focus:outline-none focus:bg-blue-50/70"
+                >
+                  <td className="px-4 py-3">
+                    <div className="flex flex-col">
+                      <span className="font-medium text-gray-900">{maquinariaTexto}</span>
+                      <span className="text-xs text-gray-500">{trabajo.codigo_orden}</span>
+                    </div>
+                  </td>
+                  <td className="px-4 py-3 text-gray-700">{formatTrabajoFecha(trabajo.fecha)}</td>
+                  <td className="px-4 py-3">
+                    <span className={`inline-flex rounded-full px-2.5 py-1 text-xs font-semibold ${prioridadStyles[trabajo.prioridad] || prioridadStyles.REGULAR}`}>
+                      {prettyLabel(trabajo.prioridad || "REGULAR")}
+                    </span>
+                  </td>
+                  <td className="px-4 py-3 text-gray-700">{prettyLabel(trabajo.lugar || "-")}</td>
+                  <td className="px-4 py-3">
+                    <span className={`inline-flex rounded-full px-2.5 py-1 text-xs font-semibold ${estadoStyles[trabajo.estatus] || estadoStyles.PENDIENTE}`}>
+                      {prettyLabel(trabajo.estatus || "PENDIENTE")}
+                    </span>
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
     </div>
   );
 }
