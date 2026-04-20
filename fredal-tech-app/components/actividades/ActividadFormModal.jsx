@@ -8,7 +8,7 @@ import AppSheet from '../ui/AppSheet';
 import { colors, radius } from '../../lib/theme';
 
 const TIPO_ACT = [
-  { value: 'REVISION', label: 'Revisión' },
+  { value: 'REVISION', label: 'Revision' },
   { value: 'MANTENIMIENTO', label: 'Mantenimiento' },
 ];
 
@@ -21,11 +21,17 @@ const TIPO_MANT = [
 const SUB_PREV = ['PM1', 'PM2', 'PM3', 'PM4'].map((value) => ({ value, label: value }));
 const SUB_CORR = ['LEVE', 'MEDIANO', 'GRAVE'].map((value) => ({ value, label: value }));
 
+const getErrorMessage = (error, fallback) =>
+  error?.response?.data?.detail ||
+  error?.response?.data?.non_field_errors?.[0] ||
+  fallback;
+
 export default function ActividadFormModal({ trabajoId, onClose }) {
   const [tipoAct, setTipoAct] = useState('');
   const [tipoMant, setTipoMant] = useState('');
   const [subtipo, setSubtipo] = useState('');
   const [desc, setDesc] = useState('');
+
   const createAct = useCreateActividad(trabajoId);
 
   const subtipoOpts =
@@ -39,8 +45,10 @@ export default function ActividadFormModal({ trabajoId, onClose }) {
     tipoAct === 'REVISION' ||
     (tipoAct === 'MANTENIMIENTO' && tipoMant && subtipo);
 
+  const isSaving = createAct.isPending;
+
   const handleSave = async () => {
-    if (!canSave) return;
+    if (!canSave || isSaving) return;
 
     try {
       await createAct.mutateAsync({
@@ -48,13 +56,15 @@ export default function ActividadFormModal({ trabajoId, onClose }) {
         tipo_actividad: tipoAct,
         tipo_mantenimiento: tipoAct === 'MANTENIMIENTO' ? tipoMant : undefined,
         subtipo: tipoAct === 'MANTENIMIENTO' ? subtipo : undefined,
-        descripcion: desc,
+        descripcion: desc.trim(),
         es_planificada: false,
       });
-      onClose();
-    } catch {
-      Alert.alert('Error', 'No se pudo guardar la actividad');
+    } catch (error) {
+      Alert.alert('Error', getErrorMessage(error, 'No se pudo guardar la actividad.'));
+      return;
     }
+
+    onClose();
   };
 
   return (
@@ -63,24 +73,28 @@ export default function ActividadFormModal({ trabajoId, onClose }) {
       onClose={onClose}
       icon='create-outline'
       title='Registrar actividad'
-      subtitle='Documenta la ejecución real realizada en esta orden'
+      subtitle='Documenta la ejecucion real realizada en esta orden'
       footer={
         <View style={styles.footerRow}>
-          <Pressable style={styles.cancelButton} onPress={onClose}>
+          <Pressable
+            style={[styles.cancelButton, isSaving ? styles.buttonDisabled : null]}
+            onPress={onClose}
+            disabled={isSaving}
+          >
             <Text style={styles.cancelText}>Cancelar</Text>
           </Pressable>
           <Pressable
-            style={[styles.saveButton, !canSave || createAct.isPending ? styles.saveButtonDisabled : null]}
+            style={[styles.saveButton, !canSave || isSaving ? styles.saveButtonDisabled : null]}
             onPress={handleSave}
-            disabled={!canSave || createAct.isPending}
+            disabled={!canSave || isSaving}
           >
-            {createAct.isPending ? (
+            {isSaving ? (
               <ActivityIndicator size='small' color={colors.white} />
             ) : (
               <Ionicons name='save-outline' size={16} color={colors.white} />
             )}
             <Text style={styles.saveText}>
-              {createAct.isPending ? 'Guardando...' : 'Guardar actividad'}
+              {isSaving ? 'Guardando...' : 'Guardar actividad'}
             </Text>
           </Pressable>
         </View>
@@ -96,10 +110,7 @@ export default function ActividadFormModal({ trabajoId, onClose }) {
             return (
               <Pressable
                 key={option.value}
-                style={[
-                  styles.choiceCard,
-                  selected ? styles.choiceCardSelected : null,
-                ]}
+                style={[styles.choiceCard, selected ? styles.choiceCardSelected : null]}
                 onPress={() => {
                   setTipoAct(option.value);
                   setTipoMant('');
@@ -129,8 +140,13 @@ export default function ActividadFormModal({ trabajoId, onClose }) {
                 <Text style={[styles.choiceTitle, selected ? styles.choiceTitleSelected : null]}>
                   {option.label}
                 </Text>
-                <Text style={[styles.choiceSubtitle, selected ? styles.choiceSubtitleSelected : null]}>
-                  {isMaintenance ? 'Con tipo y subtipo técnico' : 'Sin materiales ni mantenimiento'}
+                <Text
+                  style={[
+                    styles.choiceSubtitle,
+                    selected ? styles.choiceSubtitleSelected : null,
+                  ]}
+                >
+                  {isMaintenance ? 'Con tipo y subtipo tecnico' : 'Sin materiales ni mantenimiento'}
                 </Text>
               </Pressable>
             );
@@ -140,7 +156,7 @@ export default function ActividadFormModal({ trabajoId, onClose }) {
 
       {tipoAct === 'MANTENIMIENTO' ? (
         <View style={styles.block}>
-          <Text style={styles.blockTitle}>Clasificación del mantenimiento</Text>
+          <Text style={styles.blockTitle}>Clasificacion del mantenimiento</Text>
           <View style={styles.stack}>
             {TIPO_MANT.map((option) => {
               const selected = tipoMant === option.value;
@@ -154,15 +170,25 @@ export default function ActividadFormModal({ trabajoId, onClose }) {
                   }}
                 >
                   <View style={styles.rowOptionTextWrap}>
-                    <Text style={[styles.rowOptionTitle, selected ? styles.rowOptionTitleSelected : null]}>
+                    <Text
+                      style={[
+                        styles.rowOptionTitle,
+                        selected ? styles.rowOptionTitleSelected : null,
+                      ]}
+                    >
                       {option.label}
                     </Text>
-                    <Text style={[styles.rowOptionMeta, selected ? styles.rowOptionMetaSelected : null]}>
+                    <Text
+                      style={[
+                        styles.rowOptionMeta,
+                        selected ? styles.rowOptionMetaSelected : null,
+                      ]}
+                    >
                       {option.value === 'PREVENTIVO'
-                        ? 'Planificado por ciclo o mantenimiento periódico'
+                        ? 'Planificado por ciclo o mantenimiento periodico'
                         : option.value === 'CORRECTIVO'
                           ? 'Atiende una falla existente'
-                          : 'Basado en comportamiento o condición'}
+                          : 'Basado en comportamiento o condicion'}
                     </Text>
                   </View>
                   {selected ? <Ionicons name='checkmark-circle' size={18} color={colors.navy} /> : null}
@@ -184,10 +210,10 @@ export default function ActividadFormModal({ trabajoId, onClose }) {
 
       <View style={styles.block}>
         <AppTextArea
-          label='Descripción'
+          label='Descripcion'
           value={desc}
           onChange={setDesc}
-          placeholder='Describe lo que realizaste, hallazgos o notas técnicas...'
+          placeholder='Describe lo que realizaste, hallazgos o notas tecnicas...'
         />
       </View>
     </AppSheet>
@@ -208,6 +234,9 @@ const styles = StyleSheet.create({
     backgroundColor: colors.white,
     alignItems: 'center',
     justifyContent: 'center',
+  },
+  buttonDisabled: {
+    opacity: 0.7,
   },
   cancelText: {
     fontSize: 14,

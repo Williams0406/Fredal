@@ -45,6 +45,7 @@ export default function MovimientoRepuestoModal({ open, onClose, actividad, onSa
   const [evidenciasGuardadas, setEvidenciasGuardadas] = useState([]);
   const [evidenciasPendientes, setEvidenciasPendientes] = useState([]);
   const [evidenciaError, setEvidenciaError] = useState("");
+  const [removingEvidenceId, setRemovingEvidenceId] = useState(null);
 
   const [form, setForm] = useState({
     proveedor: "",
@@ -93,6 +94,7 @@ export default function MovimientoRepuestoModal({ open, onClose, actividad, onSa
     setEvidenciasPendientes([]);
     setEvidenciasGuardadas(Array.isArray(actividad?.evidencias) ? actividad.evidencias : []);
     setEvidenciaError("");
+    setRemovingEvidenceId(null);
   }, [open, actividad]);
 
   useEffect(() => () => {
@@ -419,6 +421,25 @@ export default function MovimientoRepuestoModal({ open, onClose, actividad, onSa
     });
   };
 
+  const handleRemoveSavedEvidence = async (evidenciaId) => {
+    if (!actividad?.id || removingEvidenceId) return;
+
+    const confirmed = window.confirm("Esta evidencia se eliminara de la actividad. Deseas continuar?");
+    if (!confirmed) return;
+
+    setRemovingEvidenceId(evidenciaId);
+    try {
+      const response = await actividadTrabajoAPI.eliminarEvidencia(actividad.id, evidenciaId);
+      setEvidenciasGuardadas(response.data?.evidencias || []);
+      await onSaved?.();
+    } catch (error) {
+      console.error(error);
+      alert(error.response?.data?.detail || "No se pudo eliminar la evidencia.");
+    } finally {
+      setRemovingEvidenceId(null);
+    }
+  };
+
   const handleSave = async () => {
     setLoading(true);
     try {
@@ -450,7 +471,7 @@ export default function MovimientoRepuestoModal({ open, onClose, actividad, onSa
           });
         }
       }
-      onSaved?.();
+      await onSaved?.();
       onClose();
     } catch (error) {
       console.error(error);
@@ -700,24 +721,46 @@ export default function MovimientoRepuestoModal({ open, onClose, actividad, onSa
                   </p>
                   <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
                     {evidenciasGuardadas.map((evidencia) => (
-                      <a
+                      <div
                         key={evidencia.id}
-                        href={evidencia.url}
-                        target="_blank"
-                        rel="noreferrer"
-                        className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm transition hover:-translate-y-0.5 hover:shadow-md"
+                        className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm"
                       >
-                        <img
-                          src={evidencia.url}
-                          alt={evidencia.nombre || `Evidencia ${evidencia.id}`}
-                          className="h-32 w-full object-cover"
-                        />
-                        <div className="p-3">
+                        <a
+                          href={evidencia.url}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="block transition hover:-translate-y-0.5 hover:shadow-md"
+                        >
+                          <img
+                            src={evidencia.url}
+                            alt={evidencia.nombre || `Evidencia ${evidencia.id}`}
+                            className="h-32 w-full object-cover"
+                          />
+                        </a>
+                        <div className="space-y-2 p-3">
                           <p className="truncate text-xs font-medium text-slate-700">
                             {evidencia.nombre || `Evidencia ${evidencia.id}`}
                           </p>
+                          <div className="flex items-center justify-between gap-2 text-[11px] text-slate-500">
+                            <a
+                              href={evidencia.url}
+                              target="_blank"
+                              rel="noreferrer"
+                              className="font-medium text-slate-600 hover:text-[#1e3a8a]"
+                            >
+                              Ver
+                            </a>
+                            <button
+                              type="button"
+                              className="font-medium text-red-600 hover:text-red-800 disabled:cursor-not-allowed disabled:text-red-300"
+                              onClick={() => handleRemoveSavedEvidence(evidencia.id)}
+                              disabled={removingEvidenceId === evidencia.id}
+                            >
+                              {removingEvidenceId === evidencia.id ? "Quitando..." : "Eliminar"}
+                            </button>
+                          </div>
                         </div>
-                      </a>
+                      </div>
                     ))}
                   </div>
                 </div>

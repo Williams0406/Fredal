@@ -23,6 +23,29 @@ export const useCreateActividad = (trabajoId) => {
   });
 };
 
+export const useUploadActividadEvidencias = (trabajoId) => {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, imagenes }) => actividadAPI.uploadEvidencias(id, imagenes),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['actividades', trabajoId] });
+      qc.invalidateQueries({ queryKey: ['trabajo', trabajoId] });
+    },
+  });
+};
+
+export const useDeleteActividadEvidencia = (trabajoId) => {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ actividadId, evidenciaId }) =>
+      actividadAPI.deleteEvidencia(actividadId, evidenciaId),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['actividades', trabajoId] });
+      qc.invalidateQueries({ queryKey: ['trabajo', trabajoId] });
+    },
+  });
+};
+
 export const useUpdateActividad = (trabajoId) => {
   const qc = useQueryClient();
   return useMutation({

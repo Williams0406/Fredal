@@ -266,6 +266,9 @@ export const actividadTrabajoAPI = {
     });
   },
 
+  eliminarEvidencia: (actividadId, evidenciaId) =>
+    api.delete(`/api/actividades/${actividadId}/evidencias/${evidenciaId}/`),
+
   delete: (id) =>
     api.delete(`/api/actividades/${id}/`),
 };

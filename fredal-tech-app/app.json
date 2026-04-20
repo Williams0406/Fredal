@@ -31,7 +31,14 @@
     "plugins": [
       "expo-router",
       "expo-secure-store",
-      "expo-font"
+      "expo-font",
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "La app necesita acceso a tus fotos para adjuntar evidencias del trabajo realizado.",
+          "cameraPermission": "La app necesita usar la camara para tomar evidencias del trabajo realizado."
+        }
+      ]
     ],
     "experiments": {
       "typedRoutes": true

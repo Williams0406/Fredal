@@ -1113,6 +1113,34 @@ class ActividadTrabajoViewSet(viewsets.ModelViewSet):
         serializer = self.get_serializer(actividad)
         return Response(serializer.data, status=status.HTTP_201_CREATED)
 
+    @action(
+        detail=True,
+        methods=["delete"],
+        url_path=r"evidencias/(?P<evidencia_id>[^/.]+)",
+    )
+    def eliminar_evidencia(self, request, pk=None, evidencia_id=None):
+        actividad = self.get_object()
+
+        if actividad.es_planificada:
+            return Response(
+                {"detail": "Solo las actividades realizadas pueden gestionar evidencias."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        evidencia = actividad.evidencias.filter(pk=evidencia_id).first()
+        if not evidencia:
+            return Response(
+                {"detail": "La evidencia indicada no existe en esta actividad."},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+        with transaction.atomic():
+            evidencia.imagen.delete(save=False)
+            evidencia.delete()
+
+        serializer = self.get_serializer(actividad)
+        return Response(serializer.data, status=status.HTTP_200_OK)
+
 class MovimientoRepuestoViewSet(viewsets.ModelViewSet):
     queryset = MovimientoRepuesto.objects.all()
     serializer_class = MovimientoRepuestoSerializer

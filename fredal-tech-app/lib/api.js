@@ -74,11 +74,42 @@ export const trabajoAPI = {
 };
 
 // ── Actividades ───────────────────────────────────────────────────
+const buildActividadEvidenceFormData = (imagenes = []) => {
+  const formData = new FormData();
+
+  imagenes.forEach((imagen, index) => {
+    if (!imagen?.uri && !imagen?.file) return;
+
+    const nombre = imagen.name || imagen.fileName || `evidencia-${Date.now()}-${index + 1}.jpg`;
+
+    if (imagen.file) {
+      formData.append('imagenes', imagen.file, nombre);
+      return;
+    }
+
+    formData.append('imagenes', {
+      uri: imagen.uri,
+      name: nombre,
+      type: imagen.type || imagen.mimeType || 'image/jpeg',
+    });
+  });
+
+  return formData;
+};
+
 export const actividadAPI = {
   listByTrabajo: (trabajoId) =>
     api.get('/api/actividades/', { params: { orden: trabajoId } }),
   create: (data) => api.post('/api/actividades/', data),
   update: (id, data) => api.put(`/api/actividades/${id}/`, data),
+  uploadEvidencias: (id, imagenes) =>
+    api.post(
+      `/api/actividades/${id}/subir-evidencias/`,
+      buildActividadEvidenceFormData(imagenes),
+      { headers: { 'Content-Type': 'multipart/form-data' } }
+    ),
+  deleteEvidencia: (actividadId, evidenciaId) =>
+    api.delete(`/api/actividades/${actividadId}/evidencias/${evidenciaId}/`),
   delete: (id)   => api.delete(`/api/actividades/${id}/`),
 };
 

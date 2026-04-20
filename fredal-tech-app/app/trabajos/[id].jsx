@@ -2,6 +2,7 @@ import { useMemo, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
+  Image,
   Pressable,
   SafeAreaView,
   ScrollView,
@@ -18,6 +19,7 @@ import ActividadFormModal from '../../components/actividades/ActividadFormModal'
 import FinalizarModal from '../../components/trabajos/FinalizarModal';
 import MovimientoModal from '../../components/movimientos/MovimientoModal';
 import { useAuthStore } from '../../store/authStore';
+import { API_URL } from '../../lib/constants';
 import { canManagePlannedActivities } from '../../lib/permissions';
 import {
   colors,
@@ -27,6 +29,15 @@ import {
   radius,
   shadows,
 } from '../../lib/theme';
+
+const resolveMediaUrl = (url) => {
+  if (!url) return null;
+  if (url.startsWith('http://') || url.startsWith('https://') || url.startsWith('file://')) {
+    return url;
+  }
+
+  return `${API_URL}${url.startsWith('/') ? '' : '/'}${url}`;
+};
 
 function InfoRow({ icon, label, value }) {
   if (!value) return null;
@@ -71,6 +82,7 @@ function ActivityCard({ actividad, readonly, onAddMovimiento }) {
   const deleteMut = useDeleteActividad(actividad.orden);
   const isMaintenance = actividad.tipo_actividad === 'MANTENIMIENTO';
   const movementCount = (actividad.repuestos?.length ?? 0) + (actividad.consumibles?.length ?? 0);
+  const evidenceCount = actividad.evidencias?.length ?? 0;
 
   const handleDelete = () => {
     Alert.alert('Eliminar actividad', '¿Seguro que deseas eliminar esta actividad?', [
@@ -87,13 +99,14 @@ function ActivityCard({ actividad, readonly, onAddMovimiento }) {
     <View style={styles.activityCard}>
       <View style={styles.activityHeader}>
         <View style={[styles.activityIconWrap, isMaintenance ? styles.activityIconMaintenance : styles.activityIconReview]}>
-          {isMaintenance ? (
+          {isMaintenance && (
             <MaterialCommunityIcons
               name='wrench-outline'
               size={20}
               color={colors.navy}
             />
-          ) : (
+          )}
+          {!isMaintenance && (
             <Ionicons name='search-outline' size={20} color={colors.textMuted} />
           )}
         </View>
@@ -131,11 +144,41 @@ function ActivityCard({ actividad, readonly, onAddMovimiento }) {
               {movementCount}
             </Text>
           </View>
+          {evidenceCount > 0 ? (
+            <View style={[styles.inlinePill, styles.countPill]}>
+              <Ionicons name='images-outline' size={12} color={colors.textMuted} />
+              <Text style={[styles.inlinePillText, { color: colors.textMuted }]}>
+                {evidenceCount}
+              </Text>
+            </View>
+          ) : null}
         </View>
       </View>
 
       {actividad.descripcion ? (
         <Text style={styles.activityDescription}>{actividad.descripcion}</Text>
+      ) : null}
+
+      {evidenceCount > 0 ? (
+        <View style={styles.evidenceBlock}>
+          <Text style={styles.evidenceTitle}>
+            {evidenceCount === 1 ? '1 evidencia fotografica' : `${evidenceCount} evidencias fotograficas`}
+          </Text>
+          <View style={styles.evidenceGrid}>
+            {actividad.evidencias.map((evidencia) => {
+              const uri = resolveMediaUrl(evidencia.url);
+              if (!uri) return null;
+
+              return (
+                <Image
+                  key={evidencia.id}
+                  source={{ uri }}
+                  style={styles.evidenceImage}
+                />
+              );
+            })}
+          </View>
+        </View>
       ) : null}
 
       {(actividad.repuestos?.length > 0 || actividad.consumibles?.length > 0) ? (
@@ -163,14 +206,14 @@ function ActivityCard({ actividad, readonly, onAddMovimiento }) {
 
       {!readonly ? (
         <View style={styles.activityActions}>
-          {isMaintenance ? (
             <Pressable style={[styles.secondaryAction, { flex: 1 }]} onPress={() => onAddMovimiento(actividad)}>
-              <Ionicons name='add-circle-outline' size={16} color={colors.navy} />
-              <Text style={styles.secondaryActionText}>Agregar materiales</Text>
+              <Ionicons name={isMaintenance ? 'cube-outline' : 'images-outline'} size={16} color={colors.navy} />
+              <Text style={styles.secondaryActionText}>
+                {isMaintenance ? 'Materiales y evidencias' : 'Registrar evidencias'}
+              </Text>
             </Pressable>
-          ) : (
+          {false && (
             <View style={[styles.secondaryAction, { flex: 1, opacity: 0.7 }]}>
-              <Ionicons name='information-circle-outline' size={16} color={colors.textMuted} />
               <Text style={[styles.secondaryActionText, { color: colors.textMuted }]}>
                 La revisión no usa materiales
               </Text>
@@ -850,6 +893,28 @@ const styles = StyleSheet.create({
     fontSize: 14,
     lineHeight: 22,
     color: colors.textMuted,
+  },
+  evidenceBlock: {
+    marginTop: 14,
+    gap: 10,
+  },
+  evidenceTitle: {
+    fontSize: 12,
+    fontWeight: '700',
+    textTransform: 'uppercase',
+    letterSpacing: 0.7,
+    color: colors.textSoft,
+  },
+  evidenceGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 10,
+  },
+  evidenceImage: {
+    width: 88,
+    height: 88,
+    borderRadius: radius.md,
+    backgroundColor: colors.surfaceMuted,
   },
   materialBlock: {
     marginTop: 14,
