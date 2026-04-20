@@ -1294,9 +1294,13 @@ class ActividadTrabajoSerializer(serializers.ModelSerializer):
         fields = "__all__"
 
     def validate(self, data):
-        tipo = data.get("tipo_actividad")
-        tipo_mantenimiento = data.get("tipo_mantenimiento")
-        subtipo = data.get("subtipo")
+        instance = getattr(self, "instance", None)
+        tipo = data.get("tipo_actividad", getattr(instance, "tipo_actividad", None))
+        tipo_mantenimiento = data.get(
+            "tipo_mantenimiento",
+            getattr(instance, "tipo_mantenimiento", None),
+        )
+        subtipo = data.get("subtipo", getattr(instance, "subtipo", None))
 
         if tipo == ActividadTrabajo.TipoActividad.REVISION:
             data["tipo_mantenimiento"] = None
@@ -1306,6 +1310,12 @@ class ActividadTrabajoSerializer(serializers.ModelSerializer):
             if not tipo_mantenimiento or not subtipo:
                 raise serializers.ValidationError(
                     "El mantenimiento requiere tipo y subtipo"
+                )
+
+            subtipos_validos = ActividadTrabajo.get_subtipos_validos(tipo_mantenimiento)
+            if subtipo not in subtipos_validos:
+                raise serializers.ValidationError(
+                    "El subtipo no es valido para el tipo de mantenimiento seleccionado"
                 )
 
         return data

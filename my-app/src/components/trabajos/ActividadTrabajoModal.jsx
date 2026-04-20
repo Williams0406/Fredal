@@ -10,6 +10,7 @@ const TIPO_MANTENIMIENTO = [
   { value: "PREVENTIVO", label: "Preventivo" },
   { value: "CORRECTIVO", label: "Correctivo" },
   { value: "PREDICTIVO", label: "Predictivo" },
+  { value: "OVERHAUL", label: "Overhaul" },
 ];
 
 const SUBTIPOS_PREVENTIVO = [
@@ -23,6 +24,12 @@ const SUBTIPOS_CORRECTIVO = [
   { value: "LEVE", label: "Leve" },
   { value: "MEDIANO", label: "Mediano" },
   { value: "GRAVE", label: "Grave" },
+];
+
+const SUBTIPOS_OVERHAUL = [
+  { value: "LEVE", label: "Leve" },
+  { value: "MEDIANO", label: "Mediano" },
+  { value: "REGULAR", label: "Regular" },
 ];
 
 export default function ActividadTrabajoModal({
@@ -69,6 +76,9 @@ export default function ActividadTrabajoModal({
       form.tipo_mantenimiento === "PREDICTIVO"
     ) {
       return SUBTIPOS_CORRECTIVO;
+    }
+    if (form.tipo_mantenimiento === "OVERHAUL") {
+      return SUBTIPOS_OVERHAUL;
     }
     return [];
   })();

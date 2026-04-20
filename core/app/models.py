@@ -512,6 +512,7 @@ class ActividadTrabajo(models.Model):
         PREVENTIVO = "PREVENTIVO", "Preventivo"
         CORRECTIVO = "CORRECTIVO", "Correctivo"
         PREDICTIVO = "PREDICTIVO", "Predictivo"
+        OVERHAUL = "OVERHAUL", "Overhaul"
 
     class SubTipo(models.TextChoices):
         PM1 = "PM1", "PM1"
@@ -520,7 +521,32 @@ class ActividadTrabajo(models.Model):
         PM4 = "PM4", "PM4"
         LEVE = "LEVE", "Leve"
         MEDIANO = "MEDIANO", "Mediano"
+        REGULAR = "REGULAR", "Regular"
         GRAVE = "GRAVE", "Grave"
+
+    SUBTIPOS_POR_TIPO_MANTENIMIENTO = {
+        TipoMantenimiento.PREVENTIVO: {
+            SubTipo.PM1,
+            SubTipo.PM2,
+            SubTipo.PM3,
+            SubTipo.PM4,
+        },
+        TipoMantenimiento.CORRECTIVO: {
+            SubTipo.LEVE,
+            SubTipo.MEDIANO,
+            SubTipo.GRAVE,
+        },
+        TipoMantenimiento.PREDICTIVO: {
+            SubTipo.LEVE,
+            SubTipo.MEDIANO,
+            SubTipo.GRAVE,
+        },
+        TipoMantenimiento.OVERHAUL: {
+            SubTipo.LEVE,
+            SubTipo.MEDIANO,
+            SubTipo.REGULAR,
+        },
+    }
 
     orden = models.ForeignKey(
         OrdenTrabajo,
@@ -550,6 +576,10 @@ class ActividadTrabajo(models.Model):
     descripcion = models.TextField(blank=True)
     es_planificada = models.BooleanField(default=False)
 
+    @classmethod
+    def get_subtipos_validos(cls, tipo_mantenimiento):
+        return cls.SUBTIPOS_POR_TIPO_MANTENIMIENTO.get(tipo_mantenimiento, set())
+
     def clean(self):
         # REVISION: no debe tener mantenimiento
         if self.tipo_actividad == self.TipoActividad.REVISION:
@@ -563,6 +593,12 @@ class ActividadTrabajo(models.Model):
             if not self.tipo_mantenimiento or not self.subtipo:
                 raise ValidationError(
                     "El mantenimiento requiere tipo y subtipo"
+                )
+
+            subtipos_validos = self.get_subtipos_validos(self.tipo_mantenimiento)
+            if self.subtipo not in subtipos_validos:
+                raise ValidationError(
+                    "El subtipo no es valido para el tipo de mantenimiento seleccionado"
                 )
 
     def save(self, *args, **kwargs):

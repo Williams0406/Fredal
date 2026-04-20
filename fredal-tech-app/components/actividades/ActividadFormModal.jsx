@@ -16,10 +16,12 @@ const TIPO_MANT = [
   { value: 'PREVENTIVO', label: 'Preventivo' },
   { value: 'CORRECTIVO', label: 'Correctivo' },
   { value: 'PREDICTIVO', label: 'Predictivo' },
+  { value: 'OVERHAUL', label: 'Overhaul' },
 ];
 
 const SUB_PREV = ['PM1', 'PM2', 'PM3', 'PM4'].map((value) => ({ value, label: value }));
 const SUB_CORR = ['LEVE', 'MEDIANO', 'GRAVE'].map((value) => ({ value, label: value }));
+const SUB_OVERHAUL = ['LEVE', 'MEDIANO', 'REGULAR'].map((value) => ({ value, label: value }));
 
 const getErrorMessage = (error, fallback) =>
   error?.response?.data?.detail ||
@@ -39,7 +41,9 @@ export default function ActividadFormModal({ trabajoId, onClose }) {
       ? SUB_PREV
       : tipoMant === 'CORRECTIVO' || tipoMant === 'PREDICTIVO'
         ? SUB_CORR
-        : [];
+        : tipoMant === 'OVERHAUL'
+          ? SUB_OVERHAUL
+          : [];
 
   const canSave =
     tipoAct === 'REVISION' ||
@@ -188,6 +192,8 @@ export default function ActividadFormModal({ trabajoId, onClose }) {
                         ? 'Planificado por ciclo o mantenimiento periodico'
                         : option.value === 'CORRECTIVO'
                           ? 'Atiende una falla existente'
+                          : option.value === 'OVERHAUL'
+                            ? 'Intervencion mayor con alcance estructural'
                           : 'Basado en comportamiento o condicion'}
                     </Text>
                   </View>
