@@ -22,4 +22,8 @@ export const ROUTE_PERMISSIONS = [
     path: "/usuarios",
     roles: ["admin"],
   },
+  {
+    path: "/catalogo-sync",
+    roles: ["admin"],
+  },
 ];

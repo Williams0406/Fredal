@@ -1,6 +1,7 @@
 from rest_framework.routers import DefaultRouter
 from django.urls import path, include
 
+from .catalog_sync import CatalogoSyncView
 from .views import (
     UserViewSet,
     ItemViewSet,
@@ -52,4 +53,5 @@ urlpatterns = [
     path("api/registro/", RegistroUsuarioView.as_view()),
     path("api/me/", MeView.as_view(), name="me"),
     path("api/catalogos/", CatalogosView.as_view()),
+    path("api/catalogo-sync/", CatalogoSyncView.as_view(), name="catalogo-sync"),
 ]

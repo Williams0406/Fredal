@@ -377,4 +377,18 @@ export const proveedorAPI = {
     api.delete(`/api/proveedores/${id}/`),
 };
 
+export const catalogoSyncAPI = {
+  exportData: () =>
+    api.get("/api/catalogo-sync/", {
+      responseType: "blob",
+    }),
+
+  importData: (formData) =>
+    api.post("/api/catalogo-sync/", formData, {
+      headers: {
+        "Content-Type": "multipart/form-data",
+      },
+    }),
+};
+
 export default api;

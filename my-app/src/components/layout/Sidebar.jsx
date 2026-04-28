@@ -239,6 +239,14 @@ function getIconForPath(path) {
       </svg>
     );
 
+  if (path.includes("sync") || path.includes("import"))
+    return (
+      <svg className={cls} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
+          d="M4 17v2a1 1 0 001 1h14a1 1 0 001-1v-2M7 9l5-5m0 0l5 5m-5-5v12M17 15l-5 5m0 0l-5-5m5 5V8" />
+      </svg>
+    );
+
   return (
     <svg className={cls} fill="none" stroke="currentColor" viewBox="0 0 24 24">
       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}

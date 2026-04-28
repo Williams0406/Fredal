@@ -53,6 +53,11 @@ export const MENU_ITEMS = [
     roles: ["admin", "Almacenero", "Jefe de Almaceneros", "ManageCompras"],
   },
   {
+    label: "Importar / Exportar",
+    path: "/catalogo-sync",
+    roles: ["admin"],
+  },
+  {
     label: "Maquinarias",
     path: "/maquinaria",
     roles: ["admin"],
