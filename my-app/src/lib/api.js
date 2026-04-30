@@ -378,8 +378,16 @@ export const proveedorAPI = {
 };
 
 export const catalogoSyncAPI = {
+  metadata: () => api.get("/api/catalogo-sync/", { params: { metadata: 1 } }),
+
   exportData: () =>
     api.get("/api/catalogo-sync/", {
+      responseType: "blob",
+    }),
+
+  exportTable: (table, format = "csv") =>
+    api.get("/api/catalogo-sync/", {
+      params: { table, file_format: format },
       responseType: "blob",
     }),
 
@@ -389,6 +397,18 @@ export const catalogoSyncAPI = {
         "Content-Type": "multipart/form-data",
       },
     }),
+
+  importTable: (table, file) => {
+    const formData = new FormData();
+    formData.append("table", table);
+    formData.append("file", file);
+
+    return api.post("/api/catalogo-sync/", formData, {
+      headers: {
+        "Content-Type": "multipart/form-data",
+      },
+    });
+  },
 };
 
 export default api;

@@ -1,7 +1,10 @@
+import csv
 import json
+from io import BytesIO, StringIO
 
 from django.contrib.auth.models import User
 from django.core.files.uploadedfile import SimpleUploadedFile
+from openpyxl import Workbook, load_workbook
 from rest_framework.test import APITestCase
 
 from .models import (
@@ -71,6 +74,18 @@ class CatalogoSyncViewTests(APITestCase):
             direccion="Av. Base",
         )
 
+    def test_metadata_returns_supported_tables(self):
+        response = self.client.get("/api/catalogo-sync/?metadata=1")
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        keys = [table["key"] for table in payload["tables"]]
+
+        self.assertIn("maquinarias", keys)
+        self.assertIn("items", keys)
+        self.assertIn("csv", payload["formats"])
+        self.assertIn("xlsx", payload["formats"])
+
     def test_export_returns_configured_tables_with_primary_keys(self):
         response = self.client.get("/api/catalogo-sync/")
 
@@ -82,6 +97,31 @@ class CatalogoSyncViewTests(APITestCase):
         self.assertEqual(payload["tables"]["clientes"][0]["id"], self.cliente.id)
         self.assertEqual(payload["tables"]["items"][0]["dimension"], self.dimension.id)
         self.assertEqual(payload["tables"]["items"][0]["unidad_medida"], self.unidad.id)
+
+    def test_export_specific_table_in_csv_and_xlsx(self):
+        csv_response = self.client.get(
+            "/api/catalogo-sync/",
+            {"table": "maquinarias", "file_format": "csv"},
+        )
+
+        self.assertEqual(csv_response.status_code, 200)
+        csv_text = csv_response.content.decode("utf-8-sig")
+        csv_rows = list(csv.DictReader(StringIO(csv_text)))
+        self.assertEqual(csv_rows[0]["codigo_maquina"], "MQ-01")
+        self.assertEqual(csv_rows[0]["nombre"], "Excavadora")
+
+        xlsx_response = self.client.get(
+            "/api/catalogo-sync/",
+            {"table": "clientes", "file_format": "xlsx"},
+        )
+
+        self.assertEqual(xlsx_response.status_code, 200)
+        workbook = load_workbook(filename=BytesIO(xlsx_response.content))
+        worksheet = workbook.active
+
+        self.assertEqual(worksheet["A1"].value, "id")
+        self.assertEqual(worksheet["B1"].value, "nombre")
+        self.assertEqual(worksheet["B2"].value, "Cliente Uno")
 
     def test_import_upserts_records_by_primary_key(self):
         payload = {
@@ -234,3 +274,64 @@ class CatalogoSyncViewTests(APITestCase):
         self.assertTrue(UbicacionCliente.objects.filter(pk=1).exists())
         self.assertTrue(UnidadMedida.objects.filter(pk=2).exists())
         self.assertTrue(Item.objects.filter(pk=2).exists())
+
+    def test_import_selected_table_from_csv(self):
+        csv_content = (
+            "id,codigo_maquina,nombre,descripcion,observacion,gasto\n"
+            "1,MQ-01,Excavadora 320,Actualizada,Operativa,22.50\n"
+            "2,MQ-02,Motoniveladora,,,0.00\n"
+        )
+        upload = SimpleUploadedFile(
+            "maquinarias.csv",
+            csv_content.encode("utf-8"),
+            content_type="text/csv",
+        )
+
+        response = self.client.post(
+            "/api/catalogo-sync/",
+            {"table": "maquinarias", "file": upload},
+            format="multipart",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data["summary"]["processed"], 2)
+        self.assertEqual(response.data["summary"]["created"], 1)
+        self.assertEqual(response.data["summary"]["updated"], 1)
+        self.assertEqual(response.data["summary"]["tables"][0]["key"], "maquinarias")
+
+        self.maquinaria.refresh_from_db()
+        self.assertEqual(self.maquinaria.nombre, "Excavadora 320")
+        self.assertEqual(str(self.maquinaria.gasto), "22.50")
+        self.assertTrue(Maquinaria.objects.filter(pk=2).exists())
+
+    def test_import_selected_table_from_xlsx(self):
+        workbook = Workbook()
+        worksheet = workbook.active
+        worksheet.append(["id", "nombre", "ruc"])
+        worksheet.append([1, "Cliente Uno Premium", "20111111111"])
+        worksheet.append([2, "Cliente Dos", "20222222222"])
+
+        output = BytesIO()
+        workbook.save(output)
+        upload = SimpleUploadedFile(
+            "clientes.xlsx",
+            output.getvalue(),
+            content_type=(
+                "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+            ),
+        )
+
+        response = self.client.post(
+            "/api/catalogo-sync/",
+            {"table": "clientes", "file": upload},
+            format="multipart",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data["summary"]["processed"], 2)
+        self.assertEqual(response.data["summary"]["created"], 1)
+        self.assertEqual(response.data["summary"]["updated"], 1)
+
+        self.cliente.refresh_from_db()
+        self.assertEqual(self.cliente.nombre, "Cliente Uno Premium")
+        self.assertTrue(Cliente.objects.filter(pk=2, nombre="Cliente Dos").exists())
