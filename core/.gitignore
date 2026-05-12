@@ -1,0 +1,7 @@
+.env
+db.sqlite3
+db.commands-test.sqlite3
+db.commands-test-2.sqlite3
+db.commands-test-3.sqlite3
+
+*.sqlite3
