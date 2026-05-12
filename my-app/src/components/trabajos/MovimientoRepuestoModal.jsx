@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   actividadTrabajoAPI,
   itemAPI,
@@ -11,6 +11,7 @@ import {
   unidadMedidaAPI,
   unidadRelacionAPI,
 } from "@/lib/api";
+import { useAuth } from "@/context/AuthContext";
 import ItemGroupSelector from "@/components/items/ItemGroupSelector";
 
 const MAX_EVIDENCIAS_PENDIENTES = 10;
@@ -30,8 +31,8 @@ const formatFileSize = (bytes) => {
 };
 
 export default function MovimientoRepuestoModal({ open, onClose, actividad, onSaved }) {
+  const { trabajador } = useAuth();
   const [items, setItems] = useState([]);
-  const [proveedores, setProveedores] = useState([]);
   const [tecnicosAsignados, setTecnicosAsignados] = useState([]);
   const [unidades, setUnidades] = useState([]);
   const [unidadesMedida, setUnidadesMedida] = useState([]);
@@ -46,9 +47,9 @@ export default function MovimientoRepuestoModal({ open, onClose, actividad, onSa
   const [evidenciasPendientes, setEvidenciasPendientes] = useState([]);
   const [evidenciaError, setEvidenciaError] = useState("");
   const [removingEvidenceId, setRemovingEvidenceId] = useState(null);
+  const itemSelectorRef = useRef(null);
 
   const [form, setForm] = useState({
-    proveedor: "",
     tecnico: "",
     item: "",
     estado_unidad: "NUEVO",
@@ -59,8 +60,8 @@ export default function MovimientoRepuestoModal({ open, onClose, actividad, onSa
   const movimientos = [...movimientosDB, ...movimientosNew];
   const esActividadPlanificada = Boolean(actividad?.es_planificada);
   const esActividadRealizada = !esActividadPlanificada;
-  const requiereProveedorTecnico = esActividadPlanificada;
   const selectedItem = items.find((i) => String(i.id) === String(form.item));
+  const selectedItemLabel = selectedItem ? `${selectedItem.codigo} - ${selectedItem.nombre}` : "";
   const esConsumible = selectedItem?.tipo_insumo === "CONSUMIBLE";
 
   const tecnicoSeleccionado = useMemo(
@@ -79,7 +80,6 @@ export default function MovimientoRepuestoModal({ open, onClose, actividad, onSa
     if (!open) return;
 
     setForm({
-      proveedor: "",
       tecnico: "",
       item: "",
       estado_unidad: "NUEVO",
@@ -106,10 +106,24 @@ export default function MovimientoRepuestoModal({ open, onClose, actividad, onSa
   }, [evidenciasPendientes]);
 
   useEffect(() => {
-    itemAPI.proveedoresDisponibles().then((res) => setProveedores(res.data || []));
     unidadMedidaAPI.list().then((res) => setUnidadesMedida(res.data || []));
     unidadRelacionAPI.list().then((res) => setRelaciones(res.data || []));
   }, []);
+
+  useEffect(() => {
+    if (!showItemDropdown) return undefined;
+
+    const handleClickOutside = (event) => {
+      if (itemSelectorRef.current && !itemSelectorRef.current.contains(event.target)) {
+        setShowItemDropdown(false);
+      }
+    };
+
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => {
+      document.removeEventListener("mousedown", handleClickOutside);
+    };
+  }, [showItemDropdown]);
 
   useEffect(() => {
     if (!open || !actividad?.orden) return;
@@ -118,13 +132,34 @@ export default function MovimientoRepuestoModal({ open, onClose, actividad, onSa
       ([trabajoRes, trabajadoresRes]) => {
         const ids = trabajoRes.data?.tecnicos || [];
         const all = trabajadoresRes.data || [];
-        setTecnicosAsignados(all.filter((t) => ids.includes(t.id)));
+        const asignados = all
+          .filter((t) => ids.includes(t.id))
+          .sort((left, right) => ids.indexOf(left.id) - ids.indexOf(right.id));
+
+        setTecnicosAsignados(asignados);
+
+        const tecnicoActual =
+          (trabajador?.id && asignados.find((t) => String(t.id) === String(trabajador.id))) ||
+          asignados[0] ||
+          null;
+
+        setForm((prev) => {
+          const tecnicoPrevio = asignados.find((t) => String(t.id) === String(prev.tecnico));
+          return {
+            ...prev,
+            tecnico: tecnicoPrevio
+              ? String(tecnicoPrevio.id)
+              : tecnicoActual
+                ? String(tecnicoActual.id)
+                : "",
+          };
+        });
       }
     );
-  }, [open, actividad?.orden]);
+  }, [open, actividad?.orden, trabajador?.id]);
 
   useEffect(() => {
-    if (!actividad?.id) {
+    if (!actividad?.id || !form.tecnico) {
       setItems([]);
       return;
     }
@@ -132,11 +167,11 @@ export default function MovimientoRepuestoModal({ open, onClose, actividad, onSa
     itemAPI
       .list({
         actividad: actividad.id,
-        ...(form.proveedor ? { proveedor: form.proveedor } : {}),
+        ...(form.tecnico ? { tecnico: form.tecnico } : {}),
         disponibles: 1,
       })
       .then((res) => setItems(res.data || []));
-  }, [actividad?.id, form.proveedor]);
+  }, [actividad?.id, form.tecnico]);
 
   useEffect(() => {
     if (!form.item || selectedItem?.tipo_insumo === "CONSUMIBLE") {
@@ -148,11 +183,11 @@ export default function MovimientoRepuestoModal({ open, onClose, actividad, onSa
     itemAPI
       .unidadesAsignables(form.item, {
         actividad: actividad.id,
-        ...(form.proveedor ? { proveedor: form.proveedor } : {}),
+        ...(form.tecnico ? { tecnico: form.tecnico } : {}),
       })
       .then((res) => setUnidades(res.data || []))
       .finally(() => setLoading(false));
-  }, [form.item, form.proveedor, actividad?.id, selectedItem?.tipo_insumo]);
+  }, [form.item, form.tecnico, actividad?.id, selectedItem?.tipo_insumo]);
 
   useEffect(() => {
     if (!form.item || !selectedItem || selectedItem.tipo_insumo !== "CONSUMIBLE") {
@@ -163,13 +198,16 @@ export default function MovimientoRepuestoModal({ open, onClose, actividad, onSa
     itemAPI
       .lotesDisponibles(form.item, {
         actividad: actividad.id,
-        ...(form.proveedor ? { proveedor: form.proveedor } : {}),
+        ...(form.tecnico ? { tecnico: form.tecnico } : {}),
       })
       .then((res) => setStockConsumibleProveedor(Number(res.data?.cantidad_disponible || 0)));
-  }, [form.item, form.proveedor, actividad?.id, selectedItem]);
+  }, [form.item, form.tecnico, actividad?.id, selectedItem]);
 
   useEffect(() => {
-    if (!actividad?.id) return;
+    if (!actividad?.id || !form.tecnico) {
+      setMovimientosDB([]);
+      return;
+    }
 
     Promise.all([
       movimientoRepuestoAPI.list({ actividad: actividad.id }),
@@ -184,6 +222,7 @@ export default function MovimientoRepuestoModal({ open, onClose, actividad, onSa
         unidad_id: m.item_unidad,
         unidad_serie: m.unidad_serie,
         estado: m.estado,
+        tecnico: m.tecnico ? Number(m.tecnico) : m.tecnico_id ? Number(m.tecnico_id) : null,
         tecnico_nombre: m.tecnico_nombre || "",
       }));
 
@@ -195,12 +234,17 @@ export default function MovimientoRepuestoModal({ open, onClose, actividad, onSa
         item_nombre: m.item_nombre,
         cantidad: m.cantidad,
         unidad_medida: m.unidad_medida_detalle || "",
+        tecnico: m.tecnico ? Number(m.tecnico) : m.tecnico_id ? Number(m.tecnico_id) : null,
         tecnico_nombre: m.tecnico_nombre || "",
       }));
 
-      setMovimientosDB([...repuestos, ...consumibles]);
+      setMovimientosDB(
+        [...repuestos, ...consumibles].filter(
+          (movimiento) => String(movimiento.tecnico || "") === String(form.tecnico)
+        )
+      );
     });
-  }, [actividad?.id]);
+  }, [actividad?.id, form.tecnico]);
 
   if (!open) return null;
 
@@ -215,7 +259,7 @@ export default function MovimientoRepuestoModal({ open, onClose, actividad, onSa
 
   const handleAddUnidad = () => {
     if (!form.item || !form.cantidad) return;
-    if (requiereProveedorTecnico && (!form.proveedor || !form.tecnico)) return;
+    if (!form.tecnico) return;
 
     const item = selectedItem;
     const cantidad = Number(form.cantidad) || 0;
@@ -297,8 +341,8 @@ export default function MovimientoRepuestoModal({ open, onClose, actividad, onSa
 
   const handleApplyGroup = async (group) => {
     if (!group?.items?.length || !actividad?.id) return;
-    if (requiereProveedorTecnico && !form.tecnico) {
-      alert("Selecciona un técnico asignado antes de aplicar el grupo");
+    if (!form.tecnico) {
+      alert("Asigna primero un técnico a la orden para aplicar el grupo");
       return;
     }
 
@@ -328,7 +372,7 @@ export default function MovimientoRepuestoModal({ open, onClose, actividad, onSa
 
       const unidadesRes = await itemAPI.unidadesAsignables(item.id, {
         actividad: actividad.id,
-        ...(form.proveedor ? { proveedor: form.proveedor } : {}),
+        ...(form.tecnico ? { tecnico: form.tecnico } : {}),
       });
 
       const cantidadUnidades = Math.floor(cantidad);
@@ -460,7 +504,6 @@ export default function MovimientoRepuestoModal({ open, onClose, actividad, onSa
             item: m.item_id,
             cantidad: Number(m.cantidad),
             unidad_medida: m.unidad_conversion ? Number(m.unidad_conversion) : null,
-            proveedor: requiereProveedorTecnico && form.proveedor ? Number(form.proveedor) : null,
             tecnico: m.tecnico ? Number(m.tecnico) : null,
           });
         } else {
@@ -484,9 +527,15 @@ export default function MovimientoRepuestoModal({ open, onClose, actividad, onSa
     }
   };
 
-  const itemsFiltrados = items.filter((i) => `${i.codigo} ${i.nombre}`.toLowerCase().includes(itemSearch.toLowerCase()));
+  const itemsFiltrados = items.filter((i) => {
+    const term = itemSearch.trim().toLowerCase();
+    const mostrarTodo = !term || (selectedItemLabel && term === selectedItemLabel.toLowerCase());
+    return mostrarTodo
+      ? true
+      : `${i.codigo} ${i.nombre}`.toLowerCase().includes(term);
+  });
 
-  const canAddMovimiento = !requiereProveedorTecnico || (form.proveedor && form.tecnico);
+  const canAddMovimiento = Boolean(form.tecnico);
   const totalEvidencias = evidenciasGuardadas.length + evidenciasPendientes.length;
 
   return (
@@ -506,29 +555,66 @@ export default function MovimientoRepuestoModal({ open, onClose, actividad, onSa
         <div className="flex-1 overflow-y-auto px-6 py-6 space-y-6">
           <ItemGroupSelector onApply={handleApplyGroup} />
 
-          {requiereProveedorTecnico && (
-            <div className="rounded-xl border border-blue-100 bg-blue-50 px-4 py-3 text-sm text-blue-800">
-              <strong>Tip UX:</strong> selecciona proveedor y técnico primero para agilizar el registro de varios ítems.
-            </div>
-          )}
+          <div className="rounded-xl border border-blue-100 bg-blue-50 px-4 py-3 text-sm text-blue-800">
+              {tecnicoSeleccionado ? (
+                <>
+                  Materiales filtrados por el técnico asignado a la OT:{" "}
+                  <strong>{tecnicoNombreSeleccionado}</strong>.
+                </>
+              ) : (
+                <>
+                  Asigna un técnico a la orden para ver y planificar solo los items que tiene
+                  disponibles.
+                </>
+              )}
+          </div>
 
           <div className="grid grid-cols-1 md:grid-cols-12 gap-4 bg-slate-50 border border-slate-200 rounded-xl p-4">
-            <div className="md:col-span-4 relative">
+            <div className="md:col-span-12">
+              <label className="block text-xs font-semibold text-gray-600 mb-1">Tecnico</label>
+              <select
+                className="w-full px-3 py-2.5 border border-gray-300 rounded-lg bg-white text-sm"
+                value={form.tecnico}
+                onChange={(e) => {
+                  const value = e.target.value;
+                  setForm((prev) => ({
+                    ...prev,
+                    tecnico: value,
+                    item: "",
+                    estado_unidad: "NUEVO",
+                    cantidad: 1,
+                    unidad_conversion: "",
+                  }));
+                  setItemSearch("");
+                }}
+              >
+                <option value="">Selecciona un tecnico</option>
+                {tecnicosAsignados.map((tecnico) => (
+                  <option key={tecnico.id} value={tecnico.id}>
+                    {`${tecnico.nombres} ${tecnico.apellidos}`.trim()}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            <div ref={itemSelectorRef} className="md:col-span-4 relative">
               <label className="block text-xs font-semibold text-gray-600 mb-1">Item</label>
               <input
                 className="w-full px-3 py-2.5 border border-gray-300 rounded-lg bg-white text-sm focus:ring-2 focus:ring-[#1e3a8a]"
-                placeholder="Buscar por código o nombre"
+                placeholder={items.length ? "Buscar por código o nombre" : "Sin items disponibles"}
                 value={itemSearch}
+                onClick={() => setShowItemDropdown(true)}
+                onFocus={() => setShowItemDropdown(true)}
                 onChange={(e) => {
                   setItemSearch(e.target.value);
                   setShowItemDropdown(true);
                   setForm((p) => ({ ...p, item: "", estado_unidad: "NUEVO", cantidad: 1, unidad_conversion: "" }));
                 }}
               />
-              {showItemDropdown && itemSearch && (
+              {showItemDropdown && (
                 <div className="absolute z-30 bg-white border border-gray-200 rounded-lg mt-1 max-h-56 overflow-y-auto shadow-lg w-full">
                   {itemsFiltrados.length === 0 ? (
-                    <p className="px-3 py-2 text-sm text-gray-500">Sin resultados.</p>
+                    <p className="px-3 py-2 text-sm text-gray-500">Sin items disponibles.</p>
                   ) : (
                     itemsFiltrados.map((i) => (
                       <button
@@ -588,26 +674,6 @@ export default function MovimientoRepuestoModal({ open, onClose, actividad, onSa
               )}
             </div>
 
-            {requiereProveedorTecnico && (
-              <>
-                <div className="md:col-span-2">
-                  <label className="block text-xs font-semibold text-gray-600 mb-1">Proveedor</label>
-                  <select className="w-full px-3 py-2.5 border border-gray-300 rounded-lg bg-white text-sm" value={form.proveedor} onChange={(e) => setForm((p) => ({ ...p, proveedor: e.target.value }))}>
-                    <option value="">Selecciona proveedor</option>
-                    {proveedores.map((p) => (<option key={p.id} value={p.id}>{p.nombre}</option>))}
-                  </select>
-                </div>
-
-                <div className="md:col-span-2">
-                  <label className="block text-xs font-semibold text-gray-600 mb-1">Técnico asignado</label>
-                  <select className="w-full px-3 py-2.5 border border-gray-300 rounded-lg bg-white text-sm" value={form.tecnico} onChange={(e) => setForm((p) => ({ ...p, tecnico: e.target.value }))}>
-                    <option value="">Selecciona técnico</option>
-                    {tecnicosAsignados.map((t) => (<option key={t.id} value={t.id}>{t.nombres} {t.apellidos}</option>))}
-                  </select>
-                </div>
-              </>
-            )}
-
             <div className="md:col-span-2 flex items-end">
               <button disabled={!canAddMovimiento} className="w-full px-4 py-2.5 bg-[#84cc16] text-white rounded-lg text-sm font-medium disabled:bg-gray-300" onClick={handleAddUnidad}>Agregar al listado</button>
             </div>
@@ -615,7 +681,7 @@ export default function MovimientoRepuestoModal({ open, onClose, actividad, onSa
 
           {esConsumible && selectedItem && (
             <div className="text-xs text-blue-700 bg-blue-50 border border-blue-100 rounded-lg p-3">
-              Stock disponible {form.proveedor ? "del proveedor" : "total"} en unidad base ({selectedItem?.unidad_medida_detalle?.nombre || "-"}): <strong>{Number(stockConsumibleProveedor || 0).toFixed(2)}</strong>
+              Stock disponible en unidad base ({selectedItem?.unidad_medida_detalle?.nombre || "-"}): <strong>{Number(stockConsumibleProveedor || 0).toFixed(2)}</strong>
             </div>
           )}
 
@@ -627,7 +693,6 @@ export default function MovimientoRepuestoModal({ open, onClose, actividad, onSa
                     <th className="px-4 py-3 text-left text-xs font-semibold text-gray-700 uppercase">Código</th>
                     <th className="px-4 py-3 text-left text-xs font-semibold text-gray-700 uppercase">Item</th>
                     <th className="px-4 py-3 text-left text-xs font-semibold text-gray-700 uppercase">Detalle</th>
-                    {requiereProveedorTecnico && <th className="px-4 py-3 text-left text-xs font-semibold text-gray-700 uppercase">Técnico</th>}
                     <th className="px-4 py-3 text-left text-xs font-semibold text-gray-700 uppercase">Estado</th>
                     <th className="px-4 py-3 text-left text-xs font-semibold text-gray-700 uppercase">Acción</th>
                   </tr>
@@ -635,7 +700,7 @@ export default function MovimientoRepuestoModal({ open, onClose, actividad, onSa
                 <tbody className="divide-y divide-gray-200 bg-white">
                   {movimientosFiltrados.length === 0 ? (
                     <tr>
-                      <td colSpan={requiereProveedorTecnico ? 6 : 5} className="px-4 py-6 text-center text-gray-500">Aún no hay movimientos en el listado.</td>
+                      <td colSpan={5} className="px-4 py-6 text-center text-gray-500">Aún no hay movimientos en el listado.</td>
                     </tr>
                   ) : (
                     movimientosFiltrados.map((m,i)=>(
@@ -643,7 +708,6 @@ export default function MovimientoRepuestoModal({ open, onClose, actividad, onSa
                         <td className="px-4 py-3">{m.item_codigo}</td>
                         <td className="px-4 py-3">{m.item_nombre}</td>
                         <td className="px-4 py-3">{m.tipo==="CONSUMIBLE"?`${Number(m.cantidad).toFixed(2)} ${m.unidad_medida || ""}`:m.unidad_serie}</td>
-                        {requiereProveedorTecnico && <td className="px-4 py-3">{m.tecnico_nombre || "-"}</td>}
                         <td className="px-4 py-3">{m.tipo==="CONSUMIBLE"?"NUEVO":m.estado}</td>
                         <td className="px-4 py-3">{m.id ? <span className="text-gray-400 text-xs">Guardado</span> : <button type="button" className="text-red-600 hover:text-red-800 font-medium" onClick={()=>handleRemoveMovimiento(i)}>Borrar</button>}</td>
                       </tr>

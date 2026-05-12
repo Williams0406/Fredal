@@ -31,8 +31,8 @@ export const MENU_ITEMS = [
   },
 
   {
-    label: "Items",
-    path: "/items",
+    label: "Almacén",
+    path: "/almacen",
     roles: [
       "Almacenero",
       "Jefe de Almaceneros",
@@ -60,7 +60,12 @@ export const MENU_ITEMS = [
   {
     label: "Maquinarias",
     path: "/maquinaria",
-    roles: ["admin"],
+    roles: ["admin", "Jefe de Tecnicos", "Jefe de Almaceneros", "ManageCompras"],
+  },
+  {
+    label: "Gestion",
+    path: "/gestion",
+    roles: ["admin", "Jefe de Tecnicos", "Jefe de Almaceneros", "ManageCompras"],
   },
 
   {

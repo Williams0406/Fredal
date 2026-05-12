@@ -1,21 +1,46 @@
 import csv
 import json
+from datetime import date
+from decimal import Decimal
 from io import BytesIO, StringIO
 
-from django.contrib.auth.models import User
+from django.contrib.auth.models import Group, User
+from django.conf import settings
 from django.core.files.uploadedfile import SimpleUploadedFile
+from django.utils import timezone
 from openpyxl import Workbook, load_workbook
 from rest_framework.test import APITestCase
 
 from .models import (
+    ActividadTrabajo,
+    Almacen,
     Cliente,
+    Compra,
+    CompraDetalle,
     Dimension,
+    HistorialConsumible,
     Item,
+    LoteConsumible,
     Maquinaria,
+    MovimientoConsumible,
+    OrdenRequerimiento,
+    OrdenRequerimientoDetalle,
+    OrdenTrabajo,
+    PerfilUsuario,
     Proveedor,
+    Trabajador,
     UbicacionCliente,
     UnidadMedida,
+    current_local_date,
 )
+from .serializers import OrdenTrabajoSerializer
+
+
+class TimezoneConfigurationTests(APITestCase):
+    def test_backend_usa_zona_horaria_de_peru_y_fecha_local_en_ot(self):
+        self.assertEqual(settings.TIME_ZONE, "America/Lima")
+        self.assertFalse(settings.USE_TZ)
+        self.assertIs(OrdenTrabajo._meta.get_field("fecha").default, current_local_date)
 
 
 class CatalogoSyncViewTests(APITestCase):
@@ -335,3 +360,800 @@ class CatalogoSyncViewTests(APITestCase):
         self.cliente.refresh_from_db()
         self.assertEqual(self.cliente.nombre, "Cliente Uno Premium")
         self.assertTrue(Cliente.objects.filter(pk=2, nombre="Cliente Dos").exists())
+
+
+class ItemYCompraLegacyTests(APITestCase):
+    def setUp(self):
+        self.user = User.objects.create_user(
+            username="admin-legacy",
+            password="secret123",
+        )
+        self.user.is_staff = True
+        self.user.save(update_fields=["is_staff"])
+        self.client.force_authenticate(user=self.user)
+
+        self.dimension_unidad = Dimension.objects.create(
+            codigo="UNIDAD",
+            nombre="Unidad",
+            descripcion="Conteo unitario",
+            activo=True,
+        )
+        self.unidad_cantidad = UnidadMedida.objects.create(
+            nombre="Cantidad",
+            simbolo="und",
+            dimension=self.dimension_unidad,
+            es_base=True,
+            activo=True,
+        )
+
+    def test_crear_herramienta_asigna_unidad_por_defecto(self):
+        response = self.client.post(
+            "/api/items/",
+            {
+                "codigo": "TOOL-001",
+                "nombre": "Llave Stilson",
+                "tipo_insumo": Item.TipoInsumo.HERRAMIENTA,
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 201, response.data)
+
+        item = Item.objects.get(pk=response.data["id"])
+        self.assertEqual(item.dimension_id, self.dimension_unidad.id)
+        self.assertEqual(item.unidad_medida_id, self.unidad_cantidad.id)
+
+    def test_compra_herramienta_legacy_sanea_configuracion_y_registra_unidades(self):
+        item = Item.objects.create(
+            codigo="TOOL-LEG-001",
+            nombre="Martillo",
+            tipo_insumo=Item.TipoInsumo.HERRAMIENTA,
+            dimension=None,
+            unidad_medida=None,
+        )
+
+        response = self.client.post(
+            "/api/compras/batch/",
+            {
+                "fecha": "2026-05-11",
+                "moneda": "PEN",
+                "items": [
+                    {
+                        "item": item.id,
+                        "cantidad": 2,
+                        "unidad_medida": None,
+                        "tipo_registro": "VALOR_UNITARIO",
+                        "monto": "25.00",
+                        "moneda": "PEN",
+                    }
+                ],
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 201, response.data)
+
+        item.refresh_from_db()
+        self.assertEqual(item.dimension_id, self.dimension_unidad.id)
+        self.assertEqual(item.unidad_medida_id, self.unidad_cantidad.id)
+        self.assertEqual(item.unidades.count(), 2)
+
+
+class OrdenTrabajoHistorialConsumibleHorometroTests(APITestCase):
+    def setUp(self):
+        self.user = User.objects.create_user(
+            username="admin-horometro-cons",
+            password="secret123",
+        )
+        self.user.is_staff = True
+        self.user.save(update_fields=["is_staff"])
+        self.client.force_authenticate(user=self.user)
+
+        self.dimension = Dimension.objects.create(
+            codigo="VOL",
+            nombre="Volumen",
+            descripcion="Consumibles",
+            activo=True,
+        )
+        self.unidad = UnidadMedida.objects.create(
+            nombre="LITRO",
+            simbolo="L",
+            dimension=self.dimension,
+            es_base=True,
+            activo=True,
+        )
+        self.item = Item.objects.create(
+            codigo="CONS-001",
+            nombre="Aceite",
+            tipo_insumo=Item.TipoInsumo.CONSUMIBLE,
+            dimension=self.dimension,
+            unidad_medida=self.unidad,
+        )
+        self.maquinaria = Maquinaria.objects.create(
+            codigo_maquina="MQ-HT-01",
+            nombre="Excavadora",
+            descripcion="Prueba",
+            observacion="",
+            gasto="0.00",
+        )
+        self.trabajador = Trabajador.objects.create(
+            nombres="Ana",
+            apellidos="Perez",
+            dni="12345678",
+            puesto="Tecnico",
+        )
+        self.almacen = Almacen.objects.create(nombre="Principal")
+        self.proveedor = Proveedor.objects.create(
+            nombre="Proveedor HT",
+            ruc="20123456789",
+            direccion="Av. Test",
+        )
+        self.compra = Compra.objects.create(proveedor=self.proveedor)
+        self.compra_detalle = CompraDetalle.objects.create(
+            compra=self.compra,
+            item=self.item,
+            cantidad=100,
+            unidad_medida=self.unidad,
+            moneda=Compra.Moneda.PEN,
+            valor_unitario="10.00",
+        )
+
+    def _crear_lote(self):
+        return LoteConsumible.objects.create(
+            compra_detalle=self.compra_detalle,
+            item=self.item,
+            cantidad_inicial=Decimal("100.000000"),
+            cantidad_disponible=Decimal("100.000000"),
+            unidad_medida=self.unidad,
+            almacen=self.almacen,
+        )
+
+    def _crear_orden(self, fecha, horometro=None):
+        orden = OrdenTrabajo.objects.create(
+            maquinaria=self.maquinaria,
+            fecha=fecha,
+            horometro=horometro,
+            prioridad="REGULAR",
+            lugar=OrdenTrabajo.Lugar.TALLER,
+            observaciones="",
+        )
+        orden.tecnicos.add(self.trabajador)
+        return orden
+
+    def _crear_actividad_registrada(self, orden):
+        return ActividadTrabajo.objects.create(
+            orden=orden,
+            tipo_actividad=ActividadTrabajo.TipoActividad.MANTENIMIENTO,
+            tipo_mantenimiento=ActividadTrabajo.TipoMantenimiento.PREVENTIVO,
+            subtipo=ActividadTrabajo.SubTipo.PM1,
+            descripcion="Registro",
+            es_planificada=False,
+        )
+
+    def _actualizar_horometro(self, orden, horometro):
+        serializer = OrdenTrabajoSerializer(
+            instance=orden,
+            data={"horometro": str(horometro)},
+            partial=True,
+        )
+        self.assertTrue(serializer.is_valid(), serializer.errors)
+        serializer.save()
+
+    def test_movimiento_consumible_registrado_crea_historial_en_maquinaria(self):
+        lote = self._crear_lote()
+        lote.cantidad_disponible = Decimal("10.000000")
+        lote.save(update_fields=["cantidad_disponible"])
+
+        historial_tecnico = HistorialConsumible.objects.create(
+            lote=lote,
+            item=self.item,
+            cantidad=Decimal("10.000000"),
+            unidad_medida=self.unidad,
+            trabajador=self.trabajador,
+        )
+
+        orden = self._crear_orden(date(2026, 5, 2))
+        actividad = self._crear_actividad_registrada(orden)
+
+        response = self.client.post(
+            "/api/movimientos-consumible/",
+            {
+                "actividad": actividad.id,
+                "item": self.item.id,
+                "cantidad": "5",
+                "tecnico": self.trabajador.id,
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 201, response.data)
+
+        lote.refresh_from_db()
+        historial_tecnico.refresh_from_db()
+        historial_maquinaria = HistorialConsumible.objects.get(
+            orden_trabajo=orden,
+            maquinaria=self.maquinaria,
+            item=self.item,
+        )
+        historial_tecnico_restante = HistorialConsumible.objects.get(
+            trabajador=self.trabajador,
+            item=self.item,
+            fecha_fin__isnull=True,
+        )
+
+        self.assertIsNone(historial_maquinaria.trabajador)
+        self.assertEqual(historial_maquinaria.maquinaria_id, self.maquinaria.id)
+        self.assertIsNone(historial_maquinaria.horometro_inicio)
+        self.assertEqual(historial_maquinaria.cantidad, Decimal("5.000000"))
+        self.assertEqual(lote.cantidad_disponible, Decimal("10.000000"))
+        self.assertFalse(historial_tecnico.fecha_fin is None)
+        self.assertEqual(historial_tecnico.cantidad, Decimal("5.000000"))
+        self.assertEqual(historial_tecnico_restante.cantidad, Decimal("5.000000"))
+
+    def test_horometros_solo_afectan_historiales_consumibles_de_maquinaria_registrada(self):
+        orden_muy_anterior = self._crear_orden(date(2026, 5, 1), horometro=Decimal("80.00"))
+        orden_anterior = self._crear_orden(date(2026, 5, 2), horometro=Decimal("100.00"))
+        orden_actual = self._crear_orden(date(2026, 5, 3))
+
+        actividad_muy_anterior = self._crear_actividad_registrada(orden_muy_anterior)
+        actividad_anterior = self._crear_actividad_registrada(orden_anterior)
+        actividad_actual = self._crear_actividad_registrada(orden_actual)
+
+        MovimientoConsumible.objects.create(
+            actividad=actividad_muy_anterior,
+            item=self.item,
+            cantidad=Decimal("2.000000"),
+            unidad_medida=self.unidad,
+            tecnico=self.trabajador,
+        )
+        MovimientoConsumible.objects.create(
+            actividad=actividad_anterior,
+            item=self.item,
+            cantidad=Decimal("5.000000"),
+            unidad_medida=self.unidad,
+            tecnico=self.trabajador,
+        )
+        MovimientoConsumible.objects.create(
+            actividad=actividad_actual,
+            item=self.item,
+            cantidad=Decimal("3.000000"),
+            unidad_medida=self.unidad,
+            tecnico=self.trabajador,
+        )
+
+        historial_muy_anterior = HistorialConsumible.objects.create(
+            lote=self._crear_lote(),
+            item=self.item,
+            cantidad=Decimal("2.000000"),
+            unidad_medida=self.unidad,
+            maquinaria=self.maquinaria,
+            orden_trabajo=orden_muy_anterior,
+            fecha_fin=timezone.now(),
+            horometro_inicio=Decimal("80.00"),
+        )
+        historial_anterior_1 = HistorialConsumible.objects.create(
+            lote=self._crear_lote(),
+            item=self.item,
+            cantidad=Decimal("4.000000"),
+            unidad_medida=self.unidad,
+            maquinaria=self.maquinaria,
+            orden_trabajo=orden_anterior,
+            fecha_fin=timezone.now(),
+            horometro_inicio=Decimal("100.00"),
+        )
+        historial_anterior_2 = HistorialConsumible.objects.create(
+            lote=self._crear_lote(),
+            item=self.item,
+            cantidad=Decimal("1.000000"),
+            unidad_medida=self.unidad,
+            maquinaria=self.maquinaria,
+            orden_trabajo=orden_anterior,
+            fecha_fin=timezone.now(),
+            horometro_inicio=Decimal("100.00"),
+        )
+        historial_anterior_tecnico = HistorialConsumible.objects.create(
+            lote=self._crear_lote(),
+            item=self.item,
+            cantidad=Decimal("1.500000"),
+            unidad_medida=self.unidad,
+            trabajador=self.trabajador,
+            orden_trabajo=orden_anterior,
+            fecha_fin=timezone.now(),
+        )
+        historial_actual_maquinaria = HistorialConsumible.objects.create(
+            lote=self._crear_lote(),
+            item=self.item,
+            cantidad=Decimal("3.000000"),
+            unidad_medida=self.unidad,
+            maquinaria=self.maquinaria,
+            orden_trabajo=orden_actual,
+        )
+        historial_actual_tecnico = HistorialConsumible.objects.create(
+            lote=self._crear_lote(),
+            item=self.item,
+            cantidad=Decimal("2.000000"),
+            unidad_medida=self.unidad,
+            trabajador=self.trabajador,
+            orden_trabajo=orden_actual,
+        )
+
+        self._actualizar_horometro(orden_actual, Decimal("150.00"))
+
+        historial_muy_anterior.refresh_from_db()
+        historial_anterior_1.refresh_from_db()
+        historial_anterior_2.refresh_from_db()
+        historial_anterior_tecnico.refresh_from_db()
+        historial_actual_maquinaria.refresh_from_db()
+        historial_actual_tecnico.refresh_from_db()
+
+        self.assertIsNone(historial_muy_anterior.horometro_fin)
+        self.assertEqual(historial_anterior_1.horometro_fin, Decimal("150.00"))
+        self.assertEqual(historial_anterior_2.horometro_fin, Decimal("150.00"))
+        self.assertIsNone(historial_anterior_tecnico.horometro_fin)
+        self.assertEqual(historial_actual_maquinaria.horometro_inicio, Decimal("150.00"))
+        self.assertIsNone(historial_actual_tecnico.horometro_inicio)
+
+    def test_consumible_registrado_autocompleta_horometro_fin_en_historial_previo_abierto(self):
+        lote = self._crear_lote()
+        historial_tecnico = HistorialConsumible.objects.create(
+            lote=lote,
+            item=self.item,
+            cantidad=Decimal("10.000000"),
+            unidad_medida=self.unidad,
+            trabajador=self.trabajador,
+        )
+        orden_anterior = self._crear_orden(date(2026, 5, 5), horometro=Decimal("100.00"))
+        HistorialConsumible.objects.create(
+            lote=self._crear_lote(),
+            item=self.item,
+            cantidad=Decimal("4.000000"),
+            unidad_medida=self.unidad,
+            maquinaria=self.maquinaria,
+            orden_trabajo=orden_anterior,
+            horometro_inicio=Decimal("100.00"),
+        )
+        orden_actual = self._crear_orden(date(2026, 5, 5), horometro=Decimal("150.00"))
+        actividad_actual = self._crear_actividad_registrada(orden_actual)
+
+        response = self.client.post(
+            "/api/movimientos-consumible/",
+            {
+                "actividad": actividad_actual.id,
+                "item": self.item.id,
+                "cantidad": "5",
+                "tecnico": self.trabajador.id,
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 201, response.data)
+
+        historial_tecnico.refresh_from_db()
+        historial_anterior = HistorialConsumible.objects.get(
+            orden_trabajo=orden_anterior,
+            maquinaria=self.maquinaria,
+            item=self.item,
+        )
+        historial_actual = HistorialConsumible.objects.get(
+            orden_trabajo=orden_actual,
+            maquinaria=self.maquinaria,
+            item=self.item,
+        )
+
+        self.assertEqual(historial_anterior.horometro_fin, Decimal("150.00"))
+        self.assertIsNone(historial_anterior.fecha_fin)
+        self.assertEqual(historial_actual.horometro_inicio, Decimal("150.00"))
+        self.assertEqual(historial_actual.cantidad, Decimal("5.000000"))
+        self.assertEqual(historial_tecnico.cantidad, Decimal("5.000000"))
+
+
+class MovimientoConsumiblePlanificadoTests(APITestCase):
+    def setUp(self):
+        self.user = User.objects.create_user(
+            username="admin-plan-cons",
+            password="secret123",
+        )
+        self.user.is_staff = True
+        self.user.save(update_fields=["is_staff"])
+        self.client.force_authenticate(user=self.user)
+
+        self.dimension = Dimension.objects.create(
+            codigo="VOL-PLAN",
+            nombre="Volumen plan",
+            descripcion="Consumibles planificados",
+            activo=True,
+        )
+        self.unidad = UnidadMedida.objects.create(
+            nombre="LITRO-PLAN",
+            simbolo="L",
+            dimension=self.dimension,
+            es_base=True,
+            activo=True,
+        )
+        self.item = Item.objects.create(
+            codigo="CONS-PLAN-001",
+            nombre="Aceite planificado",
+            tipo_insumo=Item.TipoInsumo.CONSUMIBLE,
+            dimension=self.dimension,
+            unidad_medida=self.unidad,
+        )
+        self.maquinaria = Maquinaria.objects.create(
+            codigo_maquina="MQ-PLAN-01",
+            nombre="Cargador frontal",
+            descripcion="Prueba",
+            observacion="",
+            gasto="0.00",
+        )
+        self.tecnico = Trabajador.objects.create(
+            nombres="Luis",
+            apellidos="Ramos",
+            dni="87654321",
+            puesto="Tecnico",
+        )
+        self.almacen = Almacen.objects.create(nombre="Almacen Planificado")
+        self.proveedor = Proveedor.objects.create(
+            nombre="Proveedor Plan",
+            ruc="20987654321",
+            direccion="Av. Plan",
+        )
+        self.compra = Compra.objects.create(proveedor=self.proveedor)
+        self.compra_detalle = CompraDetalle.objects.create(
+            compra=self.compra,
+            item=self.item,
+            cantidad=50,
+            unidad_medida=self.unidad,
+            moneda=Compra.Moneda.PEN,
+            valor_unitario="12.00",
+        )
+        self.lote = LoteConsumible.objects.create(
+            compra_detalle=self.compra_detalle,
+            item=self.item,
+            cantidad_inicial=Decimal("50.000000"),
+            cantidad_disponible=Decimal("50.000000"),
+            unidad_medida=self.unidad,
+            almacen=self.almacen,
+        )
+        self.orden = OrdenTrabajo.objects.create(
+            maquinaria=self.maquinaria,
+            fecha=date(2026, 5, 4),
+            prioridad="REGULAR",
+            lugar=OrdenTrabajo.Lugar.TALLER,
+            observaciones="",
+        )
+        self.orden.tecnicos.add(self.tecnico)
+        self.actividad = ActividadTrabajo.objects.create(
+            orden=self.orden,
+            tipo_actividad=ActividadTrabajo.TipoActividad.MANTENIMIENTO,
+            tipo_mantenimiento=ActividadTrabajo.TipoMantenimiento.PREVENTIVO,
+            subtipo=ActividadTrabajo.SubTipo.PM1,
+            descripcion="Planificacion",
+            es_planificada=True,
+        )
+
+    def test_movimiento_consumible_planificado_no_crea_historial(self):
+        HistorialConsumible.objects.create(
+            lote=self.lote,
+            item=self.item,
+            cantidad=Decimal("10.000000"),
+            unidad_medida=self.unidad,
+            trabajador=self.tecnico,
+        )
+        total_historiales_antes = HistorialConsumible.objects.count()
+
+        response = self.client.post(
+            "/api/movimientos-consumible/",
+            {
+                "actividad": self.actividad.id,
+                "item": self.item.id,
+                "cantidad": "5",
+                "tecnico": self.tecnico.id,
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 201, response.data)
+        self.assertEqual(HistorialConsumible.objects.count(), total_historiales_antes)
+        self.assertEqual(MovimientoConsumible.objects.count(), 1)
+
+        movimiento = MovimientoConsumible.objects.get()
+        self.assertEqual(movimiento.tecnico_id, self.tecnico.id)
+        self.assertEqual(response.data["tecnico"], self.tecnico.id)
+        self.assertEqual(response.data["tecnico_nombre"], "Luis Ramos")
+
+
+class OrdenRequerimientoPermisosTests(APITestCase):
+    def setUp(self):
+        self.jefe_tecnicos_group = Group.objects.create(name="Jefe de Tecnicos")
+        self.jefe_almacen_group = Group.objects.create(name="Jefe de Almaceneros")
+        self.almacenero_group = Group.objects.create(name="Almacenero")
+        self.tecnico_group = Group.objects.create(name="Tecnico")
+
+        self.jefe_tecnicos_user = User.objects.create_user(
+            username="jefe-tecnicos",
+            password="secret123",
+        )
+        self.jefe_tecnicos_user.groups.add(self.jefe_tecnicos_group)
+
+        self.almacen_user = User.objects.create_user(
+            username="jefe-almacen",
+            password="secret123",
+        )
+        self.almacen_user.groups.add(self.jefe_almacen_group)
+
+        self.tecnico = Trabajador.objects.create(
+            nombres="Pedro",
+            apellidos="Quispe",
+            dni="44556677",
+            puesto="Tecnico",
+        )
+        self.tecnico_user = User.objects.create_user(
+            username="tecnico-asignado",
+            password="secret123",
+        )
+        self.tecnico_user.groups.add(self.tecnico_group)
+        PerfilUsuario.objects.create(user=self.tecnico_user, trabajador=self.tecnico)
+
+        self.dimension = Dimension.objects.create(
+            codigo="VOL-REQ",
+            nombre="Volumen requerimiento",
+            descripcion="Base",
+            activo=True,
+        )
+        self.unidad = UnidadMedida.objects.create(
+            nombre="LITRO-REQ",
+            simbolo="L",
+            dimension=self.dimension,
+            es_base=True,
+            activo=True,
+        )
+        self.item = Item.objects.create(
+            codigo="CONS-REQ-001",
+            nombre="Aceite motor",
+            tipo_insumo=Item.TipoInsumo.CONSUMIBLE,
+            dimension=self.dimension,
+            unidad_medida=self.unidad,
+        )
+        self.almacen = Almacen.objects.create(nombre="Almacen Requerimientos")
+        self.proveedor = Proveedor.objects.create(
+            nombre="Proveedor Req",
+            ruc="20123456789",
+            direccion="Av. Requerimientos",
+        )
+        self.compra = Compra.objects.create(proveedor=self.proveedor)
+        self.compra_detalle = CompraDetalle.objects.create(
+            compra=self.compra,
+            item=self.item,
+            cantidad=10,
+            unidad_medida=self.unidad,
+            moneda=Compra.Moneda.PEN,
+            valor_unitario="20.00",
+        )
+        self.lote = LoteConsumible.objects.create(
+            compra_detalle=self.compra_detalle,
+            item=self.item,
+            cantidad_inicial=Decimal("10.000000"),
+            cantidad_disponible=Decimal("10.000000"),
+            unidad_medida=self.unidad,
+            almacen=self.almacen,
+        )
+        HistorialConsumible.objects.create(
+            lote=self.lote,
+            item=self.item,
+            cantidad=Decimal("10.000000"),
+            unidad_medida=self.unidad,
+            almacen=self.almacen,
+        )
+
+        self.maquinaria = Maquinaria.objects.create(
+            codigo_maquina="MQ-REQ-01",
+            nombre="Retroexcavadora",
+            descripcion="Prueba",
+            observacion="",
+            gasto="0.00",
+        )
+        self.orden_trabajo = OrdenTrabajo.objects.create(
+            maquinaria=self.maquinaria,
+            fecha=date(2026, 5, 12),
+            prioridad="REGULAR",
+            lugar=OrdenTrabajo.Lugar.TALLER,
+            observaciones="",
+        )
+        self.orden_trabajo.tecnicos.add(self.tecnico)
+
+    def _crear_requerimiento(self, tecnico_asignado=None):
+        orden = OrdenRequerimiento.objects.create(
+            trabajo=self.orden_trabajo,
+            tecnico_asignado=tecnico_asignado,
+            observaciones="Materiales para la OT",
+            emitido_por=self.jefe_tecnicos_user,
+        )
+        OrdenRequerimientoDetalle.objects.create(
+            orden_requerimiento=orden,
+            item=self.item,
+            cantidad=Decimal("2.000000"),
+            proveedor=self.proveedor,
+        )
+        return orden
+
+    def test_jefe_tecnicos_puede_crear_orden_requerimiento(self):
+        self.client.force_authenticate(user=self.jefe_tecnicos_user)
+
+        response = self.client.post(
+            "/api/ordenes-requerimiento/",
+            {
+                "trabajo": self.orden_trabajo.id,
+                "tecnico_asignado": self.tecnico.id,
+                "observaciones": "Solicitar aceite",
+                "items": [
+                    {
+                        "item": self.item.id,
+                        "cantidad": "2",
+                        "proveedor": self.proveedor.id,
+                    }
+                ],
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 201, response.data)
+        self.assertEqual(response.data["tecnico_asignado"], self.tecnico.id)
+        self.assertEqual(OrdenRequerimiento.objects.count(), 1)
+
+    def test_jefe_tecnicos_puede_listar_items_para_emitir_requerimientos(self):
+        self.client.force_authenticate(user=self.jefe_tecnicos_user)
+
+        response = self.client.get("/api/items/")
+
+        self.assertEqual(response.status_code, 200, response.data)
+        item_ids = [row["id"] for row in response.data]
+        self.assertIn(self.item.id, item_ids)
+
+    def test_jefe_tecnicos_puede_registrar_movimiento_consumible(self):
+        actividad = ActividadTrabajo.objects.create(
+            orden=self.orden_trabajo,
+            tipo_actividad=ActividadTrabajo.TipoActividad.MANTENIMIENTO,
+            tipo_mantenimiento=ActividadTrabajo.TipoMantenimiento.PREVENTIVO,
+            subtipo=ActividadTrabajo.SubTipo.PM1,
+            descripcion="Registro desde jefe de tecnicos",
+            es_planificada=False,
+        )
+        HistorialConsumible.objects.create(
+            lote=self.lote,
+            item=self.item,
+            cantidad=Decimal("5.000000"),
+            unidad_medida=self.unidad,
+            trabajador=self.tecnico,
+        )
+
+        self.client.force_authenticate(user=self.jefe_tecnicos_user)
+
+        response = self.client.post(
+            "/api/movimientos-consumible/",
+            {
+                "actividad": actividad.id,
+                "item": self.item.id,
+                "cantidad": "1",
+                "tecnico": self.tecnico.id,
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 201, response.data)
+        self.assertEqual(response.data["tecnico"], self.tecnico.id)
+
+    def test_tecnico_asignado_puede_marcar_entregado(self):
+        orden = self._crear_requerimiento(tecnico_asignado=self.tecnico)
+        self.client.force_authenticate(user=self.tecnico_user)
+
+        response = self.client.post(
+            f"/api/ordenes-requerimiento/{orden.id}/cambiar_estado/",
+            {"estado": OrdenRequerimiento.Estado.ENTREGADO},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 200, response.data)
+        orden.refresh_from_db()
+        self.assertEqual(orden.estado, OrdenRequerimiento.Estado.ENTREGADO)
+
+    def test_tecnico_asignado_no_puede_marcar_sin_stock(self):
+        orden = self._crear_requerimiento(tecnico_asignado=self.tecnico)
+        self.client.force_authenticate(user=self.tecnico_user)
+
+        response = self.client.post(
+            f"/api/ordenes-requerimiento/{orden.id}/cambiar_estado/",
+            {"estado": OrdenRequerimiento.Estado.SIN_STOCK},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 403, response.data)
+        orden.refresh_from_db()
+        self.assertEqual(orden.estado, OrdenRequerimiento.Estado.POR_REVISAR)
+
+
+class ActividadPlanificadaPermisosTests(APITestCase):
+    def setUp(self):
+        self.jefe_tecnicos_group = Group.objects.create(name="Jefe de Tecnicos")
+        self.jefe_almacen_group = Group.objects.create(name="Jefe de Almaceneros")
+        self.almacenero_group = Group.objects.create(name="Almacenero")
+
+        self.jefe_tecnicos_user = User.objects.create_user(
+            username="jefe-tecnicos-plan",
+            password="secret123",
+        )
+        self.jefe_tecnicos_user.groups.add(self.jefe_tecnicos_group)
+
+        self.jefe_almacen_user = User.objects.create_user(
+            username="jefe-almacen-plan",
+            password="secret123",
+        )
+        self.jefe_almacen_user.groups.add(self.jefe_almacen_group)
+
+        self.almacenero_user = User.objects.create_user(
+            username="almacenero-plan",
+            password="secret123",
+        )
+        self.almacenero_user.groups.add(self.almacenero_group)
+
+        self.maquinaria = Maquinaria.objects.create(
+            codigo_maquina="MQ-ACT-01",
+            nombre="Motoniveladora",
+            descripcion="Prueba",
+            observacion="",
+            gasto="0.00",
+        )
+        self.orden = OrdenTrabajo.objects.create(
+            maquinaria=self.maquinaria,
+            fecha=date(2026, 5, 12),
+            prioridad="REGULAR",
+            lugar=OrdenTrabajo.Lugar.TALLER,
+            observaciones="",
+        )
+
+    def test_jefe_tecnicos_puede_crear_actividad_planificada(self):
+        self.client.force_authenticate(user=self.jefe_tecnicos_user)
+
+        response = self.client.post(
+            "/api/actividades/",
+            {
+                "orden": self.orden.id,
+                "tipo_actividad": ActividadTrabajo.TipoActividad.REVISION,
+                "descripcion": "Revision programada",
+                "es_planificada": True,
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 201, response.data)
+        self.assertTrue(response.data["es_planificada"])
+
+    def test_almacenero_no_puede_crear_actividad_planificada(self):
+        self.client.force_authenticate(user=self.almacenero_user)
+
+        response = self.client.post(
+            "/api/actividades/",
+            {
+                "orden": self.orden.id,
+                "tipo_actividad": ActividadTrabajo.TipoActividad.REVISION,
+                "descripcion": "Revision programada",
+                "es_planificada": True,
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 403, response.data)
+
+    def test_jefe_almacen_puede_crear_actividad_planificada(self):
+        self.client.force_authenticate(user=self.jefe_almacen_user)
+
+        response = self.client.post(
+            "/api/actividades/",
+            {
+                "orden": self.orden.id,
+                "tipo_actividad": ActividadTrabajo.TipoActividad.REVISION,
+                "descripcion": "Revision programada",
+                "es_planificada": True,
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 201, response.data)

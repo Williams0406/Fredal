@@ -89,6 +89,14 @@ export default function ItemHistorialModal({ itemId, open, onClose }) {
     });
   }
 
+  function formatHorometro(value) {
+    if (value === null || value === undefined || value === "") return "-";
+    return Number(value).toLocaleString("es-PE", {
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 2,
+    });
+  }
+
   const renderUbicacion = (h) => {
     if (esConsumible) {
       return (
@@ -178,6 +186,8 @@ export default function ItemHistorialModal({ itemId, open, onClose }) {
                               <th className="px-4 py-2 text-left text-xs font-semibold text-gray-700 uppercase">Orden de Trabajo</th>
                               <th className="px-4 py-2 text-left text-xs font-semibold text-gray-700 uppercase">Fecha Inicio</th>
                               <th className="px-4 py-2 text-left text-xs font-semibold text-gray-700 uppercase">Fecha Fin</th>
+                              <th className="px-4 py-2 text-left text-xs font-semibold text-gray-700 uppercase">Horómetro Inicio</th>
+                              <th className="px-4 py-2 text-left text-xs font-semibold text-gray-700 uppercase">Horómetro Fin</th>
                             </tr>
                           </thead>
                           <tbody className="divide-y divide-gray-200">
@@ -194,6 +204,8 @@ export default function ItemHistorialModal({ itemId, open, onClose }) {
                                     <span className="text-[#84cc16] font-semibold">Ubicación actual</span>
                                   )}
                                 </td>
+                                <td className="px-4 py-3 text-sm text-gray-700">{formatHorometro(h.horometro_inicio)}</td>
+                                <td className="px-4 py-3 text-sm text-gray-700">{formatHorometro(h.horometro_fin)}</td>
                               </tr>
                             ))}
                           </tbody>

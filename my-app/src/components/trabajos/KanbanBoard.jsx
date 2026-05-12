@@ -1,25 +1,26 @@
 "use client";
 
 import { useState } from "react";
+import { CircleCheckBig, Clock3, Wrench } from "lucide-react";
 import KanbanColumn from "./KanbanColumn";
 
 const ESTADOS = [
   {
     key: "PENDIENTE",
     label: "Pendiente",
-    icon: "⏳",
+    icon: Clock3,
     color: "gray",
   },
   {
     key: "EN_PROCESO",
     label: "En Proceso",
-    icon: "⚙️",
+    icon: Wrench,
     color: "blue",
   },
   {
     key: "FINALIZADO",
     label: "Finalizado",
-    icon: "✓",
+    icon: CircleCheckBig,
     color: "green",
   },
 ];
@@ -42,21 +43,16 @@ export default function KanbanBoard({
   tecnicoLookup = {},
   maquinariaLookup = {},
 }) {
-  // activeTab solo se usa en mobile (< md)
   const [activeTab, setActiveTab] = useState("EN_PROCESO");
 
   return (
     <>
-      {/* ════════════════════════════════════════
-          MOBILE: Tab switcher + columna activa
-          Solo visible en pantallas < md
-      ════════════════════════════════════════ */}
       <div className="md:hidden">
-        {/* ── Tab bar ── */}
-        <div className="flex border-b border-gray-200 bg-white rounded-t-xl overflow-hidden shadow-sm mb-4">
+        <div className="mb-4 flex overflow-hidden rounded-t-xl border-b border-gray-200 bg-white shadow-sm">
           {ESTADOS.map((estado) => {
             const count = trabajos.filter((t) => t.estatus === estado.key).length;
             const isActive = activeTab === estado.key;
+            const Icon = estado.icon;
 
             return (
               <button
@@ -69,18 +65,14 @@ export default function KanbanBoard({
                   ${isActive ? TAB_ACTIVE[estado.key] : TAB_INACTIVE}
                 `}
               >
-                <span className="text-lg leading-none mb-0.5">{estado.icon}</span>
-                <span className="text-[11px] font-bold tracking-wide uppercase leading-tight">
+                <Icon className="mb-0.5 h-5 w-5" strokeWidth={2.2} />
+                <span className="text-[11px] font-bold uppercase tracking-wide leading-tight">
                   {estado.label}
                 </span>
-                {/* Contador inline */}
                 <span
                   className={`
-                    mt-1 text-[10px] font-bold px-1.5 py-0.5 rounded-full
-                    ${isActive
-                      ? "bg-current/10 text-current"
-                      : "bg-gray-100 text-gray-500"
-                    }
+                    mt-1 rounded-full px-1.5 py-0.5 text-[10px] font-bold
+                    ${isActive ? "bg-current/10 text-current" : "bg-gray-100 text-gray-500"}
                   `}
                 >
                   {count}
@@ -90,7 +82,6 @@ export default function KanbanBoard({
           })}
         </div>
 
-        {/* ── Columna activa ── */}
         {ESTADOS.map((estado) =>
           activeTab === estado.key ? (
             <KanbanColumn
@@ -108,11 +99,7 @@ export default function KanbanBoard({
         )}
       </div>
 
-      {/* ════════════════════════════════════════
-          DESKTOP: Grid de 3 columnas (sin cambios)
-          Solo visible en pantallas >= md
-      ════════════════════════════════════════ */}
-      <div className="hidden md:grid md:grid-cols-3 gap-6">
+      <div className="hidden gap-6 md:grid md:grid-cols-3">
         {ESTADOS.map((estado) => (
           <KanbanColumn
             key={estado.key}

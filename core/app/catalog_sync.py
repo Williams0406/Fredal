@@ -334,7 +334,9 @@ class CatalogoSyncView(APIView):
         }
 
     def _export_bundle_json(self):
-        generated_at = timezone.localtime()
+        generated_at = timezone.now()
+        if timezone.is_aware(generated_at):
+            generated_at = timezone.localtime(generated_at)
         tables = {}
         record_counts = {}
 
@@ -368,7 +370,9 @@ class CatalogoSyncView(APIView):
         return response
 
     def _export_single_table(self, config, export_format):
-        generated_at = timezone.localtime()
+        generated_at = timezone.now()
+        if timezone.is_aware(generated_at):
+            generated_at = timezone.localtime(generated_at)
         records = self._get_table_records(config)
         filename = (
             f'{config["key"]}-{generated_at.strftime("%Y%m%d-%H%M%S")}.{export_format}'

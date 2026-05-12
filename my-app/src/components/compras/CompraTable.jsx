@@ -2,6 +2,8 @@
 
 import { useMemo, useState } from "react";
 import { Search, Trash2 } from "lucide-react";
+import { FilterInput, FilterPanel, FilterSelect } from "@/components/ui/FilterPanel";
+import TableActionButton from "@/components/ui/TableActionButton";
 
 export default function CompraTable({ compras = [], onDeleteRegistro, deletingCompraId = null }) {
   const [search, setSearch] = useState("");
@@ -54,43 +56,101 @@ export default function CompraTable({ compras = [], onDeleteRegistro, deletingCo
   const canDeleteCompra = (compraId) => !!compraId && deletingCompraId !== compraId;
   const confirmDelete = (row) => {
     if (!onDeleteRegistro || !row.compra_id) return;
-    const message = `Vas a eliminar el registro de compra ${row.tipo_comprobante} ${row.codigo_comprobante}.\n\nTambién se eliminarán los detalles y movimientos relacionados.\n¿Deseas continuar?`;
+    const comprobanteLabel = row.tipo_comprobante && row.codigo_comprobante
+      ? `${row.tipo_comprobante} ${row.codigo_comprobante}`
+      : "sin comprobante";
+    const message = `Vas a eliminar el registro de compra ${comprobanteLabel}.\n\nTambien se eliminaran los detalles y movimientos relacionados.\n\nDeseas continuar?`;
     if (!window.confirm(message)) return;
     onDeleteRegistro(row.compra_id);
   };
 
   return (
     <div className="space-y-4">
-      <div className="bg-white rounded-xl border border-gray-200 p-4 shadow-sm">
-        <div className="flex flex-wrap items-center justify-between gap-2 mb-4">
-          <div className="flex items-center gap-2">
-            <div className="w-9 h-9 rounded-lg bg-blue-50 text-[#1e3a8a] flex items-center justify-center"><Search className="w-4 h-4" /></div>
-            <div>
-              <p className="text-sm font-semibold text-gray-800">Filtros de búsqueda</p>
-              <p className="text-xs text-gray-500">Refina por texto, proveedor, moneda y rango de fechas</p>
-            </div>
+      <FilterPanel
+        title="Filtros de busqueda"
+        description="Refina por texto, proveedor, moneda y rango de fechas."
+        collapsible
+        hasActiveFilters={Boolean(hasFilters)}
+        onClear={clearFilters}
+      >
+        <div className="grid grid-cols-1 gap-3 md:grid-cols-2 lg:grid-cols-12">
+          <FilterInput
+            label="Busqueda global"
+            icon={Search}
+            placeholder="Item, codigo, proveedor o comprobante"
+            value={search}
+            onChange={(e) => {
+              setSearch(e.target.value);
+              setPage(1);
+            }}
+            className="lg:col-span-4"
+          />
+          <FilterInput
+            label="Proveedor"
+            placeholder="Nombre del proveedor"
+            value={proveedor}
+            onChange={(e) => {
+              setProveedor(e.target.value);
+              setPage(1);
+            }}
+            className="lg:col-span-3"
+          />
+          <FilterSelect
+            label="Moneda"
+            value={moneda}
+            onChange={(e) => {
+              setMoneda(e.target.value);
+              setPage(1);
+            }}
+            className="lg:col-span-2"
+          >
+            <option value="">Todas</option>
+            <option value="PEN">PEN</option>
+            <option value="USD">USD</option>
+            <option value="EUR">EUR</option>
+          </FilterSelect>
+          <FilterSelect
+            label="Filas por pagina"
+            value={pageSize}
+            onChange={(e) => {
+              setPageSize(Number(e.target.value));
+              setPage(1);
+            }}
+            className="lg:col-span-2"
+          >
+            <option value={10}>10</option>
+            <option value={20}>20</option>
+            <option value={50}>50</option>
+          </FilterSelect>
+          <div className="grid grid-cols-2 gap-3 lg:col-span-3">
+            <FilterInput
+              label="Desde"
+              type="date"
+              value={fechaDesde}
+              onChange={(e) => {
+                setFechaDesde(e.target.value);
+                setPage(1);
+              }}
+            />
+            <FilterInput
+              label="Hasta"
+              type="date"
+              value={fechaHasta}
+              onChange={(e) => {
+                setFechaHasta(e.target.value);
+                setPage(1);
+              }}
+            />
           </div>
-          {hasFilters && <button onClick={clearFilters} className="text-sm text-gray-600 hover:text-gray-900 border border-gray-300 px-3 py-1.5 rounded-lg">Limpiar filtros</button>}
         </div>
-
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-12 gap-3">
-          <div className="lg:col-span-4"><label className="block text-xs font-semibold text-gray-600 mb-1">Búsqueda global</label><input placeholder="Item, código, proveedor o comprobante" value={search} onChange={(e) => { setSearch(e.target.value); setPage(1); }} className="w-full px-3 py-2.5 border border-gray-300 rounded-lg text-sm" /></div>
-          <div className="lg:col-span-3"><label className="block text-xs font-semibold text-gray-600 mb-1">Proveedor</label><input placeholder="Nombre del proveedor" value={proveedor} onChange={(e) => { setProveedor(e.target.value); setPage(1); }} className="w-full px-3 py-2.5 border border-gray-300 rounded-lg text-sm" /></div>
-          <div className="lg:col-span-2"><label className="block text-xs font-semibold text-gray-600 mb-1">Moneda</label><select value={moneda} onChange={(e) => { setMoneda(e.target.value); setPage(1); }} className="w-full px-3 py-2.5 border border-gray-300 rounded-lg text-sm"><option value="">Todas</option><option value="PEN">PEN</option><option value="USD">USD</option><option value="EUR">EUR</option></select></div>
-          <div className="lg:col-span-2"><label className="block text-xs font-semibold text-gray-600 mb-1">Filas por página</label><select value={pageSize} onChange={(e) => { setPageSize(Number(e.target.value)); setPage(1); }} className="w-full px-3 py-2.5 border border-gray-300 rounded-lg text-sm"><option value={10}>10</option><option value={20}>20</option><option value={50}>50</option></select></div>
-          <div className="lg:col-span-3 grid grid-cols-2 gap-3">
-            <div><label className="block text-xs font-semibold text-gray-600 mb-1">Desde</label><input type="date" value={fechaDesde} onChange={(e) => { setFechaDesde(e.target.value); setPage(1); }} className="w-full px-3 py-2.5 border border-gray-300 rounded-lg text-sm" /></div>
-            <div><label className="block text-xs font-semibold text-gray-600 mb-1">Hasta</label><input type="date" value={fechaHasta} onChange={(e) => { setFechaHasta(e.target.value); setPage(1); }} className="w-full px-3 py-2.5 border border-gray-300 rounded-lg text-sm" /></div>
-          </div>
-        </div>
-      </div>
+      </FilterPanel>
 
       <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
         <div className="overflow-x-auto">
           <table className="min-w-full">
             <thead className="bg-gray-50 border-b border-gray-200">
               <tr>
-                {['Fecha','Código','Item','Proveedor','Cant.','Unidad','V. Unit.','V. Total','C. Unit.','C. Total S/.','C. Total $','C. Total €','Mon.','Comprobante','Acciones'].map((h)=><th key={h} className="px-4 py-3 text-xs font-semibold text-gray-700 uppercase tracking-wider text-left">{h}</th>)}
+                {["Fecha", "Codigo", "Item", "Proveedor", "Cant.", "Unidad", "V. Unit.", "V. Total", "C. Unit.", "C. Total S/.", "C. Total $", "C. Total EUR", "Mon.", "Comprobante", "Acciones"].map((h)=><th key={h} className="px-4 py-3 text-xs font-semibold text-gray-700 uppercase tracking-wider text-left">{h}</th>)}
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-200">
@@ -109,12 +169,19 @@ export default function CompraTable({ compras = [], onDeleteRegistro, deletingCo
                   <td className="px-4 py-3 text-sm text-[#1e3a8a] whitespace-nowrap">{c.costo_total_usd ? Number(c.costo_total_usd).toFixed(2) : "-"}</td>
                   <td className="px-4 py-3 text-sm text-emerald-700 whitespace-nowrap">{c.costo_total_eur ? Number(c.costo_total_eur).toFixed(2) : "-"}</td>
                   <td className="px-4 py-3 whitespace-nowrap"><span className="px-2 py-1 text-xs font-medium bg-gray-100 text-gray-700 rounded">{c.moneda}</span></td>
-                  <td className="px-4 py-3 text-sm text-gray-700 whitespace-nowrap"><div><span className="font-medium">{c.tipo_comprobante}</span></div><div className="text-xs text-gray-500">{c.codigo_comprobante}</div></td>
+                  <td className="px-4 py-3 text-sm text-gray-700 whitespace-nowrap"><div><span className="font-medium">{c.tipo_comprobante || "Sin comprobante"}</span></div><div className="text-xs text-gray-500">{c.codigo_comprobante || (c.tipo_comprobante ? "Sin codigo" : "No aplica")}</div></td>
                   <td className="px-4 py-3">
-                    <button type="button" disabled={!canDeleteCompra(c.compra_id)} onClick={() => confirmDelete(c)} className="inline-flex items-center gap-1 px-3 py-1.5 text-xs rounded-lg border border-red-200 text-red-600 hover:bg-red-50 disabled:opacity-40">
+                    <TableActionButton
+                      type="button"
+                      disabled={!canDeleteCompra(c.compra_id)}
+                      onClick={() => confirmDelete(c)}
+                      tone="danger"
+                      className="text-xs"
+                      title="Borrar registro"
+                    >
                       <Trash2 className="w-3 h-3" />
                       {deletingCompraId === c.compra_id ? "Eliminando..." : "Borrar registro"}
-                    </button>
+                    </TableActionButton>
                   </td>
                 </tr>
               ))}

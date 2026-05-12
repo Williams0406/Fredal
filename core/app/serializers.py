@@ -4,16 +4,19 @@ from rest_framework import serializers
 from django.contrib.contenttypes.models import ContentType
 from decimal import Decimal, ROUND_HALF_UP
 from django.db import transaction
-from django.db.models import Sum
+from django.db.models import Q, Sum
 from django.utils import timezone
 from rest_framework.exceptions import ValidationError
-from .permissions import can_manage_planned_activities
 
 from .models import (
     Item,
     Maquinaria,
     Compra,
     CompraDetalle,
+    OrdenCompra,
+    OrdenCompraDetalle,
+    OrdenRequerimiento,
+    OrdenRequerimientoDetalle,
     Almacen,
     Trabajador,
     PerfilUsuario,
@@ -37,6 +40,13 @@ from .models import (
     ItemGrupoDetalle,
     LoteConsumible,
     TipoCambioDiario,
+)
+from .permissions import (
+    can_manage_planned_activities,
+    is_compras_user,
+    is_maintenance_boss,
+    is_storage_user,
+    is_tecnico_user,
 )
 
 def obtener_unidad_base(dimension):
@@ -66,7 +76,7 @@ def obtener_factor_entre_unidades(unidad_origen, unidad_destino, unidad_base=Non
     return Decimal(relacion.factor)
 
 def calcular_stock_item(item):
-    if item.tipo_insumo == Item.TipoInsumo.REPUESTO:
+    if item.tipo_insumo in Item.tipos_con_unidades():
         if (
             item.unidad_medida
             and item.dimension
@@ -77,8 +87,7 @@ def calcular_stock_item(item):
                 ItemUnidad.objects
                 .filter(
                     item=item,
-                    historial__fecha_fin__isnull=True,
-                    historial__almacen__isnull=False,
+                    almacen_actual__isnull=False,
                 )
                 .exclude(estado=ItemUnidad.Estado.INOPERATIVO)
                 .distinct()
@@ -97,6 +106,8 @@ def calcular_stock_item(item):
             MovimientoRepuesto.objects
             .filter(item_unidad__item=item, actividad__es_planificada=False)
             .count()
+            if item.tipo_insumo == Item.TipoInsumo.REPUESTO
+            else 0
         )
         return max(Decimal(total_compras) - Decimal(total_salidas), Decimal("0"))
 
@@ -121,6 +132,161 @@ def actualizar_stock_item(item):
         item.stock = stock
         item.save(update_fields=["stock"])
     return stock
+
+
+def convertir_cantidad_a_unidad_item(item, cantidad, unidad_origen):
+    if unidad_origen.id == item.unidad_medida_id:
+        return Decimal(cantidad)
+    factor = obtener_factor_entre_unidades(unidad_origen, item.unidad_medida)
+    return Decimal(cantidad) * factor
+
+
+def obtener_configuracion_unidad_por_defecto():
+    dimension = Dimension.objects.filter(codigo__iexact="UNIDAD").first()
+    if not dimension:
+        raise ValidationError(
+            "No existe la dimension UNIDAD para configurar repuestos y herramientas."
+        )
+
+    unidad = (
+        UnidadMedida.objects
+        .filter(dimension=dimension, activo=True)
+        .order_by("-es_base", "id")
+        .first()
+        or UnidadMedida.objects
+        .filter(dimension=dimension)
+        .order_by("-es_base", "id")
+        .first()
+    )
+    if not unidad:
+        raise ValidationError(
+            "No existe una unidad de medida para la dimension UNIDAD."
+        )
+
+    return dimension, unidad
+
+
+def normalizar_item_con_unidades(item):
+    if item.tipo_insumo not in Item.tipos_con_unidades():
+        return item
+
+    update_fields = []
+
+    if item.unidad_medida_id and not item.dimension_id:
+        item.dimension = item.unidad_medida.dimension
+        update_fields.append("dimension")
+
+    if (
+        item.dimension_id
+        and item.unidad_medida_id
+        and item.dimension_id == item.unidad_medida.dimension_id
+    ):
+        if update_fields:
+            item.save(update_fields=update_fields)
+        return item
+
+    dimension_default, unidad_default = obtener_configuracion_unidad_por_defecto()
+
+    if item.dimension_id != dimension_default.id:
+        item.dimension = dimension_default
+        update_fields.append("dimension")
+
+    if item.unidad_medida_id != unidad_default.id:
+        item.unidad_medida = unidad_default
+        update_fields.append("unidad_medida")
+
+    if update_fields:
+        item.save(update_fields=list(dict.fromkeys(update_fields)))
+
+    return item
+
+
+def obtener_tecnico_responsable_planificado(actividad, tecnico=None, tecnico_id=None):
+    tecnicos = actividad.orden.tecnicos.order_by("id")
+
+    if tecnico is not None:
+        tecnico_id = getattr(tecnico, "id", tecnico)
+
+    if tecnico_id:
+        tecnico_resuelto = tecnicos.filter(id=tecnico_id).first()
+        if tecnico_resuelto:
+            return tecnico_resuelto
+
+    return tecnicos.first()
+
+
+def obtener_trabajador_request(request):
+    user = getattr(request, "user", None)
+    if not user or not user.is_authenticated:
+        return None
+
+    try:
+        return user.perfil.trabajador
+    except (AttributeError, PerfilUsuario.DoesNotExist):
+        return None
+
+
+def obtener_tecnico_contexto_actividad(actividad, request=None, tecnico=None, tecnico_id=None):
+    tecnicos = actividad.orden.tecnicos.order_by("id")
+
+    if tecnico is not None:
+        tecnico_id = getattr(tecnico, "id", tecnico)
+
+    if tecnico_id:
+        tecnico_resuelto = tecnicos.filter(id=tecnico_id).first()
+        if tecnico_resuelto:
+            return tecnico_resuelto
+
+    trabajador = obtener_trabajador_request(request)
+    if trabajador and tecnicos.filter(id=trabajador.id).exists():
+        return trabajador
+
+    return tecnicos.first()
+
+
+def calcular_stock_item_por_vista(item, vista="general"):
+    vista_normalizada = (vista or "general").lower()
+    if vista_normalizada == "general":
+        return actualizar_stock_item(item)
+
+    if item.tipo_insumo in Item.tipos_con_unidades():
+        unidades = (
+            ItemUnidad.objects
+            .filter(
+                item=item,
+                estado__in=[
+                    ItemUnidad.Estado.NUEVO,
+                    ItemUnidad.Estado.USADO,
+                    ItemUnidad.Estado.REPARADO,
+                ],
+            )
+            .exclude(estado=ItemUnidad.Estado.INOPERATIVO)
+        )
+
+        if vista_normalizada == "almacen":
+            unidades = unidades.filter(almacen_actual__isnull=False)
+        elif vista_normalizada == "tecnicos":
+            unidades = unidades.filter(trabajador_actual__isnull=False)
+        elif vista_normalizada == "maquinaria":
+            unidades = unidades.filter(maquinaria_actual__isnull=False)
+
+        return Decimal(unidades.values("id").distinct().count())
+
+    historiales = HistorialConsumible.objects.filter(
+        item=item,
+        fecha_fin__isnull=True,
+        cantidad__gt=0,
+    )
+
+    if vista_normalizada == "almacen":
+        historiales = historiales.filter(almacen__isnull=False)
+    elif vista_normalizada == "tecnicos":
+        historiales = historiales.filter(trabajador__isnull=False)
+    elif vista_normalizada == "maquinaria":
+        historiales = historiales.filter(maquinaria__isnull=False)
+
+    total = historiales.aggregate(total=Sum("cantidad")).get("total") or Decimal("0")
+    return max(Decimal(total), Decimal("0"))
 
 class UserSerializer(serializers.ModelSerializer):
     password = serializers.CharField(write_only=True)
@@ -204,101 +370,87 @@ class ItemSerializer(serializers.ModelSerializer):
             return None
         return UnidadMedidaSerializer(obj.unidad_medida).data
 
-    def validate(self, data):
-        tipo_insumo = data.get(
+    def _get_vista_contextual(self):
+        request = self.context.get("request")
+        if not request:
+            return "general"
+
+        if hasattr(request, "query_params"):
+            return request.query_params.get("vista", "general")
+
+        return request.GET.get("vista", "general")
+
+    def _get_stock_contextual(self, obj):
+        vista = self._get_vista_contextual()
+        return calcular_stock_item_por_vista(obj, vista=vista)
+
+    def get_unidades_disponibles(self, obj):
+        if obj.tipo_insumo not in Item.tipos_con_unidades():
+            return 0
+
+        vista = self._get_vista_contextual()
+        vista_normalizada = (vista or "general").lower()
+
+        unidades = (
+            ItemUnidad.objects
+            .filter(item=obj)
+            .exclude(estado=ItemUnidad.Estado.INOPERATIVO)
+        )
+
+        if vista_normalizada == "almacen":
+            unidades = unidades.filter(almacen_actual__isnull=False)
+        elif vista_normalizada == "tecnicos":
+            unidades = unidades.filter(trabajador_actual__isnull=False)
+        elif vista_normalizada == "maquinaria":
+            unidades = unidades.filter(maquinaria_actual__isnull=False)
+        else:
+            unidades = unidades.filter(
+                Q(almacen_actual__isnull=False)
+                | Q(trabajador_actual__isnull=False)
+                | Q(maquinaria_actual__isnull=False)
+            )
+
+        return unidades.distinct().count()
+
+    def get_stock(self, obj):
+        return self._get_stock_contextual(obj)
+
+    def validate(self, attrs):
+        tipo_insumo = attrs.get(
             "tipo_insumo",
             getattr(self.instance, "tipo_insumo", None),
         )
-        dimension = data.get(
+        dimension = attrs.get(
             "dimension",
             getattr(self.instance, "dimension", None),
         )
-        unidad_medida = data.get(
+        unidad_medida = attrs.get(
             "unidad_medida",
             getattr(self.instance, "unidad_medida", None),
         )
 
-        if tipo_insumo == Item.TipoInsumo.REPUESTO:
-            dimension_cantidad = Dimension.objects.filter(codigo="CANTIDAD").first()
-            if not dimension_cantidad:
-                raise serializers.ValidationError(
-                    "Debe existir la dimensión CANTIDAD para registrar repuestos"
-                )
-            unidad_base = UnidadMedida.objects.filter(
-                dimension=dimension_cantidad,
-                nombre__iexact="CANTIDAD",
-            ).first() or obtener_unidad_base(dimension_cantidad)
-            if not unidad_base:
-                raise serializers.ValidationError(
-                    "Debe existir al menos una unidad en la dimensión CANTIDAD"
-                )
-            if dimension and dimension.id != dimension_cantidad.id:
-                raise serializers.ValidationError(
-                    "La dimensión de un REPUESTO debe ser CANTIDAD"
-                )
-            if unidad_medida and unidad_medida.id != unidad_base.id:
-                raise serializers.ValidationError(
-                    "La unidad de un REPUESTO debe ser CANTIDAD"
-                )
-            data["dimension"] = dimension_cantidad
-            data["unidad_medida"] = unidad_base
-            return data
+        if tipo_insumo in Item.tipos_con_unidades():
+            dimension_default, unidad_default = obtener_configuracion_unidad_por_defecto()
+            attrs["dimension"] = dimension_default
+            attrs["unidad_medida"] = unidad_default
+            return attrs
 
         if tipo_insumo == Item.TipoInsumo.CONSUMIBLE:
             if not dimension:
-                raise serializers.ValidationError(
-                    "El consumible debe tener una dimensión"
-                )
+                raise ValidationError({
+                    "dimension": "Selecciona la dimension del consumible."
+                })
             if not unidad_medida:
-                raise serializers.ValidationError(
-                    "El consumible debe tener una unidad de medida"
-                )
+                raise ValidationError({
+                    "unidad_medida": "Selecciona la unidad de medida del consumible."
+                })
             if unidad_medida.dimension_id != dimension.id:
-                raise serializers.ValidationError(
-                    "La unidad seleccionada no pertenece a la dimensión del item"
-                )
-            unidad_item_actual = getattr(self.instance, "unidad_medida", None)
-            if unidad_item_actual and unidad_medida.id != unidad_item_actual.id:
-                obtener_factor_entre_unidades(unidad_medida, unidad_item_actual)
+                raise ValidationError({
+                    "unidad_medida": "La unidad de medida no coincide con la dimension seleccionada."
+                })
 
-        return data
-    
-    def get_unidades_disponibles(self, obj):
-        return actualizar_stock_item(obj)
+        return attrs
 
-    def get_stock(self, obj):
-        return actualizar_stock_item(obj)
-    
-    def update(self, instance, validated_data):
-        nueva_unidad = validated_data.get('unidad_medida')
-        unidad_anterior = instance.unidad_medida
-        
-        # 1. Verificamos si es CONSUMIBLE y si la unidad realmente cambió
-        if instance.tipo_insumo == 'CONSUMIBLE' and nueva_unidad and unidad_anterior and nueva_unidad != unidad_anterior:
-            
-            # 2. Buscamos la relación de conversión (Base -> Relacionada)
-            relacion = UnidadRelacion.objects.filter(
-                unidad_base=unidad_anterior,
-                unidad_relacionada=nueva_unidad,
-            ).first()
-
-            if relacion:
-                # 3. ¡Aquí ocurre la magia! Actualizamos cada registro físico de stock
-                factor = Decimal(str(relacion.factor))
-                # Usamos el related_name 'unidades' que definiste en ItemUnidad
-                unidades_fisicas = instance.unidades.all() 
-                
-                for unidad_fisica in unidades_fisicas:
-                    unidad_fisica.cantidad_nominal = unidad_fisica.cantidad_nominal * factor
-                    unidad_fisica.save()
-            else:
-                # Opcional: podrías lanzar un error si no existe la relación
-                # raise serializers.ValidationError(f"No existe una relación de conversión entre {unidad_anterior.nombre} y {nueva_unidad.nombre}")
-                pass
-
-        instance = super().update(instance, validated_data)
-        actualizar_stock_item(instance)
-        return instance
 
 class MaquinariaSerializer(serializers.ModelSerializer):
     centro_costos = serializers.SerializerMethodField()
@@ -354,35 +506,36 @@ class CompraCreateSerializer(serializers.ModelSerializer):
             almacen_principal, _ = Almacen.objects.get_or_create(nombre="Almacén Central")
 
             for data in items_data:
+                item = normalizar_item_con_unidades(data["item"])
                 cantidad_original = data["cantidad"]
                 unidad_medida = data.get("unidad_medida")
                 cantidad = cantidad_original
 
-                if unidad_medida and data["item"].tipo_insumo != Item.TipoInsumo.CONSUMIBLE:
-                    if data["item"].unidad_medida_id != unidad_medida.id:
+                if unidad_medida and item.tipo_insumo != Item.TipoInsumo.CONSUMIBLE:
+                    if item.unidad_medida_id != unidad_medida.id:
                         raise serializers.ValidationError(
-                            f"El item {data['item'].codigo} solo permite su unidad configurada"
+                            f"El item {item.codigo} solo permite su unidad configurada"
                         )
                 
-                if data["item"].tipo_insumo == Item.TipoInsumo.CONSUMIBLE and unidad_medida:
-                    if not data["item"].dimension:
+                if item.tipo_insumo == Item.TipoInsumo.CONSUMIBLE and unidad_medida:
+                    if not item.dimension:
                         raise serializers.ValidationError(
                             f"El item {data['item'].codigo} no tiene dimensión configurada"
                         )
-                    if unidad_medida.dimension_id != data["item"].dimension_id:
+                    if unidad_medida.dimension_id != item.dimension_id:
                         raise serializers.ValidationError(
                             "La unidad de medida no coincide con la dimensión del item"
                         )
-                    if unidad_medida.id != data["item"].unidad_medida_id:
-                        obtener_factor_entre_unidades(unidad_medida, data["item"].unidad_medida)
-                elif data["item"].tipo_insumo == Item.TipoInsumo.CONSUMIBLE:
-                    unidad_medida = data["item"].unidad_medida
+                    if unidad_medida.id != item.unidad_medida_id:
+                        obtener_factor_entre_unidades(unidad_medida, item.unidad_medida)
+                elif item.tipo_insumo == Item.TipoInsumo.CONSUMIBLE:
+                    unidad_medida = item.unidad_medida
                     if not unidad_medida:
                         raise serializers.ValidationError(
                             f"El item {data['item'].codigo} no tiene unidad de medida configurada"
                         )
                 else:
-                    unidad_medida = data["item"].unidad_medida
+                    unidad_medida = item.unidad_medida
                     if not unidad_medida:
                         raise serializers.ValidationError(
                             f"El item {data['item'].codigo} no tiene unidad de medida configurada"
@@ -404,7 +557,7 @@ class CompraCreateSerializer(serializers.ModelSerializer):
                 # 4. Crear el detalle
                 detalle = CompraDetalle.objects.create(
                     compra=compra,
-                    item=data["item"],
+                    item=item,
                     cantidad=cantidad,
                     unidad_medida=unidad_medida,
                     moneda=data["moneda"],
@@ -412,10 +565,10 @@ class CompraCreateSerializer(serializers.ModelSerializer):
                 )
 
                 # 5. Generar unidades físicas en inventario e historial inicial
-                if data["item"].tipo_insumo == Item.TipoInsumo.REPUESTO:
+                if item.tipo_insumo in Item.tipos_con_unidades():
                     for _ in range(cantidad):
                         unidad = ItemUnidad.objects.create(
-                            item=data["item"],
+                            item=item,
                             compra_detalle=detalle,
                             estado=ItemUnidad.Estado.NUEVO
                         )
@@ -427,26 +580,26 @@ class CompraCreateSerializer(serializers.ModelSerializer):
                         )
                 else:
                     cantidad_convertida = self._cantidad_en_unidad_item(
-                        data["item"],
+                        item,
                         cantidad_original,
                         unidad_medida,
                     )
                     lote = LoteConsumible.objects.create(
                         compra_detalle=detalle,
-                        item=data["item"],
+                        item=item,
                         cantidad_inicial=cantidad_convertida,
                         cantidad_disponible=cantidad_convertida,
-                        unidad_medida=data["item"].unidad_medida,
+                        unidad_medida=item.unidad_medida,
                         almacen=almacen_principal,
                     )
                     HistorialConsumible.objects.create(
                         lote=lote,
-                        item=data["item"],
+                        item=item,
                         cantidad=cantidad_convertida,
-                        unidad_medida=data["item"].unidad_medida,
+                        unidad_medida=item.unidad_medida,
                         almacen=almacen_principal,
                     )
-                actualizar_stock_item(data["item"])
+                actualizar_stock_item(item)
             return compra
 
 class CompraDetalleListSerializer(serializers.ModelSerializer):
@@ -671,6 +824,226 @@ class TrabajadorSerializer(serializers.ModelSerializer):
         ]
         read_only_fields = ["codigo"]
 
+class OrdenCompraDetalleSerializer(serializers.ModelSerializer):
+    item_codigo = serializers.CharField(source="item.codigo", read_only=True)
+    item_nombre = serializers.CharField(source="item.nombre", read_only=True)
+    proveedor_nombre = serializers.CharField(source="proveedor.nombre", read_only=True, default=None)
+
+    class Meta:
+        model = OrdenCompraDetalle
+        fields = ["id", "item", "item_codigo", "item_nombre", "cantidad", "proveedor", "proveedor_nombre"]
+
+
+class OrdenCompraSerializer(serializers.ModelSerializer):
+    items = OrdenCompraDetalleSerializer(source="detalles", many=True)
+    emitido_por_nombre = serializers.SerializerMethodField()
+    pendiente_confirmacion_almacen = serializers.SerializerMethodField()
+    puede_cambiar_estado = serializers.SerializerMethodField()
+    puede_confirmar_recepcion = serializers.SerializerMethodField()
+
+    class Meta:
+        model = OrdenCompra
+        fields = [
+            "id",
+            "codigo",
+            "estado",
+            "observaciones",
+            "created_at",
+            "recepcion_confirmada",
+            "fecha_confirmacion_recepcion",
+            "emitido_por",
+            "emitido_por_nombre",
+            "confirmado_por",
+            "items",
+            "pendiente_confirmacion_almacen",
+            "puede_cambiar_estado",
+            "puede_confirmar_recepcion",
+        ]
+        read_only_fields = [
+            "codigo",
+            "estado",
+            "created_at",
+            "recepcion_confirmada",
+            "fecha_confirmacion_recepcion",
+            "emitido_por",
+            "confirmado_por",
+            "emitido_por_nombre",
+            "pendiente_confirmacion_almacen",
+            "puede_cambiar_estado",
+            "puede_confirmar_recepcion",
+        ]
+
+    def get_emitido_por_nombre(self, obj):
+        if not obj.emitido_por:
+            return "Sistema"
+        return obj.emitido_por.get_full_name() or obj.emitido_por.username
+
+    def get_pendiente_confirmacion_almacen(self, obj):
+        return obj.estado == OrdenCompra.Estado.RECIBIDO and not obj.recepcion_confirmada
+
+    def get_puede_cambiar_estado(self, obj):
+        request = self.context.get("request")
+        user = getattr(request, "user", None)
+        if not user or not user.is_authenticated:
+            return False
+        return is_compras_user(user) and obj.estado != OrdenCompra.Estado.RECIBIDO
+
+    def get_puede_confirmar_recepcion(self, obj):
+        request = self.context.get("request")
+        user = getattr(request, "user", None)
+        if not user or not user.is_authenticated:
+            return False
+        return is_storage_user(user) and obj.estado == OrdenCompra.Estado.RECIBIDO and not obj.recepcion_confirmada
+
+    def create(self, validated_data):
+        items_data = validated_data.pop("detalles", [])
+        request = self.context.get("request")
+        if request and request.user and request.user.is_authenticated:
+            validated_data.setdefault("emitido_por", request.user)
+
+        with transaction.atomic():
+            orden = OrdenCompra.objects.create(**validated_data)
+            for item_data in items_data:
+                OrdenCompraDetalle.objects.create(orden_compra=orden, **item_data)
+        return orden
+
+
+class OrdenRequerimientoDetalleSerializer(serializers.ModelSerializer):
+    item_codigo = serializers.CharField(source="item.codigo", read_only=True)
+    item_nombre = serializers.CharField(source="item.nombre", read_only=True)
+    proveedor_nombre = serializers.CharField(source="proveedor.nombre", read_only=True, default=None)
+
+    class Meta:
+        model = OrdenRequerimientoDetalle
+        fields = ["id", "item", "item_codigo", "item_nombre", "cantidad", "proveedor", "proveedor_nombre"]
+
+
+class OrdenRequerimientoSerializer(serializers.ModelSerializer):
+    items = OrdenRequerimientoDetalleSerializer(source="detalles", many=True)
+    trabajo_codigo = serializers.CharField(source="trabajo.codigo_orden", read_only=True)
+    tecnico_asignado_nombre = serializers.SerializerMethodField()
+    pendiente_confirmacion_tecnico = serializers.SerializerMethodField()
+    puede_cambiar_estado = serializers.SerializerMethodField()
+    puede_marcar_entregado = serializers.SerializerMethodField()
+    puede_marcar_sin_stock = serializers.SerializerMethodField()
+    puede_confirmar_tecnico = serializers.SerializerMethodField()
+    puede_asignar_tecnico = serializers.SerializerMethodField()
+
+    class Meta:
+        model = OrdenRequerimiento
+        fields = [
+            "id",
+            "codigo",
+            "trabajo",
+            "trabajo_codigo",
+            "estado",
+            "tecnico_asignado",
+            "tecnico_asignado_nombre",
+            "observaciones",
+            "created_at",
+            "recepcion_confirmada_tecnico",
+            "fecha_confirmacion_tecnico",
+            "emitido_por",
+            "items",
+            "pendiente_confirmacion_tecnico",
+            "puede_cambiar_estado",
+            "puede_marcar_entregado",
+            "puede_marcar_sin_stock",
+            "puede_confirmar_tecnico",
+            "puede_asignar_tecnico",
+        ]
+        read_only_fields = [
+            "codigo",
+            "created_at",
+            "recepcion_confirmada_tecnico",
+            "fecha_confirmacion_tecnico",
+            "emitido_por",
+            "trabajo_codigo",
+            "tecnico_asignado_nombre",
+            "pendiente_confirmacion_tecnico",
+            "puede_cambiar_estado",
+            "puede_marcar_entregado",
+            "puede_marcar_sin_stock",
+            "puede_confirmar_tecnico",
+            "puede_asignar_tecnico",
+        ]
+
+    def get_tecnico_asignado_nombre(self, obj):
+        if not obj.tecnico_asignado:
+            return None
+        return f"{obj.tecnico_asignado.nombres} {obj.tecnico_asignado.apellidos}".strip()
+
+    def get_pendiente_confirmacion_tecnico(self, obj):
+        return obj.estado == OrdenRequerimiento.Estado.ENTREGADO and not obj.recepcion_confirmada_tecnico
+
+    def get_puede_cambiar_estado(self, obj):
+        request = self.context.get("request")
+        user = getattr(request, "user", None)
+        if not user or not user.is_authenticated:
+            return False
+        return is_storage_user(user) and obj.estado != OrdenRequerimiento.Estado.ENTREGADO
+
+    def get_puede_marcar_entregado(self, obj):
+        request = self.context.get("request")
+        user = getattr(request, "user", None)
+        if (
+            not user
+            or not user.is_authenticated
+            or obj.estado == OrdenRequerimiento.Estado.ENTREGADO
+            or not obj.tecnico_asignado_id
+        ):
+            return False
+
+        if is_storage_user(user):
+            return True
+
+        trabajador = obtener_trabajador_request(request) if request else None
+        return bool(
+            trabajador
+            and obj.tecnico_asignado_id
+            and trabajador.id == obj.tecnico_asignado_id
+        )
+
+    def get_puede_marcar_sin_stock(self, obj):
+        request = self.context.get("request")
+        user = getattr(request, "user", None)
+        if not user or not user.is_authenticated:
+            return False
+        return is_storage_user(user) and obj.estado != OrdenRequerimiento.Estado.ENTREGADO
+
+    def get_puede_confirmar_tecnico(self, obj):
+        request = self.context.get("request")
+        user = getattr(request, "user", None)
+        if not user or not user.is_authenticated:
+            return False
+        trabajador = obtener_trabajador_request(request) if request else None
+        return bool(
+            trabajador
+            and obj.tecnico_asignado_id
+            and trabajador.id == obj.tecnico_asignado_id
+            and obj.estado == OrdenRequerimiento.Estado.ENTREGADO
+            and not obj.recepcion_confirmada_tecnico
+        )
+
+    def get_puede_asignar_tecnico(self, obj):
+        request = self.context.get("request")
+        user = getattr(request, "user", None)
+        if not user or not user.is_authenticated:
+            return False
+        return is_storage_user(user) and obj.estado != OrdenRequerimiento.Estado.ENTREGADO
+
+    def create(self, validated_data):
+        items_data = validated_data.pop("detalles", [])
+        request = self.context.get("request")
+        if request and request.user and request.user.is_authenticated:
+            validated_data.setdefault("emitido_por", request.user)
+
+        with transaction.atomic():
+            orden = OrdenRequerimiento.objects.create(**validated_data)
+            for item_data in items_data:
+                OrdenRequerimientoDetalle.objects.create(orden_requerimiento=orden, **item_data)
+        return orden
+
 class MeSerializer(serializers.ModelSerializer):
     trabajador = serializers.SerializerMethodField()
     roles = serializers.SerializerMethodField()
@@ -728,7 +1101,6 @@ class MovimientoRepuestoSerializer(serializers.ModelSerializer):
         queryset=Trabajador.objects.all(),
         required=False,
         allow_null=True,
-        write_only=True,
     )
     tecnico_id = serializers.SerializerMethodField()
     tecnico_nombre = serializers.SerializerMethodField()
@@ -799,7 +1171,7 @@ class MovimientoRepuestoSerializer(serializers.ModelSerializer):
         request = self.context.get("request")
         if actividad.es_planificada and not can_manage_planned_activities(getattr(request, "user", None)):
             raise serializers.ValidationError(
-                "Solo Jefe de Almaceneros, Almacenero o admin pueden registrar materiales en actividades planificadas"
+                "Solo Jefe de Tecnicos, Jefe de Almaceneros o admin pueden registrar materiales en actividades planificadas"
             )
 
         if actividad.orden.estatus == OrdenTrabajo.Estatus.FINALIZADO:
@@ -1001,7 +1373,6 @@ class MovimientoConsumibleSerializer(serializers.ModelSerializer):
         queryset=Trabajador.objects.all(),
         required=False,
         allow_null=True,
-        write_only=True,
     )
     tecnico_nombre = serializers.SerializerMethodField()
 
@@ -1026,6 +1397,9 @@ class MovimientoConsumibleSerializer(serializers.ModelSerializer):
         read_only_fields = ["fecha"]
     
     def get_tecnico_nombre(self, obj):
+        if obj.tecnico:
+            return f"{obj.tecnico.nombres} {obj.tecnico.apellidos}".strip()
+
         historial = (
             HistorialConsumible.objects
             .select_related("trabajador")
@@ -1054,7 +1428,7 @@ class MovimientoConsumibleSerializer(serializers.ModelSerializer):
         request = self.context.get("request")
         if actividad.es_planificada and not can_manage_planned_activities(getattr(request, "user", None)):
             raise serializers.ValidationError(
-                "Solo Jefe de Almaceneros, Almacenero o admin pueden registrar materiales en actividades planificadas"
+                "Solo Jefe de Tecnicos, Jefe de Almaceneros o admin pueden registrar materiales en actividades planificadas"
             )
 
         if actividad.orden.estatus == OrdenTrabajo.Estatus.FINALIZADO:
@@ -1097,10 +1471,58 @@ class MovimientoConsumibleSerializer(serializers.ModelSerializer):
                 "El técnico seleccionado no está asignado a esta orden"
             )
 
-        lotes = LoteConsumible.objects.filter(item=item, cantidad_disponible__gt=0)
-        if proveedor:
-            lotes = lotes.filter(compra_detalle__compra__proveedor=proveedor)
-        stock_base = lotes.aggregate(total=Sum("cantidad_disponible")).get("total") or Decimal("0")
+        tecnico_contexto = obtener_tecnico_contexto_actividad(
+            actividad,
+            request=request,
+            tecnico=tecnico,
+        )
+
+        if not actividad.es_planificada and not tecnico_contexto:
+            raise serializers.ValidationError(
+                "La orden debe tener un técnico asignado para registrar consumibles."
+            )
+
+        if tecnico_contexto:
+            historiales_tecnico = HistorialConsumible.objects.filter(
+                item=item,
+                trabajador=tecnico_contexto,
+                fecha_fin__isnull=True,
+                cantidad__gt=0,
+            )
+            if proveedor:
+                historiales_tecnico = historiales_tecnico.filter(
+                    lote__compra_detalle__compra__proveedor=proveedor
+                )
+
+            stock_base = (
+                historiales_tecnico.aggregate(total=Sum("cantidad")).get("total")
+                or Decimal("0")
+            )
+
+            if actividad.es_planificada:
+                movimientos_planificados = (
+                    MovimientoConsumible.objects
+                    .select_related("unidad_medida")
+                    .filter(
+                        actividad__orden=actividad.orden,
+                        actividad__es_planificada=True,
+                        item=item,
+                        tecnico=tecnico_contexto,
+                    )
+                )
+                for movimiento in movimientos_planificados:
+                    unidad_movimiento = movimiento.unidad_medida or item.unidad_medida
+                    stock_base -= self._cantidad_en_unidad_item(
+                        item,
+                        movimiento.cantidad,
+                        unidad_movimiento,
+                    )
+                stock_base = max(Decimal(stock_base), Decimal("0"))
+        else:
+            lotes = LoteConsumible.objects.filter(item=item, cantidad_disponible__gt=0)
+            if proveedor:
+                lotes = lotes.filter(compra_detalle__compra__proveedor=proveedor)
+            stock_base = lotes.aggregate(total=Sum("cantidad_disponible")).get("total") or Decimal("0")
 
         stock_actual = Decimal(stock_base)
         if unidad_medida.id != item.unidad_medida_id:
@@ -1120,6 +1542,26 @@ class MovimientoConsumibleSerializer(serializers.ModelSerializer):
             actividad = validated_data["actividad"]
             proveedor = validated_data.pop("proveedor", None)
             tecnico = validated_data.pop("tecnico", None)
+            request = self.context.get("request")
+            tecnico_contexto = obtener_tecnico_contexto_actividad(
+                actividad,
+                request=request,
+                tecnico=tecnico,
+            )
+
+            if tecnico is not None:
+                validated_data["tecnico"] = tecnico
+
+            if actividad.es_planificada:
+                return super().create(validated_data)
+
+            if not tecnico_contexto:
+                raise serializers.ValidationError(
+                    "La orden debe tener un técnico asignado para registrar consumibles."
+                )
+
+            validated_data["tecnico"] = tecnico_contexto
+
             unidad_mov = validated_data.get("unidad_medida") or item.unidad_medida
             cantidad_requerida = self._cantidad_en_unidad_item(
                 item,
@@ -1127,100 +1569,74 @@ class MovimientoConsumibleSerializer(serializers.ModelSerializer):
                 unidad_mov,
             )
 
-            lotes = (
-                LoteConsumible.objects
-                .filter(item=item, cantidad_disponible__gt=0)
-                .order_by("fecha_ingreso", "id")
+            historiales_qs = (
+                HistorialConsumible.objects
+                .select_for_update()
+                .filter(
+                    item=item,
+                    trabajador=tecnico_contexto,
+                    fecha_fin__isnull=True,
+                    cantidad__gt=0,
+                )
+                .order_by("fecha_inicio", "id")
             )
             if proveedor:
-                lotes = lotes.filter(compra_detalle__compra__proveedor=proveedor)
-            
-            if not actividad.es_planificada:
-                now = timezone.now()
-                historiales_qs = (
-                    HistorialConsumible.objects
-                    .select_for_update()
-                    .filter(
-                        item=item,
-                        orden_trabajo=actividad.orden,
-                        trabajador__isnull=False,
-                        fecha_fin__isnull=True,
-                    )
-                    .order_by("fecha_inicio", "id")
+                historiales_qs = historiales_qs.filter(
+                    lote__compra_detalle__compra__proveedor=proveedor
                 )
-                if tecnico:
-                    historiales_qs = historiales_qs.filter(trabajador=tecnico)
 
-                historiales_asignados = list(historiales_qs)
-                restante_asignado = Decimal(cantidad_requerida)
+            historiales_asignados = list(historiales_qs)
+            disponible_total = sum(Decimal(historial.cantidad) for historial in historiales_asignados)
+            if disponible_total < Decimal(cantidad_requerida):
+                raise serializers.ValidationError(
+                    "No hay suficiente cantidad asignada al técnico para registrar este consumible."
+                )
 
-                for historial in historiales_asignados:
-                    if restante_asignado <= 0:
-                        break
+            now = timezone.now()
+            restante_asignado = Decimal(cantidad_requerida)
 
-                    cantidad_historial = Decimal(historial.cantidad)
-                    consumido = min(cantidad_historial, restante_asignado)
-
-                    historial.fecha_fin = now
-                    historial.cantidad = consumido
-                    historial.save(update_fields=["fecha_fin", "cantidad"])
-
-                    sobrante = cantidad_historial - consumido
-                    if sobrante > 0:
-                        historial_restante = HistorialConsumible.objects.create(
-                            lote=historial.lote,
-                            item=historial.item,
-                            cantidad=sobrante,
-                            unidad_medida=historial.unidad_medida,
-                            trabajador=historial.trabajador,
-                            maquinaria=historial.maquinaria,
-                            almacen=historial.almacen,
-                            orden_trabajo=historial.orden_trabajo,
-                        )
-                        HistorialConsumible.objects.filter(pk=historial_restante.pk).update(
-                            fecha_inicio=historial.fecha_inicio,
-                            fecha_fin=None,
-                        )
-
-                    restante_asignado -= consumido
-
-            restante = Decimal(cantidad_requerida)
-            for lote in lotes:
-                if restante <= 0:
+            for historial in historiales_asignados:
+                if restante_asignado <= 0:
                     break
-                disponible = Decimal(lote.cantidad_disponible)
-                descontar = min(disponible, restante)
-                
-                if not actividad.es_planificada:
-                    lote.cantidad_disponible = disponible - descontar
-                    lote.save(update_fields=["cantidad_disponible"])
-                
-                if tecnico:
-                    self._descontar_historial_almacen(
-                        item=item,
-                        lote=lote,
-                        cantidad=descontar,
+
+                cantidad_historial = Decimal(historial.cantidad)
+                consumido = min(cantidad_historial, restante_asignado)
+
+                historial.cerrar(fecha=now, cantidad=consumido)
+
+                sobrante = cantidad_historial - consumido
+                if sobrante > 0:
+                    historial_restante = HistorialConsumible.objects.create(
+                        lote=historial.lote,
+                        item=historial.item,
+                        cantidad=sobrante,
+                        unidad_medida=historial.unidad_medida,
+                        trabajador=historial.trabajador,
+                        maquinaria=historial.maquinaria,
+                        almacen=historial.almacen,
+                        orden_trabajo=historial.orden_trabajo,
+                        horometro_inicio=historial.horometro_inicio,
+                    )
+                    HistorialConsumible.objects.filter(pk=historial_restante.pk).update(
+                        fecha_inicio=historial.fecha_inicio,
+                        fecha_fin=None,
                     )
 
                 HistorialConsumible.objects.create(
-                    lote=lote,
-                    item=item,
-                    cantidad=descontar,
-                    unidad_medida=item.unidad_medida,
-                    trabajador=tecnico,
-                    maquinaria=actividad.orden.maquinaria if not tecnico else None,
+                    lote=historial.lote,
+                    item=historial.item,
+                    cantidad=consumido,
+                    unidad_medida=historial.unidad_medida,
+                    maquinaria=actividad.orden.maquinaria,
                     orden_trabajo=actividad.orden,
+                    horometro_inicio=actividad.orden.horometro,
                 )
-                restante -= descontar
 
-            if restante > 0:
-                raise serializers.ValidationError(
-                    "No hay lotes suficientes para cubrir el consumo solicitado"
-                )
+                restante_asignado -= consumido
 
             movimiento = super().create(validated_data)
-            if not actividad.es_planificada:
-                actualizar_stock_item(item)
+            actualizar_stock_item(item)
+            OrdenTrabajoSerializer.sincronizar_horometros_relacionados(actividad.orden)
             return movimiento
         
     @staticmethod
@@ -1333,6 +1749,140 @@ class OrdenTrabajoSerializer(serializers.ModelSerializer):
         model = OrdenTrabajo
         fields = "__all__"
         read_only_fields = ["codigo_orden"]
+
+    @staticmethod
+    def _get_items_consumibles_registrados(orden):
+        return (
+            MovimientoConsumible.objects
+            .filter(
+                actividad__orden=orden,
+                actividad__es_planificada=False,
+            )
+            .values_list("item_id", flat=True)
+            .distinct()
+        )
+
+    @classmethod
+    def sincronizar_horometros_relacionados(cls, orden):
+        serializer = cls()
+        serializer._autocompletar_horometro_inicio_historiales(orden)
+        serializer._autocompletar_horometro_fin_historiales_previos(orden)
+        serializer._autocompletar_horometro_fin_consumibles_previos(orden)
+
+    def _autocompletar_horometro_inicio_historiales(self, orden):
+        if orden.horometro is None:
+            return
+
+        HistorialUbicacionItem.objects.filter(
+            orden_trabajo=orden,
+            maquinaria__isnull=False,
+            horometro_inicio__isnull=True,
+        ).update(horometro_inicio=orden.horometro)
+
+        item_ids = self._get_items_consumibles_registrados(orden)
+        HistorialConsumible.objects.filter(
+            orden_trabajo=orden,
+            item_id__in=item_ids,
+            maquinaria=orden.maquinaria,
+            trabajador__isnull=True,
+            almacen__isnull=True,
+            horometro_inicio__isnull=True,
+        ).update(horometro_inicio=orden.horometro)
+
+    def _autocompletar_horometro_fin_historiales_previos(self, orden):
+        if orden.horometro is None or not orden.maquinaria_id:
+            return
+
+        historiales_actuales = (
+            HistorialUbicacionItem.objects
+            .select_related("item_unidad__item")
+            .filter(
+                orden_trabajo=orden,
+                maquinaria=orden.maquinaria,
+                estado=ItemUnidad.Estado.USADO,
+            )
+            .order_by("fecha_inicio", "id")
+        )
+
+        historiales_previos_asignados = set()
+
+        for historial_actual in historiales_actuales:
+            historial_previo = (
+                HistorialUbicacionItem.objects
+                .filter(
+                    maquinaria=orden.maquinaria,
+                    estado=ItemUnidad.Estado.USADO,
+                    fecha_fin__isnull=False,
+                    horometro_inicio__isnull=False,
+                    horometro_fin__isnull=True,
+                    item_unidad__item=historial_actual.item_unidad.item,
+                )
+                .exclude(
+                    Q(pk=historial_actual.pk)
+                    | Q(orden_trabajo=orden)
+                    | Q(pk__in=historiales_previos_asignados)
+                )
+                .filter(
+                    Q(fecha_inicio__lt=historial_actual.fecha_inicio)
+                    | Q(
+                        fecha_inicio=historial_actual.fecha_inicio,
+                        id__lt=historial_actual.id,
+                    )
+                )
+                .order_by("-fecha_inicio", "-id")
+                .first()
+            )
+
+            if not historial_previo:
+                continue
+
+            historial_previo.horometro_fin = orden.horometro
+            historial_previo.save(update_fields=["horometro_fin"])
+            historiales_previos_asignados.add(historial_previo.pk)
+
+    def _autocompletar_horometro_fin_consumibles_previos(self, orden):
+        if orden.horometro is None or not orden.maquinaria_id:
+            return
+
+        item_ids = self._get_items_consumibles_registrados(orden)
+
+        for item_id in item_ids:
+            historial_previo = (
+                HistorialConsumible.objects
+                .filter(
+                    item_id=item_id,
+                    orden_trabajo__isnull=False,
+                    maquinaria=orden.maquinaria,
+                    trabajador__isnull=True,
+                    almacen__isnull=True,
+                    horometro_inicio__isnull=False,
+                    horometro_fin__isnull=True,
+                )
+                .exclude(
+                    Q(orden_trabajo=orden)
+                )
+                .filter(
+                    Q(orden_trabajo__fecha__lt=orden.fecha)
+                    | Q(
+                        orden_trabajo__fecha=orden.fecha,
+                        orden_trabajo_id__lt=orden.id,
+                    )
+                )
+                .order_by("-orden_trabajo__fecha", "-orden_trabajo_id", "-id")
+                .first()
+            )
+
+            if not historial_previo or not historial_previo.orden_trabajo_id:
+                continue
+
+            HistorialConsumible.objects.filter(
+                item_id=item_id,
+                orden_trabajo_id=historial_previo.orden_trabajo_id,
+                maquinaria=orden.maquinaria,
+                trabajador__isnull=True,
+                almacen__isnull=True,
+                horometro_fin__isnull=True,
+            ).update(horometro_fin=orden.horometro)
     
     def update(self, instance, validated_data):
         tecnicos = validated_data.pop("tecnicos", None)
@@ -1345,6 +1895,8 @@ class OrdenTrabajoSerializer(serializers.ModelSerializer):
         if tecnicos is not None:
             instance.tecnicos.set(tecnicos)
 
+        self.sincronizar_horometros_relacionados(instance)
+
         # 🔹 2️⃣ Detectar transición a FINALIZADO
         if (
             estatus_anterior != OrdenTrabajo.Estatus.FINALIZADO
@@ -1355,7 +1907,19 @@ class OrdenTrabajoSerializer(serializers.ModelSerializer):
         return instance
     
     def validate(self, data):
+        lugar = data.get("lugar", self.instance.lugar if self.instance else None)
+        ubicacion_detalle = data.get(
+            "ubicacion_detalle",
+            self.instance.ubicacion_detalle if self.instance else "",
+        )
         estatus = data.get("estatus", self.instance.estatus if self.instance else "PENDIENTE")
+
+        if lugar == OrdenTrabajo.Lugar.TALLER:
+            data["ubicacion_detalle"] = ""
+        elif lugar == OrdenTrabajo.Lugar.CAMPO and not str(ubicacion_detalle or "").strip():
+            raise serializers.ValidationError(
+                {"ubicacion_detalle": "Campo obligatorio cuando el trabajo se realiza en campo."}
+            )
 
         if estatus == "FINALIZADO":
             required = [
@@ -1519,10 +2083,93 @@ class GroupSerializer(serializers.ModelSerializer):
         model = Group
         fields = ["id", "name"]
 
+
+def serializar_ubicacion_item_unidad_actual(unidad):
+    historial_activo = (
+        unidad.historial
+        .select_related("almacen", "maquinaria", "trabajador")
+        .filter(fecha_fin__isnull=True)
+        .order_by("-fecha_inicio", "-id")
+        .first()
+    )
+
+    almacen = unidad.almacen_actual or (historial_activo.almacen if historial_activo else None)
+    maquinaria = unidad.maquinaria_actual or (historial_activo.maquinaria if historial_activo else None)
+    trabajador = unidad.trabajador_actual or (historial_activo.trabajador if historial_activo else None)
+
+    if not any([almacen, maquinaria, trabajador]):
+        return None
+
+    if almacen:
+        return {
+            "tipo": "ALMACEN",
+            "nombre": almacen.nombre,
+            "almacen": {
+                "id": almacen.id,
+                "nombre": almacen.nombre,
+            },
+            "maquinaria": None,
+            "trabajador": None,
+            "almacen_id": almacen.id,
+            "maquinaria_id": None,
+            "trabajador_id": None,
+            "fecha_inicio": historial_activo.fecha_inicio if historial_activo else None,
+            "fecha_fin": historial_activo.fecha_fin if historial_activo else None,
+            "horometro_inicio": historial_activo.horometro_inicio if historial_activo else None,
+            "horometro_fin": historial_activo.horometro_fin if historial_activo else None,
+        }
+
+    if maquinaria:
+        return {
+            "tipo": "MAQUINARIA",
+            "nombre": f"{maquinaria.codigo_maquina} - {maquinaria.nombre}",
+            "almacen": None,
+            "maquinaria": {
+                "id": maquinaria.id,
+                "codigo": maquinaria.codigo_maquina,
+                "codigo_maquina": maquinaria.codigo_maquina,
+                "nombre": maquinaria.nombre,
+            },
+            "trabajador": None,
+            "almacen_id": None,
+            "maquinaria_id": maquinaria.id,
+            "trabajador_id": None,
+            "fecha_inicio": historial_activo.fecha_inicio if historial_activo else None,
+            "fecha_fin": historial_activo.fecha_fin if historial_activo else None,
+            "horometro_inicio": historial_activo.horometro_inicio if historial_activo else None,
+            "horometro_fin": historial_activo.horometro_fin if historial_activo else None,
+        }
+
+    return {
+        "tipo": "TRABAJADOR",
+        "nombre": f"{trabajador.nombres} {trabajador.apellidos}".strip(),
+        "almacen": None,
+        "maquinaria": None,
+        "trabajador": {
+            "id": trabajador.id,
+            "codigo": trabajador.codigo,
+            "nombres": trabajador.nombres,
+            "apellidos": trabajador.apellidos,
+        },
+        "almacen_id": None,
+        "maquinaria_id": None,
+        "trabajador_id": trabajador.id,
+        "fecha_inicio": historial_activo.fecha_inicio if historial_activo else None,
+        "fecha_fin": historial_activo.fecha_fin if historial_activo else None,
+        "horometro_inicio": historial_activo.horometro_inicio if historial_activo else None,
+        "horometro_fin": historial_activo.horometro_fin if historial_activo else None,
+    }
+
+
 class HistorialUbicacionItemSerializer(serializers.ModelSerializer):
     tipo = serializers.SerializerMethodField()
     nombre = serializers.SerializerMethodField()
+    almacen = serializers.SerializerMethodField()
     maquinaria = serializers.SerializerMethodField()
+    trabajador = serializers.SerializerMethodField()
+    almacen_id = serializers.IntegerField(source="almacen.id", read_only=True, default=None)
+    maquinaria_id = serializers.IntegerField(source="maquinaria.id", read_only=True, default=None)
+    trabajador_id = serializers.IntegerField(source="trabajador.id", read_only=True, default=None)
     item_unidad = serializers.IntegerField(source="item_unidad.id", read_only=True)
     item_unidad_serie = serializers.CharField(source="item_unidad.serie", read_only=True)
     item_unidad_estado = serializers.CharField(source="item_unidad.estado", read_only=True)
@@ -1536,10 +2183,17 @@ class HistorialUbicacionItemSerializer(serializers.ModelSerializer):
             "item_unidad_estado",
             "tipo",
             "nombre",
+            "almacen",
             "maquinaria",
+            "trabajador",
+            "almacen_id",
+            "maquinaria_id",
+            "trabajador_id",
             "orden_trabajo",
             "fecha_inicio",
             "fecha_fin",
+            "horometro_inicio",
+            "horometro_fin",
         ]
 
     def get_tipo(self, obj):
@@ -1552,6 +2206,15 @@ class HistorialUbicacionItemSerializer(serializers.ModelSerializer):
 
     def get_nombre(self, obj):
         return str(obj.almacen or obj.maquinaria or obj.trabajador)
+
+    def get_almacen(self, obj):
+        if not obj.almacen:
+            return None
+
+        return {
+            "id": obj.almacen.id,
+            "nombre": obj.almacen.nombre,
+        }
     
     def get_maquinaria(self, obj):
         if not obj.maquinaria:
@@ -1562,6 +2225,17 @@ class HistorialUbicacionItemSerializer(serializers.ModelSerializer):
             "codigo": obj.maquinaria.codigo_maquina,
             "codigo_maquina": obj.maquinaria.codigo_maquina,
             "nombre": obj.maquinaria.nombre,
+        }
+
+    def get_trabajador(self, obj):
+        if not obj.trabajador:
+            return None
+
+        return {
+            "id": obj.trabajador.id,
+            "codigo": obj.trabajador.codigo,
+            "nombres": obj.trabajador.nombres,
+            "apellidos": obj.trabajador.apellidos,
         }
 
 
@@ -1587,6 +2261,7 @@ class HistorialConsumibleActivoSerializer(serializers.ModelSerializer):
             "maquinaria_id",
             "trabajador_id",
             "fecha_inicio",
+            "horometro_inicio",
         ]
 
     def get_tipo_ubicacion(self, obj):
@@ -1626,6 +2301,8 @@ class HistorialConsumibleHistorialSerializer(serializers.ModelSerializer):
             "orden_trabajo",
             "fecha_inicio",
             "fecha_fin",
+            "horometro_inicio",
+            "horometro_fin",
         ]
 
     def get_tipo_ubicacion(self, obj):
@@ -1661,21 +2338,14 @@ class ItemDetalleSerializer(serializers.ModelSerializer):
         data = []
 
         for u in obj.unidades.all():
-            ubicacion = (
-                u.historial
-                .filter(fecha_fin__isnull=True)
-                .order_by("-fecha_inicio")
-                .first()
-            )
-
             data.append({
                 "id": u.id,
                 "serie": u.serie,
                 "estado": u.estado,
-                "ubicacion_actual": (
-                    HistorialUbicacionItemSerializer(ubicacion).data
-                    if ubicacion else None
-                )
+                "almacen_actual_id": u.almacen_actual_id,
+                "trabajador_actual_id": u.trabajador_actual_id,
+                "maquinaria_actual_id": u.maquinaria_actual_id,
+                "ubicacion_actual": serializar_ubicacion_item_unidad_actual(u),
             })
 
         return data
@@ -1701,6 +2371,8 @@ class KardexUnidadSerializer(serializers.ModelSerializer):
             "orden_trabajo",
             "fecha_inicio",
             "fecha_fin",
+            "horometro_inicio",
+            "horometro_fin",
         ]
 
 class ItemProveedorSerializer(serializers.ModelSerializer):

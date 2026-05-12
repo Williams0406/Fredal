@@ -1,10 +1,32 @@
 "use client";
 
-import Link from "next/link";
 import Image from "next/image";
+import Link from "next/link";
 import { usePathname } from "next/navigation";
+import {
+  ArrowLeftRight,
+  BarChart3,
+  Building2,
+  ChevronLeft,
+  ChevronRight,
+  ClipboardList,
+  HardHat,
+  LayoutDashboard,
+  LogOut,
+  Package,
+  Ruler,
+  ShoppingCart,
+  Tractor,
+  Truck,
+  UserRound,
+  Users,
+  Warehouse,
+  X,
+} from "lucide-react";
 import { useAuth } from "@/context/AuthContext";
 import { MENU_ITEMS } from "@/config/menu";
+
+const ACCENT_COLOR = "#8FBF2F";
 
 export default function Sidebar({ collapsed, onToggle, onMobileClose }) {
   const pathname = usePathname();
@@ -17,240 +39,211 @@ export default function Sidebar({ collapsed, onToggle, onMobileClose }) {
     item.roles.some((role) => roles.includes(role))
   );
 
+  const expandedContentClass = collapsed ? "block md:hidden" : "block";
+  const expandedInlineFlexClass = collapsed
+    ? "inline-flex md:hidden"
+    : "inline-flex";
+
   return (
     <aside
       className={`
-        ${collapsed ? "w-20" : "w-72 md:w-64"}
-        h-screen
-        bg-[#1e3a8a] text-white
-        flex flex-col
+        ${collapsed ? "w-72 md:w-20" : "w-72 md:w-64"}
+        relative h-screen overflow-hidden
+        bg-[#0f2346] text-white
+        shadow-[0_28px_60px_rgba(15,35,70,0.38)]
         transition-all duration-300
-        /* Sombra extra en mobile para separar del overlay */
-        shadow-2xl md:shadow-none
       `}
     >
-      {/* ── Header / Logo ── */}
-      <div className="px-4 py-4 border-b border-white/10 flex items-center justify-between">
-        {!collapsed && (
-          <div className="flex items-center gap-3">
-            <img
-              src="/logo/logo.png"
-              alt="Fredal Logo"
-              className="w-20 h-20 rounded-md object-contain"
-            />
+      <div className="absolute inset-0 bg-[radial-gradient(circle_at_top_left,rgba(255,255,255,0.08),transparent_34%),radial-gradient(circle_at_bottom_right,rgba(143,191,47,0.16),transparent_28%),linear-gradient(180deg,#0f2346_0%,#173569_100%)]" />
 
-            {!collapsed && (
-              <div>
-                <h1 className="text-xl font-bold tracking-wide">FREDAL</h1>
-                <p className="text-xs text-white/50 font-medium">
-                  Peruvian Group
+      <div className="absolute inset-y-0 right-0 w-px bg-white/8" />
+
+      <div className="relative flex h-full flex-col">
+        <div className="border-b border-white/10 px-4 py-5">
+          <div
+            className={`flex ${
+              collapsed
+                ? "items-center justify-between md:flex-col md:justify-start md:gap-4"
+                : "items-center justify-between gap-3"
+            }`}
+          >
+            <Link
+              href="/dashboard"
+              className={`flex min-w-0 items-center gap-3 ${
+                collapsed ? "md:flex-col md:gap-2" : ""
+              }`}
+              onClick={onMobileClose}
+            >
+              <div className="relative flex h-14 w-14 shrink-0 items-center justify-center overflow-hidden rounded-[22px] bg-white/95 ring-1 ring-white/10 shadow-[0_12px_24px_rgba(15,35,70,0.18)]">
+                <img
+                  src="/logo/logo.png"
+                  alt="Fredal Logo"
+                  className="object-contain p-2 w-full h-full"
+                />
+              </div>
+
+              <div className={`${expandedContentClass} min-w-0`}>
+                <p className="text-[11px] font-semibold uppercase tracking-[0.28em] text-white/44">
+                  Workspace
+                </p>
+                <p className="mt-1 text-xs font-semibold uppercase tracking-[0.28em] text-white/78">
+                  Fredal Workspace
                 </p>
               </div>
-            )}
-          </div>
-        )}
-
-        <div className="flex items-center gap-1 ml-auto">
-          {/* Botón cerrar drawer — solo mobile */}
-          {onMobileClose && (
-            <button
-              onClick={onMobileClose}
-              className="
-                md:hidden
-                p-2 rounded-lg hover:bg-white/10 active:bg-white/20
-                transition-colors duration-150
-              "
-              aria-label="Cerrar menú"
-            >
-              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5}
-                  d="M6 18L18 6M6 6l12 12" />
-              </svg>
-            </button>
-          )}
-
-          {/* Botón colapsar — solo desktop */}
-          <button
-            onClick={onToggle}
-            className="
-              hidden md:flex
-              p-2 rounded-lg hover:bg-white/10
-              transition-colors duration-150
-            "
-            aria-label={collapsed ? "Expandir menú" : "Colapsar menú"}
-          >
-            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
-                d={collapsed ? "M9 5l7 7-7 7" : "M15 19l-7-7 7-7"} />
-            </svg>
-          </button>
-        </div>
-      </div>
-
-      {/* ── Navegación ── */}
-      <nav className="flex-1 px-2 py-4 space-y-0.5 overflow-y-auto">
-        {menuItems.map((item) => {
-          const isActive =
-            pathname === item.path || pathname.startsWith(item.path + "/");
-
-          return (
-            <Link
-              key={item.path}
-              href={item.path}
-              onClick={onMobileClose} // Cierra el drawer al navegar en mobile
-              className={`
-                flex items-center gap-3 rounded-xl
-                /* Mobile: tap targets más grandes */
-                px-3 py-3.5 md:py-3
-                text-sm font-medium
-                transition-all duration-150
-                active:scale-[0.98]
-                ${isActive
-                  ? "bg-white/15 text-white shadow-sm"
-                  : "text-white/70 hover:bg-white/10 hover:text-white"
-                }
-              `}
-            >
-              {/* Indicador activo — barra izquierda */}
-              {isActive && (
-                <span className="absolute left-0 w-1 h-8 bg-[#84cc16] rounded-r-full" />
-              )}
-
-              {/* Ícono */}
-              <div className="w-5 h-5 flex-shrink-0">
-                {getIconForPath(item.path)}
-              </div>
-
-              {/* Texto */}
-              {!collapsed && (
-                <span className="flex-1 truncate">{item.label}</span>
-              )}
-
-              {/* Punto verde activo (desktop colapsado) */}
-              {isActive && collapsed && (
-                <div className="absolute right-2 w-1.5 h-1.5 bg-[#84cc16] rounded-full" />
-              )}
             </Link>
-          );
-        })}
-      </nav>
 
-      {/* ── Footer usuario ── */}
-      <div className="border-t border-white/10 px-3 py-4">
-        <div className="flex items-center gap-3">
-          {/* Avatar */}
-          <div className="
-            w-9 h-9 flex-shrink-0
-            bg-white/15 rounded-lg
-            flex items-center justify-center
-            text-sm font-bold
-          ">
-            {user.username?.charAt(0).toUpperCase()}
+            <div
+              className={`flex items-center gap-2 ${
+                collapsed ? "md:w-full md:justify-center" : ""
+              }`}
+            >
+              {onMobileClose ? (
+                <button
+                  type="button"
+                  onClick={onMobileClose}
+                  className="rounded-2xl border border-white/10 bg-white/6 p-2.5 text-white/72 transition hover:bg-white/10 hover:text-white md:hidden"
+                  aria-label="Cerrar menu"
+                >
+                  <X className="h-5 w-5" strokeWidth={2.2} />
+                </button>
+              ) : null}
+
+              <button
+                type="button"
+                onClick={onToggle}
+                className="hidden rounded-2xl border border-white/10 bg-white/6 p-2.5 text-white/72 transition hover:bg-white/10 hover:text-white md:flex"
+                aria-label={collapsed ? "Expandir menu" : "Colapsar menu"}
+              >
+                {collapsed ? (
+                  <ChevronRight className="h-5 w-5" strokeWidth={2.2} />
+                ) : (
+                  <ChevronLeft className="h-5 w-5" strokeWidth={2.2} />
+                )}
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <div className="flex-1 overflow-hidden px-3 py-5">
+          <div
+            className={`${expandedContentClass} px-3 pb-3 text-[11px] font-semibold uppercase tracking-[0.24em] text-white/38`}
+          >
+            Navegacion
           </div>
 
-          {!collapsed && (
-            <>
-              <div className="min-w-0 flex-1">
-                <p className="text-sm font-semibold truncate">{user.username}</p>
-                <p className="text-xs text-white/50 truncate">{user.roles?.[0]}</p>
-              </div>
+          <div className="relative h-full overflow-hidden rounded-[28px] border border-white/8 bg-[linear-gradient(180deg,rgba(255,255,255,0.06),rgba(255,255,255,0.02))] shadow-[inset_0_1px_0_rgba(255,255,255,0.06)]">
+            <div className="pointer-events-none absolute inset-x-0 top-0 h-7 bg-[linear-gradient(180deg,rgba(15,35,70,0.92),rgba(15,35,70,0))]" />
+            <div className="pointer-events-none absolute inset-x-0 bottom-0 h-7 bg-[linear-gradient(0deg,rgba(15,35,70,0.95),rgba(15,35,70,0))]" />
 
-              {/* Logout inline en mobile (dentro del sidebar/drawer) */}
-              <button
-                onClick={logout}
-                className="
-                  md:hidden
-                  p-2 rounded-lg text-white/60
-                  hover:bg-white/10 active:bg-white/20
-                  transition-colors duration-150 flex-shrink-0
-                "
-                aria-label="Cerrar sesión"
-              >
-                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
-                    d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1" />
-                </svg>
-              </button>
-            </>
-          )}
+            <nav className="sidebar-scroll h-full space-y-1.5 overflow-y-auto px-2.5 py-3 pr-2">
+              {menuItems.map((item) => {
+                const isActive =
+                  pathname === item.path ||
+                  pathname.startsWith(item.path + "/");
+                const Icon = getIconForPath(item.path);
+
+                return (
+                  <Link
+                    key={item.path}
+                    href={item.path}
+                    title={collapsed ? item.label : undefined}
+                    aria-current={isActive ? "page" : undefined}
+                    onClick={onMobileClose}
+                    className={`
+                      group relative flex min-h-[54px] items-center rounded-[22px] border
+                      transition-all duration-200
+                      ${
+                        collapsed
+                          ? "gap-3 px-3 md:justify-center md:px-0"
+                          : "gap-3 px-3"
+                      }
+                      ${
+                        isActive
+                          ? "border-white/16 bg-white text-[#12233D] shadow-[0_18px_34px_rgba(11,28,56,0.18)]"
+                          : "border-transparent text-white/68 hover:border-white/10 hover:bg-white/8 hover:text-white"
+                      }
+                    `}
+                  >
+                    {isActive ? (
+                      <span
+                        className={`
+                          absolute rounded-full
+                          ${
+                            collapsed
+                              ? "left-1.5 top-1/2 h-8 w-1 -translate-y-1/2 md:left-auto md:right-2 md:h-1.5 md:w-1.5"
+                              : "left-1.5 top-1/2 h-8 w-1 -translate-y-1/2"
+                          }
+                        `}
+                        style={{ backgroundColor: ACCENT_COLOR }}
+                      />
+                    ) : null}
+
+                    <span
+                      className={`
+                        flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl
+                        transition-colors duration-200
+                        ${
+                          isActive
+                            ? "bg-[#EAF1FF] text-[#173569]"
+                            : "bg-white/8 text-white/78 group-hover:bg-white/12 group-hover:text-white"
+                        }
+                      `}
+                    >
+                      <Icon className="h-5 w-5" strokeWidth={2.1} />
+                    </span>
+
+                    <span
+                      className={`${expandedContentClass} min-w-0 flex-1 truncate text-sm font-semibold`}
+                    >
+                      {item.label}
+                    </span>
+                  </Link>
+                );
+              })}
+            </nav>
+          </div>
+        </div>
+
+        <div className="border-t border-white/10 p-3">
+          <button
+            type="button"
+            onClick={logout}
+            className={`
+              flex items-center justify-center gap-2 rounded-[20px] border border-white/10
+              bg-white/6 text-white transition hover:bg-white/12
+              shadow-[inset_0_1px_0_rgba(255,255,255,0.05)]
+              ${
+                collapsed
+                  ? "w-full px-3 py-3 md:mx-auto md:h-11 md:w-11 md:px-0"
+                  : "w-full px-3 py-3"
+              }
+            `}
+            aria-label="Cerrar sesion"
+          >
+            <LogOut className="h-4.5 w-4.5" strokeWidth={2.1} />
+            <span className={`${expandedContentClass} text-sm font-semibold`}>
+              Cerrar sesion
+            </span>
+          </button>
         </div>
       </div>
     </aside>
   );
 }
 
-// ── Íconos SVG por ruta ──
 function getIconForPath(path) {
-  const cls = "w-5 h-5";
-
-  if (path === "/dashboard")
-    return (
-      <svg className={cls} fill="none" stroke="currentColor" viewBox="0 0 24 24">
-        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
-          d="M4 5a1 1 0 011-1h4a1 1 0 011 1v7a1 1 0 01-1 1H5a1 1 0 01-1-1V5zM14 5a1 1 0 011-1h4a1 1 0 011 1v7a1 1 0 01-1 1h-4a1 1 0 01-1-1V5zM4 16a1 1 0 011-1h4a1 1 0 011 1v3a1 1 0 01-1 1H5a1 1 0 01-1-1v-3zM14 16a1 1 0 011-1h4a1 1 0 011 1v3a1 1 0 01-1 1h-4a1 1 0 01-1-1v-3z" />
-      </svg>
-    );
-
-  if (path.includes("trabajo"))
-    return (
-      <svg className={cls} fill="none" stroke="currentColor" viewBox="0 0 24 24">
-        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
-          d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-3 7h3m-3 4h3m-6-4h.01M9 16h.01" />
-      </svg>
-    );
-
-  if (path.includes("item") || path.includes("almacen"))
-    return (
-      <svg className={cls} fill="none" stroke="currentColor" viewBox="0 0 24 24">
-        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
-          d="M20 7l-8-4-8 4m16 0l-8 4m8-4v10l-8 4m0-10L4 7m8 4v10M4 7v10l8 4" />
-      </svg>
-    );
-
-  if (path.includes("compra"))
-    return (
-      <svg className={cls} fill="none" stroke="currentColor" viewBox="0 0 24 24">
-        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
-          d="M3 3h2l.4 2M7 13h10l4-8H5.4M7 13L5.4 5M7 13l-2.293 2.293c-.63.63-.184 1.707.707 1.707H17m0 0a2 2 0 100 4 2 2 0 000-4zm-8 2a2 2 0 11-4 0 2 2 0 014 0z" />
-      </svg>
-    );
-
-  if (path.includes("maquinaria"))
-    return (
-      <svg className={cls} fill="none" stroke="currentColor" viewBox="0 0 24 24">
-        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
-          d="M19.428 15.428a2 2 0 00-1.022-.547l-2.387-.477a6 6 0 00-3.86.517l-.318.158a6 6 0 01-3.86.517L6.05 15.21a2 2 0 00-1.806.547M8 4h8l-1 1v5.172a2 2 0 00.586 1.414l5 5c1.26 1.26.367 3.414-1.415 3.414H4.828c-1.782 0-2.674-2.154-1.414-3.414l5-5A2 2 0 009 10.172V5L8 4z" />
-      </svg>
-    );
-
-  if (path.includes("trabajador") || path.includes("user"))
-    return (
-      <svg className={cls} fill="none" stroke="currentColor" viewBox="0 0 24 24">
-        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
-          d="M12 4.354a4 4 0 110 5.292M15 21H3v-1a6 6 0 0112 0v1zm0 0h6v-1a6 6 0 00-9-5.197M13 7a4 4 0 11-8 0 4 4 0 018 0z" />
-      </svg>
-    );
-
-  if (path.includes("cambio"))
-    return (
-      <svg className={cls} fill="none" stroke="currentColor" viewBox="0 0 24 24">
-        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
-          d="M8 7h12m0 0l-4-4m4 4l-4 4m0 6H4m0 0l4 4m-4-4l4-4" />
-      </svg>
-    );
-
-  if (path.includes("sync") || path.includes("import"))
-    return (
-      <svg className={cls} fill="none" stroke="currentColor" viewBox="0 0 24 24">
-        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
-          d="M4 17v2a1 1 0 001 1h14a1 1 0 001-1v-2M7 9l5-5m0 0l5 5m-5-5v12M17 15l-5 5m0 0l-5-5m5 5V8" />
-      </svg>
-    );
-
-  return (
-    <svg className={cls} fill="none" stroke="currentColor" viewBox="0 0 24 24">
-      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
-        d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
-    </svg>
-  );
+  if (path === "/dashboard") return LayoutDashboard;
+  if (path.includes("trabajo")) return ClipboardList;
+  if (path.includes("compra")) return ShoppingCart;
+  if (path.includes("proveedor")) return Truck;
+  if (path.includes("almacen") || path.includes("item")) return Warehouse;
+  if (path.includes("cliente")) return Building2;
+  if (path.includes("unidad")) return Ruler;
+  if (path.includes("sync") || path.includes("import")) return ArrowLeftRight;
+  if (path.includes("maquinaria")) return Tractor;
+  if (path.includes("gestion")) return BarChart3;
+  if (path.includes("trabajador")) return HardHat;
+  if (path.includes("usuario")) return UserRound;
+  if (path.includes("user")) return Users;
+  return Package;
 }

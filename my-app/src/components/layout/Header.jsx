@@ -1,206 +1,144 @@
 "use client";
 
-import { useState } from "react";
+import { useMemo } from "react";
+import { usePathname } from "next/navigation";
+import { CalendarDays, Menu, ShieldCheck } from "lucide-react";
 import { useAuth } from "@/context/AuthContext";
+import { MENU_ITEMS } from "@/config/menu";
+
+const HEADER_META = {
+  "/dashboard": {
+    eyebrow: "Vista general",
+    description: "Supervisa el rendimiento operativo y entra rapido a los modulos clave.",
+  },
+  "/trabajos": {
+    eyebrow: "Operacion tecnica",
+    description: "Gestiona ordenes, avances y cierres con contexto claro de ejecucion.",
+  },
+  "/compras": {
+    eyebrow: "Abastecimiento",
+    description: "Controla solicitudes, ordenes y seguimiento de compra desde un solo flujo.",
+  },
+  "/proveedores": {
+    eyebrow: "Red comercial",
+    description: "Consulta proveedores y mantén sus datos listos para compras y abastecimiento.",
+  },
+  "/almacen": {
+    eyebrow: "Inventario",
+    description: "Revisa stock, movimientos y disponibilidad con foco operativo.",
+  },
+  "/clientes": {
+    eyebrow: "Relacion comercial",
+    description: "Accede rapido al contexto de clientes y ubicaciones asociadas.",
+  },
+  "/unidades": {
+    eyebrow: "Parametros base",
+    description: "Administra unidades y referencias que sostienen el catalogo tecnico.",
+  },
+  "/catalogo-sync": {
+    eyebrow: "Intercambio de datos",
+    description: "Importa y exporta informacion critica sin salir del entorno de gestion.",
+  },
+  "/maquinaria": {
+    eyebrow: "Parque de equipos",
+    description: "Consulta el estado de cada maquinaria y su contexto de mantenimiento.",
+  },
+  "/gestion": {
+    eyebrow: "Analitica operativa",
+    description: "Explora indicadores, matrices y curvas para tomar mejores decisiones.",
+  },
+  "/trabajadores": {
+    eyebrow: "Equipo interno",
+    description: "Visualiza y organiza al personal con una capa de administracion clara.",
+  },
+  "/usuarios": {
+    eyebrow: "Acceso y permisos",
+    description: "Gestiona cuentas y roles con una lectura mas limpia del entorno.",
+  },
+};
 
 export default function Header({ onMenuToggle }) {
-  const { user, logout } = useAuth();
-  const [searchQuery, setSearchQuery] = useState("");
-  const [searchOpen, setSearchOpen] = useState(false);
+  const pathname = usePathname();
+  const { user } = useAuth();
 
-  const handleSearch = (e) => {
-    e.preventDefault();
-    console.log("Búsqueda:", searchQuery);
+  const currentItem = useMemo(() => {
+    return [...MENU_ITEMS]
+      .sort((a, b) => b.path.length - a.path.length)
+      .find(
+        (item) => pathname === item.path || pathname.startsWith(item.path + "/")
+      );
+  }, [pathname]);
+
+  const title = currentItem?.label || "Panel";
+  const meta = HEADER_META[currentItem?.path] || {
+    eyebrow: "Fredal Workspace",
+    description: "Navega el sistema con una vista mas clara y enfocada en el contexto actual.",
+  };
+
+  const todayLabel = useMemo(() => {
+    return new Intl.DateTimeFormat("es-PE", {
+      day: "numeric",
+      month: "long",
+      year: "numeric",
+    }).format(new Date());
+  }, []);
+
+  return (
+    <header className="sticky top-0 z-10 border-b border-slate-200/80 bg-[rgba(243,246,251,0.88)] backdrop-blur-xl">
+      <div className="flex min-h-[88px] items-center justify-between gap-4 px-4 py-4 md:px-6">
+        <div className="flex min-w-0 items-start gap-3">
+          <button
+            type="button"
+            onClick={onMenuToggle}
+            className="mt-0.5 rounded-2xl border border-slate-200 bg-white p-2.5 text-[#173569] shadow-sm transition hover:border-slate-300 hover:bg-slate-50 md:hidden"
+            aria-label="Abrir menu"
+          >
+            <Menu className="h-5 w-5" strokeWidth={2.3} />
+          </button>
+
+          <div className="min-w-0">
+            <p className="text-[11px] font-semibold uppercase tracking-[0.24em] text-[#5F6C80]">
+              {meta.eyebrow}
+            </p>
+            <h2 className="mt-1 truncate text-2xl font-bold tracking-tight text-[#12233D]">
+              {title}
+            </h2>
+            <p className="mt-1 hidden max-w-2xl text-sm leading-6 text-[#5F6C80] md:block">
+              {meta.description}
+            </p>
+          </div>
+        </div>
+
+        <div className="flex shrink-0 items-center gap-2 md:gap-3">
+          <HeaderChip
+            icon={ShieldCheck}
+            label={user?.roles?.[0] || "Usuario"}
+            tone="navy"
+          />
+          <HeaderChip
+            icon={CalendarDays}
+            label={todayLabel}
+            tone="neutral"
+            className="hidden sm:inline-flex"
+          />
+        </div>
+      </div>
+    </header>
+  );
+}
+
+function HeaderChip({ icon: Icon, label, tone = "neutral", className = "" }) {
+  const tones = {
+    navy: "border-[#D9E2EF] bg-white text-[#173569]",
+    neutral: "border-transparent bg-[#EAF1FF] text-[#173569]",
   };
 
   return (
-    <header className="h-14 md:h-16 bg-white border-b border-gray-200 flex items-center justify-between px-3 md:px-6 sticky top-0 z-10">
-
-      {/* ── LEFT: Hamburger (mobile) + Título ── */}
-      <div className="flex items-center gap-2 flex-1 min-w-0">
-
-        {/* Botón hamburguesa — solo visible en mobile */}
-        <button
-          onClick={onMenuToggle}
-          className="
-            md:hidden
-            p-2 -ml-1 rounded-lg
-            text-[#1e3a8a] hover:bg-blue-50
-            active:bg-blue-100
-            transition-colors duration-150
-            flex-shrink-0
-          "
-          aria-label="Abrir menú"
-        >
-          <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5}
-              d="M4 6h16M4 12h16M4 18h16" />
-          </svg>
-        </button>
-
-        {/* Título — compacto en mobile */}
-        <div className="min-w-0">
-          <h2 className="text-sm md:text-lg font-bold text-[#1e3a8a] leading-none truncate">
-            Sistema de Gestión
-          </h2>
-          {user && (
-            <p className="text-[11px] text-gray-500 mt-0.5 hidden sm:block">
-              Sesión activa:{" "}
-              <span className="font-semibold text-gray-700">{user.username}</span>
-            </p>
-          )}
-        </div>
-      </div>
-
-      {/* ── CENTER: Búsqueda — solo desktop ── */}
-      <div className="flex-1 max-w-md mx-6 hidden md:block">
-        <form onSubmit={handleSearch}>
-          <div className="relative">
-            <svg
-              className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400"
-              fill="none" stroke="currentColor" viewBox="0 0 24 24"
-            >
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
-                d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
-            </svg>
-            <input
-              type="text"
-              placeholder="Buscar maquinaria, trabajos, items..."
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              className="
-                w-full pl-10 pr-4 py-2 text-sm
-                border border-gray-300 rounded-lg
-                focus:outline-none focus:ring-2 focus:ring-[#1e3a8a] focus:border-transparent
-                transition-all duration-200 placeholder:text-gray-400
-              "
-            />
-          </div>
-        </form>
-      </div>
-
-      {/* ── RIGHT: Acciones ── */}
-      <div className="flex items-center gap-1.5 md:gap-3 flex-shrink-0">
-
-        {/* Búsqueda móvil — ícono que expande */}
-        <button
-          className="
-            md:hidden
-            p-2 rounded-lg text-gray-500
-            hover:bg-gray-100 active:bg-gray-200
-            transition-colors duration-150
-          "
-          onClick={() => setSearchOpen(!searchOpen)}
-          aria-label="Buscar"
-        >
-          <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
-              d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
-          </svg>
-        </button>
-
-        {/* Notificaciones */}
-        <button
-          className="
-            relative p-2 rounded-lg
-            text-gray-400 hover:text-gray-600
-            hover:bg-gray-100 active:bg-gray-200
-            transition-colors duration-150
-          "
-          aria-label="Notificaciones"
-        >
-          <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
-              d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9" />
-          </svg>
-          {/* Badge verde */}
-          <span className="absolute top-1.5 right-1.5 w-2 h-2 bg-[#84cc16] rounded-full ring-2 ring-white" />
-        </button>
-
-        {/* Separador — solo desktop */}
-        <div className="hidden md:block w-px h-8 bg-gray-200" />
-
-        {/* Rol — solo desktop */}
-        <div className="hidden md:block text-right">
-          <p className="text-sm font-medium text-gray-900">
-            {user?.roles?.[0] || "Usuario"}
-          </p>
-          <p className="text-xs text-gray-500">Rol principal</p>
-        </div>
-
-        {/* Avatar con iniciales */}
-        <div className="
-          w-8 h-8 md:w-9 md:h-9
-          bg-[#1e3a8a] text-white rounded-lg
-          flex items-center justify-center
-          text-sm font-bold flex-shrink-0
-        ">
-          {user?.username?.charAt(0).toUpperCase() || "U"}
-        </div>
-
-        {/* Cerrar sesión — texto en desktop, ícono en mobile */}
-        <button
-          onClick={logout}
-          className="
-            hidden sm:flex
-            items-center gap-1.5
-            px-3 py-2 text-sm font-medium
-            text-gray-700 bg-gray-100 border border-gray-300 rounded-lg
-            hover:bg-gray-200 active:bg-gray-300
-            focus:outline-none focus:ring-2 focus:ring-[#1e3a8a] focus:ring-offset-1
-            transition-colors duration-150
-          "
-          aria-label="Cerrar sesión"
-        >
-          <svg className="w-4 h-4 text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
-              d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1" />
-          </svg>
-          <span className="hidden md:inline">Cerrar sesión</span>
-        </button>
-      </div>
-
-      {/* ── Barra de búsqueda expandida en mobile ── */}
-      {searchOpen && (
-        <div className="
-          md:hidden
-          absolute top-14 left-0 right-0
-          bg-white border-b border-gray-200
-          px-4 py-3 z-20
-          shadow-md
-        ">
-          <form onSubmit={(e) => { handleSearch(e); setSearchOpen(false); }}>
-            <div className="relative">
-              <svg className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400"
-                fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
-                  d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
-              </svg>
-              <input
-                type="text"
-                placeholder="Buscar maquinaria, trabajos, items..."
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
-                autoFocus
-                className="
-                  w-full pl-10 pr-10 py-2.5 text-sm
-                  border border-gray-300 rounded-lg
-                  focus:outline-none focus:ring-2 focus:ring-[#1e3a8a] focus:border-transparent
-                "
-              />
-              <button
-                type="button"
-                onClick={() => setSearchOpen(false)}
-                className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600"
-              >
-                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                </svg>
-              </button>
-            </div>
-          </form>
-        </div>
-      )}
-    </header>
+    <div
+      className={`inline-flex items-center gap-2 rounded-full border px-3 py-2 text-sm font-semibold shadow-sm ${tones[tone]} ${className}`}
+    >
+      <Icon className="h-4 w-4" strokeWidth={2.2} />
+      <span className="max-w-[12rem] truncate">{label}</span>
+    </div>
   );
 }

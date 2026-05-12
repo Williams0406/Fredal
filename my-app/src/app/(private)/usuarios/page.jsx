@@ -42,14 +42,6 @@ export default function UsuariosPage() {
     load();
   }, []);
 
-  // Estadísticas rápidas
-  const stats = {
-    total: users.length,
-    activos: users.filter((u) => u.is_active).length,
-    inactivos: users.filter((u) => !u.is_active).length,
-    conRol: users.filter((u) => u.roles && u.roles.length > 0).length,
-  };
-
   // Obtener badge de rol
   const getRoleBadge = (userRoles) => {
     if (!userRoles || userRoles.length === 0) {
@@ -81,7 +73,7 @@ export default function UsuariosPage() {
   return (
     <div className="min-h-screen bg-gray-50">
       {/* HEADER */}
-      <div className="flex items-center justify-between">
+      <div className="hidden">
         <div>
           <h1 className="text-2xl font-semibold text-[#1e3a8a]">
             Usuarios del sistema
@@ -94,85 +86,6 @@ export default function UsuariosPage() {
 
       {/* CONTENIDO PRINCIPAL */}
       <div className="px-8 py-6 space-y-6">
-        {/* CARDS DE ESTADÍSTICAS */}
-        <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
-          {/* Total usuarios */}
-          <div className="bg-white rounded-xl border border-gray-200 p-6 shadow-sm">
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-[13px] font-medium text-gray-500 uppercase tracking-wide">
-                  Total Usuarios
-                </p>
-                <p className="text-[32px] font-semibold text-[#1e3a5f] mt-2">
-                  {stats.total}
-                </p>
-              </div>
-              <div className="w-12 h-12 bg-blue-50 rounded-lg flex items-center justify-center">
-                <svg className="w-6 h-6 text-[#1e3a5f]" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4.354a4 4 0 110 5.292M15 21H3v-1a6 6 0 0112 0v1zm0 0h6v-1a6 6 0 00-9-5.197M13 7a4 4 0 11-8 0 4 4 0 018 0z" />
-                </svg>
-              </div>
-            </div>
-          </div>
-
-          {/* Activos */}
-          <div className="bg-white rounded-xl border border-gray-200 p-6 shadow-sm">
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-[13px] font-medium text-gray-500 uppercase tracking-wide">
-                  Activos
-                </p>
-                <p className="text-[32px] font-semibold text-[#84cc16] mt-2">
-                  {stats.activos}
-                </p>
-              </div>
-              <div className="w-12 h-12 bg-green-50 rounded-lg flex items-center justify-center">
-                <svg className="w-6 h-6 text-[#84cc16]" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
-                </svg>
-              </div>
-            </div>
-          </div>
-
-          {/* Inactivos */}
-          <div className="bg-white rounded-xl border border-gray-200 p-6 shadow-sm">
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-[13px] font-medium text-gray-500 uppercase tracking-wide">
-                  Inactivos
-                </p>
-                <p className="text-[32px] font-semibold text-gray-400 mt-2">
-                  {stats.inactivos}
-                </p>
-              </div>
-              <div className="w-12 h-12 bg-gray-100 rounded-lg flex items-center justify-center">
-                <svg className="w-6 h-6 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M18.364 18.364A9 9 0 005.636 5.636m12.728 12.728A9 9 0 015.636 5.636m12.728 12.728L5.636 5.636" />
-                </svg>
-              </div>
-            </div>
-          </div>
-
-          {/* Con rol */}
-          <div className="bg-white rounded-xl border border-gray-200 p-6 shadow-sm">
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-[13px] font-medium text-gray-500 uppercase tracking-wide">
-                  Con Rol
-                </p>
-                <p className="text-[32px] font-semibold text-[#1e3a5f] mt-2">
-                  {stats.conRol}
-                </p>
-              </div>
-              <div className="w-12 h-12 bg-blue-50 rounded-lg flex items-center justify-center">
-                <svg className="w-6 h-6 text-[#1e3a5f]" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4M7.835 4.697a3.42 3.42 0 001.946-.806 3.42 3.42 0 014.438 0 3.42 3.42 0 001.946.806 3.42 3.42 0 013.138 3.138 3.42 3.42 0 00.806 1.946 3.42 3.42 0 010 4.438 3.42 3.42 0 00-.806 1.946 3.42 3.42 0 01-3.138 3.138 3.42 3.42 0 00-1.946.806 3.42 3.42 0 01-4.438 0 3.42 3.42 0 00-1.946-.806 3.42 3.42 0 01-3.138-3.138 3.42 3.42 0 00-.806-1.946 3.42 3.42 0 010-4.438 3.42 3.42 0 00.806-1.946 3.42 3.42 0 013.138-3.138z" />
-                </svg>
-              </div>
-            </div>
-          </div>
-        </div>
-
         {/* TABLA DE USUARIOS */}
         <div className="bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden">
           {/* Header de tabla */}

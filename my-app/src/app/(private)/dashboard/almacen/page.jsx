@@ -20,7 +20,7 @@
 
 import { useState, useEffect } from "react";
 import {
-  itemAPI, trabajoAPI, actividadTrabajoAPI,
+  itemAPI, trabajoAPI,
   movimientoConsumibleAPI,
 } from "@/lib/api";
 import {
@@ -48,13 +48,7 @@ export default function AlmacenDashboard() {
           movimientoConsumibleAPI.list({ page_size: 500 }).then(r => r.data?.results ?? r.data ?? []),
         ]);
         setItems(its); setTrabajos(tjs); setMovCons(mvC);
-        const acts = await Promise.all(
-          tjs.slice(0, 50).map(t =>
-            actividadTrabajoAPI.listByTrabajo(t.id)
-              .then(r => r.data?.results ?? r.data ?? []).catch(() => [])
-          )
-        );
-        setActividades(acts.flat());
+        setActividades(tjs.flatMap(t => t.actividades ?? []));
       } catch (e) { console.error(e); }
       finally { setLoading(false); }
     })();

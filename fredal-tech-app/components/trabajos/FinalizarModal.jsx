@@ -10,6 +10,7 @@ import {
 import { Ionicons } from '@expo/vector-icons';
 import { useFinalizarTrabajo } from '../../hooks/useTrabajos';
 import AppSheet from '../ui/AppSheet';
+import AppTextArea from '../ui/AppTextArea';
 import { colors, radius } from '../../lib/theme';
 
 const ESTADOS_EQUIPO = [
@@ -105,6 +106,7 @@ export default function FinalizarModal({ trabajo, onClose, onFinalizado }) {
     hora_fin: toTimeParts(trabajo?.hora_fin || ''),
     horometro: trabajo?.horometro ? String(trabajo.horometro) : '',
     estado_equipo: trabajo?.estado_equipo || '',
+    observaciones: trabajo?.observaciones || '',
   });
   const [error, setError] = useState('');
 
@@ -185,6 +187,7 @@ export default function FinalizarModal({ trabajo, onClose, onFinalizado }) {
           hora_fin: horaFin,
           horometro: Number(form.horometro),
           estado_equipo: form.estado_equipo,
+          observaciones: form.observaciones?.trim() || '',
         },
       },
       {
@@ -315,6 +318,19 @@ export default function FinalizarModal({ trabajo, onClose, onFinalizado }) {
             );
           })}
         </View>
+      </View>
+
+      <View style={styles.block}>
+        <AppTextArea
+          label='Observacion'
+          value={form.observaciones}
+          onChange={(value) => handleChange('observaciones', value)}
+          placeholder='Describe el cierre de la orden, hallazgos finales o notas importantes...'
+          rows={4}
+        />
+        <Text style={styles.helperText}>
+          Esta observacion quedara guardada en la orden de trabajo al finalizarla.
+        </Text>
       </View>
     </AppSheet>
   );

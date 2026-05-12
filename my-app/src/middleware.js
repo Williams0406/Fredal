@@ -56,7 +56,7 @@ export function middleware(request) {
 
   if (PUBLIC_ROUTES.includes(pathname)) {
     // Si está logueado, no dejar volver al login
-    if (token && pathname === "/login") {
+    if (token && (pathname === "/" || pathname === "/login")) {
       return redirectByRole(token, request);
     }
     return NextResponse.next();
@@ -67,7 +67,7 @@ export function middleware(request) {
   ========================= */
 
   if (!token) {
-    return NextResponse.redirect(new URL("/login", request.url));
+    return NextResponse.redirect(new URL("/", request.url));
   }
 
   /* =========================
@@ -77,7 +77,7 @@ export function middleware(request) {
   try {
     jwtDecode(token);
   } catch (error) {
-    return NextResponse.redirect(new URL("/login", request.url));
+    return NextResponse.redirect(new URL("/", request.url));
   }
 
   /* =========================
@@ -99,7 +99,7 @@ function redirectByRole(token, request) {
     );
   } catch {
     return NextResponse.redirect(
-      new URL("/login", request.url)
+      new URL("/", request.url)
     );
   }
 }

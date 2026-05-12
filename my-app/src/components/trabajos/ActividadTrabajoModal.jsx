@@ -161,13 +161,14 @@ export default function ActividadTrabajoModal({
   ========================= */
   return (
     <div
-      className="fixed inset-0 bg-black/40 flex items-center justify-center z-[60] p-4"
+      className="fixed inset-0 z-[60] overflow-y-auto bg-black/40"
       onClick={onClose}
     >
-      <div
-        className="bg-white rounded-xl w-full max-w-lg"
-        onClick={(e) => e.stopPropagation()}
-      >
+      <div className="flex min-h-full items-start justify-center p-4 sm:items-center">
+        <div
+          className="flex max-h-[calc(100dvh-2rem)] w-full max-w-lg flex-col overflow-hidden rounded-xl bg-white shadow-xl sm:max-h-[calc(100dvh-4rem)]"
+          onClick={(e) => e.stopPropagation()}
+        >
         {/* Header */}
         <div className="border-b border-gray-200 px-6 py-4">
           <div className="flex items-center justify-between">
@@ -190,7 +191,7 @@ export default function ActividadTrabajoModal({
         </div>
 
         {/* Content */}
-        <div className="px-6 py-6 space-y-5">
+        <div className="flex-1 overflow-y-auto px-6 py-6 space-y-5">
           
           {/* Error message */}
           {error && (
@@ -368,6 +369,7 @@ export default function ActividadTrabajoModal({
             </button>
           </div>
         </div>
+      </div>
       </div>
     </div>
   );

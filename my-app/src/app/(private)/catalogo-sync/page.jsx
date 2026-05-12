@@ -255,12 +255,10 @@ export default function CatalogoSyncPage() {
             <p className="text-xs font-semibold uppercase tracking-[0.35em] text-teal-200">
               Data Sync
             </p>
-            <h1 className="mt-4 max-w-2xl text-3xl font-semibold leading-tight md:text-4xl">
-              Importa y exporta tablas especificas en CSV, Excel o JSON.
-            </h1>
             <p className="mt-4 max-w-2xl text-sm leading-6 text-slate-200">
               Ahora puedes elegir exactamente que tabla deseas descargar y tambien
-              decidir a que tabla destino quieres importar un archivo. La
+              decidir a que tabla destino quieres importar un archivo en CSV,
+              Excel o JSON. La
               importacion funciona por ID: crea registros nuevos y actualiza los
               existentes cuando cambian.
             </p>

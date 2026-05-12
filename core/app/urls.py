@@ -7,6 +7,8 @@ from .views import (
     ItemViewSet,
     MaquinariaViewSet,
     CompraViewSet,
+    OrdenCompraViewSet,
+    OrdenRequerimientoViewSet,
     OrdenTrabajoViewSet,
     ActividadTrabajoViewSet,
     MovimientoRepuestoViewSet,
@@ -31,6 +33,8 @@ router = DefaultRouter()
 router.register(r"items", ItemViewSet)
 router.register(r"maquinarias", MaquinariaViewSet)
 router.register(r"compras", CompraViewSet)
+router.register(r"ordenes-compra", OrdenCompraViewSet)
+router.register(r"ordenes-requerimiento", OrdenRequerimientoViewSet)
 router.register(r"tipos-cambio", TipoCambioDiarioViewSet)
 router.register(r"trabajadores", TrabajadorViewSet)
 router.register(r"users", UserViewSet)

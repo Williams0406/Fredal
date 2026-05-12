@@ -16,7 +16,7 @@
 import { useState, useEffect } from "react";
 import {
   trabajoAPI, itemAPI, maquinariaAPI,
-  trabajadorAPI, actividadTrabajoAPI,
+  trabajadorAPI,
   compraAPI, tipoCambioAPI,
 } from "@/lib/api";
 import {
@@ -74,15 +74,10 @@ export default function AdminDashboard() {
           compraAPI.list({ page_size: 200 }).then(r => r.data?.results ?? r.data ?? []),
           tipoCambioAPI.list({ page_size: 1 }).then(r => (r.data?.results ?? r.data ?? [])[0] ?? null),
         ]);
+        const acts = tjs.flatMap(t => t.actividades ?? []);
         setTrabajos(tjs); setItems(its); setMaquinarias(mqs);
         setTrabajadores(trs); setCompras(cs); setTipoCambio(tc);
-        const acts = await Promise.all(
-          tjs.slice(0, 50).map(t =>
-            actividadTrabajoAPI.listByTrabajo(t.id)
-              .then(r => r.data?.results ?? r.data ?? []).catch(() => [])
-          )
-        );
-        setActividades(acts.flat());
+        setActividades(acts);
       } catch (e) { console.error(e); }
       finally { setLoading(false); }
     })();
@@ -98,9 +93,9 @@ export default function AdminDashboard() {
   const tcEUR = Number(tipoCambio?.compra_eur ?? 4.0);
   const toPEN = (m, mon) => mon === "USD" ? m * tcUSD : mon === "EUR" ? m * tcEUR : m;
   let gastoTotal = 0;
-  compras.forEach(c => (c.detalles ?? []).forEach(d => {
-    gastoTotal += toPEN(Number(d.valor_unitario ?? 0) * Number(d.cantidad ?? 0) * 1.18, c.moneda);
-  }));
+  compras.forEach((detalle) => {
+    gastoTotal += toPEN(Number(detalle.costo_total ?? 0), detalle.moneda);
+  });
   const otFin = trabajos.filter(t => t.estatus === "FINALIZADO");
   const costoOT = otFin.length ? gastoTotal / otFin.length : null;
 

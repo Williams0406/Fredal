@@ -116,8 +116,14 @@ export const actividadAPI = {
 // ── Items ─────────────────────────────────────────────────────────
 export const itemAPI = {
   list:               (params)  => api.get('/api/items/', { params }),
+  retrieve:           (id)      => api.get(`/api/items/${id}/`),
   unidadesAsignables: (id, params) => api.get(`/api/items/${id}/unidades_asignables/`, { params }),
   lotesDisponibles:   (id, params) => api.get(`/api/items/${id}/lotes_disponibles/`, { params }),
+  ubicacionesConsumible: (id)   => api.get(`/api/items/${id}/ubicaciones_consumible/`),
+  cambiarUbicacionConsumible: (id, data) =>
+    api.post(`/api/items/${id}/cambiar_ubicacion_consumible/`, data),
+  cambiarEstadoUnidad: (id, data) =>
+    api.post(`/api/items/${id}/cambiar_estado_unidad/`, data),
   proveedoresDisponibles: ()    => api.get('/api/items/proveedores_disponibles/'),
 };
 
@@ -128,6 +134,10 @@ export const trabajadorAPI = {
 
 export const maquinariaAPI = {
   list: () => api.get('/api/maquinarias/'),
+};
+
+export const almacenAPI = {
+  list: () => api.get('/api/almacenes/'),
 };
 
 export const ubicacionClienteAPI = {
@@ -149,7 +159,31 @@ export const movimientoConsumibleAPI = {
   create: (data)   => api.post('/api/movimientos-consumible/', data),
 };
 
+export const ordenRequerimientoAPI = {
+  list: (params) => api.get('/api/ordenes-requerimiento/', { params }),
+  create: (data) => api.post('/api/ordenes-requerimiento/', data),
+  patch: (id, data) => api.patch(`/api/ordenes-requerimiento/${id}/`, data),
+  cambiarEstado: (id, estado) =>
+    api.post(`/api/ordenes-requerimiento/${id}/cambiar_estado/`, { estado }),
+  confirmarRecepcion: (id) =>
+    api.post(`/api/ordenes-requerimiento/${id}/confirmar_recepcion/`),
+};
+
 // ── Catálogos ─────────────────────────────────────────────────────
+export const ordenCompraAPI = {
+  list: (params) => api.get('/api/ordenes-compra/', { params }),
+  create: (data) => api.post('/api/ordenes-compra/', data),
+  cambiarEstado: (id, estado) =>
+    api.post(`/api/ordenes-compra/${id}/cambiar_estado/`, { estado }),
+  confirmarRecepcion: (id) =>
+    api.post(`/api/ordenes-compra/${id}/confirmar_recepcion/`),
+};
+
+export const proveedorAPI = {
+  list: () => api.get('/api/proveedores/'),
+  retrieve: (id) => api.get(`/api/proveedores/${id}/`),
+};
+
 export const catalogosAPI = {
   get: () => api.get('/api/catalogos/'),
 };

@@ -10,8 +10,7 @@ import {
 import { Ionicons } from '@expo/vector-icons';
 import AppSelect from '../ui/AppSelect';
 import AppSheet from '../ui/AppSheet';
-import AppTextArea from '../ui/AppTextArea';
-import { useCreateTrabajo } from '../../hooks/useTrabajos';
+import { useCreateTrabajo, usePatchTrabajo } from '../../hooks/useTrabajos';
 import {
   maquinariaAPI,
   trabajadorAPI,
@@ -34,16 +33,48 @@ const LUGAR_OPTIONS = [
 
 const ROLES_ASIGNABLES = [ROLES.TECNICO.toLowerCase(), ROLES.JEFE_TECNICOS.toLowerCase()];
 
-const getToday = () => new Date().toISOString().split('T')[0];
 const getCurrentTime = () => new Date().toTimeString().slice(0, 5);
+const sanitizeNumericInput = (value, maxLength) => String(value || '').replace(/\D/g, '').slice(0, maxLength);
+
+const getTodayParts = () => {
+  const today = new Date();
+  return {
+    fechaDia: String(today.getDate()).padStart(2, '0'),
+    fechaMes: String(today.getMonth() + 1).padStart(2, '0'),
+    fechaAnio: String(today.getFullYear()),
+  };
+};
+
+const buildFechaValue = ({ fechaDia, fechaMes, fechaAnio }) => {
+  const day = sanitizeNumericInput(fechaDia, 2);
+  const month = sanitizeNumericInput(fechaMes, 2);
+  const year = sanitizeNumericInput(fechaAnio, 4);
+
+  if (!day || !month || year.length !== 4) return '';
+  return `${year.padStart(4, '0')}-${month.padStart(2, '0')}-${day.padStart(2, '0')}`;
+};
+
+const isValidFechaParts = ({ fechaDia, fechaMes, fechaAnio }) => {
+  const day = Number(sanitizeNumericInput(fechaDia, 2));
+  const month = Number(sanitizeNumericInput(fechaMes, 2));
+  const year = Number(sanitizeNumericInput(fechaAnio, 4));
+
+  if (!day || !month || !year || String(year).length !== 4) return false;
+
+  const date = new Date(year, month - 1, day);
+  return (
+    date.getFullYear() === year &&
+    date.getMonth() === month - 1 &&
+    date.getDate() === day
+  );
+};
 
 const createInitialForm = () => ({
   maquinaria: null,
-  fecha: getToday(),
+  ...getTodayParts(),
   lugar: 'TALLER',
   ubicacion_detalle: '',
   prioridad: 'REGULAR',
-  observaciones: '',
   hora_inicio: getCurrentTime(),
   tecnicos: [],
 });
@@ -57,7 +88,31 @@ const getTrabajadorIdFromUser = (user) =>
   user?.perfil?.trabajador?.id ??
   null;
 
-const getErrorMessage = (error) => {
+const getFechaPartsFromValue = (fecha) => {
+  const [year = '', month = '', day = ''] = String(fecha || '').split('-');
+
+  if (year.length === 4 && month.length >= 1 && day.length >= 1) {
+    return {
+      fechaDia: sanitizeNumericInput(day, 2),
+      fechaMes: sanitizeNumericInput(month, 2),
+      fechaAnio: sanitizeNumericInput(year, 4),
+    };
+  }
+
+  return getTodayParts();
+};
+
+const createFormFromTrabajo = (trabajo) => ({
+  maquinaria: trabajo?.maquinaria ?? null,
+  ...getFechaPartsFromValue(trabajo?.fecha),
+  lugar: trabajo?.lugar || 'TALLER',
+  ubicacion_detalle: trabajo?.lugar === 'CAMPO' ? trabajo?.ubicacion_detalle || '' : '',
+  prioridad: trabajo?.prioridad || 'REGULAR',
+  hora_inicio: trabajo?.hora_inicio || getCurrentTime(),
+  tecnicos: Array.isArray(trabajo?.tecnicos) ? trabajo.tecnicos : [],
+});
+
+const getErrorMessage = (error, fallback = 'No se pudo guardar la orden de trabajo.') => {
   const detail = error?.response?.data?.detail;
   if (typeof detail === 'string') return detail;
   if (Array.isArray(detail) && detail.length > 0) return detail[0];
@@ -76,18 +131,29 @@ const getErrorMessage = (error) => {
     if (typeof firstEntry === 'string') return firstEntry;
   }
 
-  return 'No se pudo crear la orden de trabajo.';
+  return fallback;
 };
 
-export default function TrabajoFormSheet({ visible, onClose, onCreated }) {
+export default function TrabajoFormSheet({
+  visible,
+  onClose,
+  onCreated,
+  onSaved,
+  trabajo = null,
+}) {
   const [form, setForm] = useState(createInitialForm);
   const [maquinarias, setMaquinarias] = useState([]);
   const [ubicaciones, setUbicaciones] = useState([]);
   const [tecnicos, setTecnicos] = useState([]);
+  const [tecnicoSearch, setTecnicoSearch] = useState('');
   const [loadingCatalogs, setLoadingCatalogs] = useState(false);
   const [error, setError] = useState('');
 
   const createTrabajo = useCreateTrabajo();
+  const patchTrabajo = usePatchTrabajo();
+  const isEdit = Boolean(trabajo?.id);
+  const ubicacionEsCampo = form.lugar === 'CAMPO';
+  const isSubmitting = createTrabajo.isPending || patchTrabajo.isPending;
 
   useEffect(() => {
     if (!visible) return;
@@ -95,7 +161,8 @@ export default function TrabajoFormSheet({ visible, onClose, onCreated }) {
     let mounted = true;
 
     const loadCatalogs = async () => {
-      setForm(createInitialForm());
+      setForm(isEdit ? createFormFromTrabajo(trabajo) : createInitialForm());
+      setTecnicoSearch('');
       setError('');
       setLoadingCatalogs(true);
 
@@ -138,7 +205,7 @@ export default function TrabajoFormSheet({ visible, onClose, onCreated }) {
         setTecnicos(tecnicosAsignables);
       } catch (loadError) {
         if (mounted) {
-          setError(getErrorMessage(loadError));
+          setError(getErrorMessage(loadError, 'No se pudieron cargar los datos de la orden.'));
         }
       } finally {
         if (mounted) setLoadingCatalogs(false);
@@ -150,7 +217,7 @@ export default function TrabajoFormSheet({ visible, onClose, onCreated }) {
     return () => {
       mounted = false;
     };
-  }, [visible]);
+  }, [isEdit, trabajo, visible]);
 
   const maquinariaOptions = useMemo(
     () =>
@@ -173,6 +240,25 @@ export default function TrabajoFormSheet({ visible, onClose, onCreated }) {
     [ubicaciones]
   );
 
+  const filteredTecnicos = useMemo(() => {
+    const term = tecnicoSearch.trim().toLowerCase();
+    if (!term) return tecnicos;
+
+    return tecnicos.filter((tecnico) => {
+      const fullName = `${tecnico.nombres || ''} ${tecnico.apellidos || ''}`.trim();
+      const searchBase = [
+        fullName,
+        tecnico.codigo || '',
+        tecnico.puesto || '',
+        ...(Array.isArray(tecnico.roles) ? tecnico.roles : []),
+      ]
+        .join(' ')
+        .toLowerCase();
+
+      return searchBase.includes(term);
+    });
+  }, [tecnicos, tecnicoSearch]);
+
   const toggleTecnico = (id) => {
     setForm((current) => {
       const actuales = current.tecnicos || [];
@@ -193,43 +279,66 @@ export default function TrabajoFormSheet({ visible, onClose, onCreated }) {
       return;
     }
 
-    if (!form.fecha?.trim()) {
+    const fecha = buildFechaValue(form);
+
+    if (!fecha) {
       setError('La fecha es obligatoria.');
       return;
     }
 
-    if (!form.ubicacion_detalle) {
-      setError('Selecciona una ubicacion.');
+    if (!isValidFechaParts(form)) {
+      setError('Ingresa una fecha valida.');
+      return;
+    }
+
+    if (ubicacionEsCampo && !form.ubicacion_detalle) {
+      setError('Selecciona una ubicacion cuando el trabajo se realiza en campo.');
       return;
     }
 
     const payload = {
       maquinaria: form.maquinaria,
-      fecha: form.fecha.trim(),
+      fecha,
       lugar: form.lugar,
-      ubicacion_detalle: form.ubicacion_detalle,
+      ubicacion_detalle: ubicacionEsCampo ? form.ubicacion_detalle : '',
       prioridad: form.prioridad,
-      observaciones: form.observaciones?.trim() || '',
       hora_inicio: form.hora_inicio,
-      estatus: 'PENDIENTE',
+      estatus: isEdit ? trabajo?.estatus || 'PENDIENTE' : 'PENDIENTE',
       tecnicos: form.tecnicos,
     };
 
     Object.keys(payload).forEach((key) => {
-      if (payload[key] === '' || payload[key] === null) {
+      if (payload[key] === null) {
         delete payload[key];
       }
-      if (Array.isArray(payload[key]) && payload[key].length === 0) {
+      if (!isEdit && payload[key] === '') {
+        delete payload[key];
+      }
+      if (!isEdit && Array.isArray(payload[key]) && payload[key].length === 0) {
         delete payload[key];
       }
     });
 
     try {
-      const response = await createTrabajo.mutateAsync(payload);
-      onCreated?.(response.data);
+      const response = isEdit
+        ? await patchTrabajo.mutateAsync({ id: trabajo.id, data: payload })
+        : await createTrabajo.mutateAsync(payload);
+
+      if (isEdit) {
+        onSaved?.(response.data);
+      } else {
+        onCreated?.(response.data);
+      }
       onClose?.();
     } catch (saveError) {
-      setError(getErrorMessage(saveError));
+      setError(
+        getErrorMessage(
+          saveError,
+          isEdit
+            ? 'No se pudo actualizar la orden de trabajo.'
+            : 'No se pudo crear la orden de trabajo.'
+        )
+      );
     }
   };
 
@@ -237,15 +346,19 @@ export default function TrabajoFormSheet({ visible, onClose, onCreated }) {
     <AppSheet
       visible={visible}
       onClose={onClose}
-      icon='add-circle-outline'
-      title='Nueva orden'
-      subtitle='Completa la informacion general y asigna tecnicos desde movil'
+      icon={isEdit ? 'create-outline' : 'add-circle-outline'}
+      title={isEdit ? 'Editar orden' : 'Nueva orden'}
+      subtitle={
+        isEdit
+          ? 'Actualiza la informacion general y los tecnicos asignados desde movil'
+          : 'Completa la informacion general y asigna tecnicos desde movil'
+      }
       footer={
         <View style={styles.footerRow}>
           <Pressable
             style={styles.cancelButton}
             onPress={onClose}
-            disabled={createTrabajo.isPending}
+            disabled={isSubmitting}
           >
             <Text style={styles.cancelText}>Cancelar</Text>
           </Pressable>
@@ -253,18 +366,18 @@ export default function TrabajoFormSheet({ visible, onClose, onCreated }) {
           <Pressable
             style={[
               styles.saveButton,
-              (loadingCatalogs || createTrabajo.isPending) ? styles.saveButtonDisabled : null,
+              (loadingCatalogs || isSubmitting) ? styles.saveButtonDisabled : null,
             ]}
             onPress={handleCreate}
-            disabled={loadingCatalogs || createTrabajo.isPending}
+            disabled={loadingCatalogs || isSubmitting}
           >
-            {createTrabajo.isPending ? (
+            {isSubmitting ? (
               <ActivityIndicator size='small' color={colors.white} />
             ) : (
               <Ionicons name='save-outline' size={16} color={colors.white} />
             )}
             <Text style={styles.saveText}>
-              {createTrabajo.isPending ? 'Guardando...' : 'Crear orden'}
+              {isSubmitting ? 'Guardando...' : isEdit ? 'Actualizar orden' : 'Crear orden'}
             </Text>
           </Pressable>
         </View>
@@ -289,9 +402,13 @@ export default function TrabajoFormSheet({ visible, onClose, onCreated }) {
               <Ionicons name='document-text-outline' size={18} color={colors.navy} />
             </View>
             <View style={{ flex: 1 }}>
-              <Text style={styles.infoBannerTitle}>La orden se creara como pendiente</Text>
+              <Text style={styles.infoBannerTitle}>
+                {isEdit ? 'Estas editando la orden actual' : 'La orden se creara como pendiente'}
+              </Text>
               <Text style={styles.infoBannerText}>
-                Aqui puedes dejar lista la informacion general y los tecnicos asignados.
+                {isEdit
+                  ? 'Actualiza los datos generales y los tecnicos asignados segun la operacion real.'
+                  : 'Aqui puedes dejar lista la informacion general y los tecnicos asignados.'}
               </Text>
             </View>
           </View>
@@ -307,18 +424,34 @@ export default function TrabajoFormSheet({ visible, onClose, onCreated }) {
               placeholder='Selecciona una maquinaria'
             />
 
-            <FieldInput
+            <DatePartsInput
               label='Fecha *'
-              value={form.fecha}
-              onChangeText={(value) => setForm((current) => ({ ...current, fecha: value }))}
-              placeholder='AAAA-MM-DD'
+              day={form.fechaDia}
+              month={form.fechaMes}
+              year={form.fechaAnio}
+              onChangeDay={(value) =>
+                setForm((current) => ({ ...current, fechaDia: sanitizeNumericInput(value, 2) }))
+              }
+              onChangeMonth={(value) =>
+                setForm((current) => ({ ...current, fechaMes: sanitizeNumericInput(value, 2) }))
+              }
+              onChangeYear={(value) =>
+                setForm((current) => ({ ...current, fechaAnio: sanitizeNumericInput(value, 4) }))
+              }
             />
 
             <AppSelect
               label='Lugar'
               value={form.lugar}
               options={LUGAR_OPTIONS}
-              onChange={(value) => setForm((current) => ({ ...current, lugar: value }))}
+              onChange={(value) => {
+                setForm((current) => ({
+                  ...current,
+                  lugar: value,
+                  ubicacion_detalle: value === 'CAMPO' ? current.ubicacion_detalle : '',
+                }));
+                if (error) setError('');
+              }}
             />
 
             <AppSelect
@@ -329,20 +462,18 @@ export default function TrabajoFormSheet({ visible, onClose, onCreated }) {
             />
 
             <AppSelect
-              label='Ubicacion *'
-              value={form.ubicacion_detalle}
+              label={`Ubicacion exacta${ubicacionEsCampo ? ' *' : ''}`}
+              value={ubicacionEsCampo ? form.ubicacion_detalle : ''}
               options={ubicacionOptions}
               onChange={(value) => setForm((current) => ({ ...current, ubicacion_detalle: value }))}
-              placeholder='Selecciona una ubicacion'
+              placeholder={ubicacionEsCampo ? 'Selecciona una ubicacion' : 'Taller'}
+              disabled={!ubicacionEsCampo}
             />
-
-            <AppTextArea
-              label='Observaciones'
-              value={form.observaciones}
-              onChange={(value) => setForm((current) => ({ ...current, observaciones: value }))}
-              placeholder='Detalles adicionales sobre la orden, hallazgos o notas previas...'
-              rows={4}
-            />
+            <Text style={styles.fieldHelper}>
+              {ubicacionEsCampo
+                ? 'Selecciona la ubicacion del cliente porque la orden se realizara en campo.'
+                : 'Cuando el lugar es taller, la ubicacion ya no es necesaria y se asume automaticamente.'}
+            </Text>
           </View>
 
           <View style={styles.block}>
@@ -351,6 +482,15 @@ export default function TrabajoFormSheet({ visible, onClose, onCreated }) {
               Solo veras trabajadores que tengan usuario con rol Tecnico o Jefe de Tecnicos.
             </Text>
 
+            {tecnicos.length > 0 ? (
+              <FieldInput
+                label='Buscar tecnico'
+                value={tecnicoSearch}
+                onChangeText={setTecnicoSearch}
+                placeholder='Buscar por nombre, apellido o codigo'
+              />
+            ) : null}
+
             {tecnicos.length === 0 ? (
               <View style={styles.emptyCard}>
                 <Ionicons name='people-outline' size={18} color={colors.textSoft} />
@@ -358,9 +498,16 @@ export default function TrabajoFormSheet({ visible, onClose, onCreated }) {
                   No se encontraron tecnicos asignables en este momento.
                 </Text>
               </View>
+            ) : filteredTecnicos.length === 0 ? (
+              <View style={styles.emptyCard}>
+                <Ionicons name='search-outline' size={18} color={colors.textSoft} />
+                <Text style={styles.emptyText}>
+                  No hay tecnicos que coincidan con la busqueda actual.
+                </Text>
+              </View>
             ) : (
               <View style={styles.tecnicoList}>
-                {tecnicos.map((tecnico) => {
+                {filteredTecnicos.map((tecnico) => {
                   const selected = form.tecnicos.includes(tecnico.id);
                   const fullName =
                     `${tecnico.nombres || ''} ${tecnico.apellidos || ''}`.trim() ||
@@ -427,6 +574,56 @@ function FieldInput({ label, value, onChangeText, placeholder }) {
         style={styles.input}
         autoCapitalize='none'
       />
+    </View>
+  );
+}
+
+function DatePartsInput({
+  label,
+  day,
+  month,
+  year,
+  onChangeDay,
+  onChangeMonth,
+  onChangeYear,
+}) {
+  return (
+    <View style={styles.inputBlock}>
+      <Text style={styles.fieldLabel}>{label}</Text>
+      <View style={styles.dateRow}>
+        <TextInput
+          value={day}
+          onChangeText={onChangeDay}
+          placeholder='DD'
+          placeholderTextColor={colors.textSoft}
+          style={[styles.input, styles.dateInput]}
+          keyboardType='number-pad'
+          maxLength={2}
+          textAlign='center'
+        />
+        <Text style={styles.dateSeparator}>/</Text>
+        <TextInput
+          value={month}
+          onChangeText={onChangeMonth}
+          placeholder='MM'
+          placeholderTextColor={colors.textSoft}
+          style={[styles.input, styles.dateInput]}
+          keyboardType='number-pad'
+          maxLength={2}
+          textAlign='center'
+        />
+        <Text style={styles.dateSeparator}>/</Text>
+        <TextInput
+          value={year}
+          onChangeText={onChangeYear}
+          placeholder='AAAA'
+          placeholderTextColor={colors.textSoft}
+          style={[styles.input, styles.dateInputYear]}
+          keyboardType='number-pad'
+          maxLength={4}
+          textAlign='center'
+        />
+      </View>
     </View>
   );
 }
@@ -553,6 +750,13 @@ const styles = StyleSheet.create({
     letterSpacing: 0.8,
     color: colors.textMuted,
   },
+  fieldHelper: {
+    marginTop: -6,
+    marginBottom: 16,
+    fontSize: 12,
+    lineHeight: 18,
+    color: colors.textMuted,
+  },
   input: {
     minHeight: 52,
     borderWidth: 1,
@@ -563,6 +767,24 @@ const styles = StyleSheet.create({
     color: colors.text,
     fontSize: 15,
     ...shadows.soft,
+  },
+  dateRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  dateInput: {
+    flex: 0.7,
+    paddingHorizontal: 12,
+  },
+  dateInputYear: {
+    flex: 1.1,
+    paddingHorizontal: 12,
+  },
+  dateSeparator: {
+    fontSize: 18,
+    fontWeight: '800',
+    color: colors.textMuted,
   },
   emptyCard: {
     minHeight: 64,

@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import { Layers3, Repeat2, Ruler, Settings2 } from "lucide-react";
 import {
   dimensionAPI,
   unidadMedidaAPI,
@@ -12,6 +13,9 @@ import UnidadMedidaModal from "@/components/unidades/UnidadMedidaModal";
 import UnidadesMedidaTable from "@/components/unidades/UnidadesMedidaTable";
 import UnidadRelacionModal from "@/components/unidades/UnidadRelacionModal";
 import UnidadesRelacionTable from "@/components/unidades/UnidadesRelacionTable";
+
+const selectClassName =
+  "mt-2 w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-700 outline-none transition focus:border-[#173569] focus:ring-2 focus:ring-[#EAF1FF]";
 
 export default function UnidadesPage() {
   const [dimensiones, setDimensiones] = useState([]);
@@ -236,13 +240,13 @@ export default function UnidadesPage() {
   };
 
   const handleDeleteDimension = async (dimension) => {
-    if (!window.confirm(`¿Eliminar la dimensión ${dimension.nombre}?`)) return;
+    if (!window.confirm(`Eliminar la dimension ${dimension.nombre}?`)) return;
     await dimensionAPI.delete(dimension.id);
     loadData();
   };
 
   const handleDeleteUnidad = async (unidad) => {
-    if (!window.confirm(`¿Eliminar la unidad ${unidad.nombre}?`)) return;
+    if (!window.confirm(`Eliminar la unidad ${unidad.nombre}?`)) return;
     await unidadMedidaAPI.delete(unidad.id);
     loadData();
   };
@@ -259,55 +263,203 @@ export default function UnidadesPage() {
   };
 
   const handleDeleteRelacion = async (relacion) => {
-    if (
-      !window.confirm(
-        `¿Eliminar la relación ${relacion.unidad_base_detalle?.nombre} → ${relacion.unidad_relacionada_detalle?.nombre}?`
-      )
-    )
-      return;
+    const label = `${relacion.unidad_base_detalle?.nombre} -> ${relacion.unidad_relacionada_detalle?.nombre}`;
+    if (!window.confirm(`Eliminar la relacion ${label}?`)) return;
     await unidadRelacionAPI.delete(relacion.id);
     loadData();
   };
 
   const unidadesPorDimension = useMemo(() => {
     return unidades.filter(
-      (unidad) =>
-        String(unidad.dimension) === String(displayDimensionId)
+      (unidad) => String(unidad.dimension) === String(displayDimensionId)
     );
   }, [unidades, displayDimensionId]);
 
+  const selectedDisplayDimension = useMemo(
+    () =>
+      dimensiones.find(
+        (dimension) => String(dimension.id) === String(displayDimensionId)
+      ),
+    [dimensiones, displayDimensionId]
+  );
+
+  const selectedDisplayUnit = useMemo(
+    () =>
+      unidades.find((unidad) => String(unidad.id) === String(displayUnitId)),
+    [unidades, displayUnitId]
+  );
+
+  const activeDimensions = useMemo(
+    () => dimensiones.filter((dimension) => dimension.activo).length,
+    [dimensiones]
+  );
+
+  const activeUnits = useMemo(
+    () => unidades.filter((unidad) => unidad.activo).length,
+    [unidades]
+  );
+
+  const baseUnits = useMemo(
+    () => unidades.filter((unidad) => unidad.es_base).length,
+    [unidades]
+  );
+
+  const activeRelations = useMemo(
+    () => relaciones.filter((relacion) => relacion.activo).length,
+    [relaciones]
+  );
+
   return (
     <div className="space-y-6">
-      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-        <div>
-          <h1 className="text-2xl font-semibold text-[#1e3a8a]">
-            Unidades y dimensiones
-          </h1>
-          <p className="text-sm text-gray-500">
-            Registra dimensiones, unidades y sus relaciones para usar
-            equivalencias coherentes en inventario.
+      <section className="grid gap-4 xl:grid-cols-[1.3fr_0.95fr]">
+        <div className="rounded-[28px] border border-slate-200 bg-white p-6 shadow-sm">
+          <div className="inline-flex items-center gap-2 rounded-full bg-[#EAF1FF] px-3 py-1 text-xs font-semibold uppercase tracking-[0.22em] text-[#173569]">
+            <Layers3 className="h-4 w-4" strokeWidth={2.2} />
+            Arquitectura de unidades
+          </div>
+          <h2 className="mt-4 text-2xl font-semibold tracking-tight text-[#12233D]">
+            Ordena dimensiones, unidades y conversiones con una lectura mas
+            consistente.
+          </h2>
+          <p className="mt-2 max-w-3xl text-sm leading-6 text-[#5F6C80]">
+            Esta vista sostiene inventario, compras y valorizacion. Por eso la
+            interfaz ahora prioriza lo estructural primero y deja las acciones
+            de registro mas a mano.
           </p>
+
+          <div className="mt-6 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+            <StatTile
+              icon={Layers3}
+              label="Dimensiones"
+              value={dimensiones.length}
+              helper={`${activeDimensions} activas`}
+            />
+            <StatTile
+              icon={Ruler}
+              label="Unidades"
+              value={unidades.length}
+              helper={`${baseUnits} base`}
+            />
+            <StatTile
+              icon={Repeat2}
+              label="Relaciones"
+              value={relaciones.length}
+              helper={`${activeRelations} activas`}
+            />
+            <StatTile
+              icon={Settings2}
+              label="Unidades activas"
+              value={activeUnits}
+              helper="listas para operar"
+            />
+          </div>
         </div>
-        <div className="flex flex-wrap gap-2">
-          <button
-            className="rounded-lg border px-4 py-2 text-sm"
-            onClick={() => setOpenDimensionModal(true)}
-          >
-            Registrar dimensión
-          </button>
-          <button
-            className="rounded-lg border px-4 py-2 text-sm"
-            onClick={() => setOpenUnidadModal(true)}
-          >
-            Registrar unidad
-          </button>
-          <button
-            className="rounded-lg bg-[#1e3a8a] px-4 py-2 text-sm text-white"
-            onClick={() => setOpenRelacionModal(true)}
-          >
-            Crear relación
-          </button>
+
+        <div className="rounded-[28px] border border-slate-200 bg-white p-5 shadow-sm">
+          <div className="flex items-start gap-3">
+            <div className="flex h-11 w-11 items-center justify-center rounded-[18px] bg-[#EAF1FF] text-[#173569]">
+              <Settings2 className="h-5 w-5" strokeWidth={2.1} />
+            </div>
+            <div>
+              <p className="text-sm font-semibold text-[#12233D]">
+                Visualizacion de stock
+              </p>
+              <p className="mt-1 text-sm leading-6 text-[#5F6C80]">
+                Define la referencia preferida para mostrar cantidades
+                convertidas en inventario.
+              </p>
+            </div>
+          </div>
+
+          <div className="mt-5 grid gap-3">
+            <label className="block">
+              <span className="text-xs font-semibold uppercase tracking-[0.18em] text-[#5F6C80]">
+                Dimension
+              </span>
+              <select
+                value={displayDimensionId}
+                onChange={(event) =>
+                  handleDisplayDimensionChange(event.target.value)
+                }
+                className={selectClassName}
+              >
+                <option value="">Sin dimension fija</option>
+                {dimensiones.map((dimension) => (
+                  <option key={dimension.id} value={dimension.id}>
+                    {dimension.nombre}
+                  </option>
+                ))}
+              </select>
+            </label>
+
+            <label className="block">
+              <span className="text-xs font-semibold uppercase tracking-[0.18em] text-[#5F6C80]">
+                Unidad preferida
+              </span>
+              <select
+                value={displayUnitId}
+                onChange={(event) => handleDisplayUnitChange(event.target.value)}
+                disabled={!displayDimensionId}
+                className={`${selectClassName} disabled:cursor-not-allowed disabled:bg-slate-100 disabled:text-slate-400`}
+              >
+                <option value="">
+                  {displayDimensionId
+                    ? "Sin unidad preferida"
+                    : "Selecciona una dimension"}
+                </option>
+                {unidadesPorDimension.map((unidad) => (
+                  <option key={unidad.id} value={unidad.id}>
+                    {unidad.nombre}
+                    {unidad.simbolo ? ` (${unidad.simbolo})` : ""}
+                  </option>
+                ))}
+              </select>
+            </label>
+
+            <div className="rounded-[22px] bg-slate-50 p-4 text-sm text-[#5F6C80]">
+              {selectedDisplayUnit ? (
+                <>
+                  El stock se mostrara usando{" "}
+                  <span className="font-semibold text-[#173569]">
+                    {selectedDisplayUnit.nombre}
+                  </span>
+                  {selectedDisplayUnit.simbolo
+                    ? ` (${selectedDisplayUnit.simbolo})`
+                    : ""}
+                  {selectedDisplayDimension
+                    ? ` dentro de ${selectedDisplayDimension.nombre}.`
+                    : "."}
+                </>
+              ) : (
+                "Si no eliges una unidad preferida, cada item seguira mostrando su unidad principal."
+              )}
+            </div>
+          </div>
         </div>
+      </section>
+
+      <div className="flex flex-wrap justify-end gap-2">
+        <button
+          type="button"
+          className="rounded-2xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-semibold text-slate-700 transition hover:bg-slate-50"
+          onClick={() => setOpenDimensionModal(true)}
+        >
+          Registrar dimension
+        </button>
+        <button
+          type="button"
+          className="rounded-2xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-semibold text-slate-700 transition hover:bg-slate-50"
+          onClick={() => setOpenUnidadModal(true)}
+        >
+          Registrar unidad
+        </button>
+        <button
+          type="button"
+          className="rounded-2xl bg-[#173569] px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-[#0f2346]"
+          onClick={() => setOpenRelacionModal(true)}
+        >
+          Crear relacion
+        </button>
       </div>
 
       <div className="grid grid-cols-1 gap-6 xl:grid-cols-2">
@@ -333,9 +485,11 @@ export default function UnidadesPage() {
       <DimensionModal
         open={openDimensionModal}
         form={formDimension}
-        title={editingDimension ? "Editar dimensión" : "Registrar dimensión"}
-        description="Crea dimensiones que luego serán asignadas a las unidades."
-        primaryLabel={editingDimension ? "Guardar cambios" : "Guardar dimensión"}
+        title={editingDimension ? "Editar dimension" : "Registrar dimension"}
+        description="Crea dimensiones que luego seran asignadas a las unidades."
+        primaryLabel={
+          editingDimension ? "Guardar cambios" : "Guardar dimension"
+        }
         onClose={handleCloseDimensionModal}
         onChange={setFormDimension}
         onSave={handleCreateDimension}
@@ -348,8 +502,8 @@ export default function UnidadesPage() {
         title={editingUnidad ? "Editar unidad" : "Registrar unidad"}
         description={
           editingUnidad
-            ? "Actualiza la unidad manteniendo su dimensión."
-            : "Registra la unidad con símbolo y dimensión. La relación se define después."
+            ? "Actualiza la unidad manteniendo su dimension."
+            : "Registra la unidad con simbolo y dimension. La relacion se define despues."
         }
         primaryLabel={editingUnidad ? "Guardar cambios" : "Guardar unidad"}
         onClose={handleCloseUnidadModal}
@@ -366,6 +520,23 @@ export default function UnidadesPage() {
         onChange={setFormRelacion}
         onSave={handleCreateRelacion}
       />
+    </div>
+  );
+}
+
+function StatTile({ icon: Icon, label, value, helper }) {
+  return (
+    <div className="rounded-[22px] border border-slate-200 bg-slate-50/80 p-4">
+      <div className="flex h-10 w-10 items-center justify-center rounded-2xl bg-white text-[#173569] shadow-sm">
+        <Icon className="h-4.5 w-4.5" strokeWidth={2.2} />
+      </div>
+      <p className="mt-4 text-xs font-semibold uppercase tracking-[0.18em] text-[#5F6C80]">
+        {label}
+      </p>
+      <p className="mt-2 text-3xl font-semibold tracking-tight text-[#12233D]">
+        {value}
+      </p>
+      <p className="mt-1 text-sm text-[#5F6C80]">{helper}</p>
     </div>
   );
 }

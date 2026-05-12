@@ -1,4 +1,4 @@
-"use client";
+﻿"use client";
 
 import { useEffect, useState, useMemo } from "react";
 import {
@@ -9,10 +9,37 @@ import {
   unidadRelacionAPI,
 } from "@/lib/api";
 import ItemGroupSelector from "@/components/items/ItemGroupSelector";
+import { getTodayDateInputValue } from "@/lib/utils";
 
 const IGV = 1.18;
 
-// 1. Quitamos moneda de aquí, ahora se controla globalmente
+const getApiErrorMessage = (err, fallback) => {
+  const data = err?.response?.data;
+  const detail = data?.detail;
+
+  if (typeof detail === "string" && detail.trim()) return detail;
+  if (Array.isArray(detail) && typeof detail[0] === "string") return detail[0];
+  if (detail && typeof detail === "object") {
+    const firstDetail = Object.values(detail)[0];
+    if (Array.isArray(firstDetail) && typeof firstDetail[0] === "string") {
+      return firstDetail[0];
+    }
+    if (typeof firstDetail === "string") return firstDetail;
+  }
+
+  if (typeof data === "string" && data.trim()) return data;
+  if (Array.isArray(data) && typeof data[0] === "string") return data[0];
+  if (data && typeof data === "object") {
+    const firstValue = Object.values(data)[0];
+    if (Array.isArray(firstValue) && typeof firstValue[0] === "string") {
+      return firstValue[0];
+    }
+    if (typeof firstValue === "string") return firstValue;
+  }
+
+  return fallback;
+};
+
 const emptyDetalle = {
   item: "",
   cantidad: 1,
@@ -22,7 +49,7 @@ const emptyDetalle = {
 };
 
 export default function CompraForm({ onCreated }) {
-  const getToday = () => new Date().toISOString().split("T")[0];
+  const getToday = () => getTodayDateInputValue();
   const [open, setOpen] = useState(false);
   const [items, setItems] = useState([]);
   const [proveedores, setProveedores] = useState([]);
@@ -207,16 +234,17 @@ export default function CompraForm({ onCreated }) {
     setError("");
 
     if (!cabecera.fecha) { setError("La fecha es obligatoria"); return; }
-    if (!cabecera.tipo_comprobante) { setError("El tipo de comprobante es obligatorio"); return; }
-    if (!cabecera.codigo_comprobante?.trim()) { setError("El código de comprobante es obligatorio"); return; }
-
+    if (Boolean(cabecera.tipo_comprobante) !== Boolean(cabecera.codigo_comprobante?.trim())) {
+      setError("Debes completar tipo y codigo de comprobante juntos, o dejar ambos vacios");
+      return;
+    }
     for (let i = 0; i < detalles.length; i++) {
       if (!detalles[i].item) {
-        setError(`Falta seleccionar el item en la línea ${i + 1}`);
+        setError(`Falta seleccionar el item en la linea ${i + 1}`);
         return;
       }
       if (!detalles[i].monto || Number(detalles[i].monto) <= 0) {
-        setError(`Falta el monto en la línea ${i + 1}`);
+        setError(`Falta el monto en la linea ${i + 1}`);
         return;
       }
       const itemSel = items.find((it) => it.id.toString() === detalles[i].item);
@@ -224,7 +252,7 @@ export default function CompraForm({ onCreated }) {
         const conversion = resolveCantidadBase(detalles[i], itemSel);
         if (conversion.missingRelation) {
           setError(
-            `No existe relación de unidades para convertir la línea ${i + 1}.`
+            `No existe relacion de unidades para convertir la linea ${i + 1}.`
           );
           return;
         }
@@ -237,8 +265,8 @@ export default function CompraForm({ onCreated }) {
       await compraAPI.batch({
         fecha: cabecera.fecha,
         proveedor: cabecera.proveedor || null,
-        tipo_comprobante: cabecera.tipo_comprobante,
-        codigo_comprobante: cabecera.codigo_comprobante,
+        tipo_comprobante: cabecera.tipo_comprobante || null,
+        codigo_comprobante: cabecera.codigo_comprobante?.trim() || null,
         moneda: cabecera.moneda, // Enviamos la moneda de la cabecera
 
         items: detalles.map((d) => {
@@ -268,13 +296,13 @@ export default function CompraForm({ onCreated }) {
 
     } catch (err) {
       console.error(err);
-      setError(err.response?.data?.detail || "Error al registrar la compra");
+      setError(getApiErrorMessage(err, "Error al registrar la compra"));
     } finally {
       setLoading(false);
     }
   };
 
-  // FILTRADO LÓGICO DE ÍTEMS
+  // Filtrado de items
   const itemsFiltrados = useMemo(() => {
     return items.filter(it => 
       it.nombre.toLowerCase().includes(searchTerm.toLowerCase()) ||
@@ -282,7 +310,7 @@ export default function CompraForm({ onCreated }) {
     );
   }, [items, searchTerm]);
 
-  // CÁLCULO DEL TOTAL GENERAL (Suma de todos los ítems)
+  // Calculo del total general
   const totalGeneralCompra = useMemo(() => {
     return detalles.reduce((acc, d) => {
       const { costo_total } = calcular(d);
@@ -339,7 +367,7 @@ export default function CompraForm({ onCreated }) {
                   </div>
                 )}
 
-                {/* CABECERA - Información del Comprobante */}
+                {/* Cabecera - Informacion del comprobante */}
                 <div className="bg-gray-50 rounded-lg border border-gray-200 p-5">
                   <h3 className="text-base font-semibold text-gray-900 mb-4">
                     Información del Comprobante
@@ -376,7 +404,7 @@ export default function CompraForm({ onCreated }) {
                       </select>
                     </div>
 
-                    {/* 3. CAMPO MONEDA MOVIDO AQUÍ */}
+                    {/* Campo moneda */}
                     <div>
                       <label className="block text-sm font-medium text-gray-700 mb-2">
                         Moneda <span className="text-red-500">*</span>
@@ -395,7 +423,7 @@ export default function CompraForm({ onCreated }) {
 
                     <div>
                       <label className="block text-sm font-medium text-gray-700 mb-2">
-                        Tipo de comprobante <span className="text-red-500">*</span>
+                        Tipo de comprobante
                       </label>
                       <select
                         value={cabecera.tipo_comprobante}
@@ -411,16 +439,19 @@ export default function CompraForm({ onCreated }) {
 
                     <div className="md:col-span-2">
                       <label className="block text-sm font-medium text-gray-700 mb-2">
-                        Código de comprobante <span className="text-red-500">*</span>
+                        Codigo de comprobante
                       </label>
                       <input
                         type="text"
-                        placeholder="Ej: F001-00123"
+                        placeholder="Ej: F001-00123 (opcional)"
                         value={cabecera.codigo_comprobante}
                         onChange={(e) => setCabecera({ ...cabecera, codigo_comprobante: e.target.value })}
                         className="w-full px-4 py-3 border border-gray-300 rounded-lg text-sm
                                   focus:outline-none focus:ring-2 focus:ring-[#1e3a8a] placeholder:text-gray-400"
                       />
+                      <p className="mt-2 text-xs text-gray-500">
+                        Si la compra no tiene comprobante, deja tipo y codigo vacios.
+                      </p>
                     </div>
                   </div>
                 </div>
@@ -453,7 +484,7 @@ export default function CompraForm({ onCreated }) {
                             <span className="text-sm font-semibold text-gray-700">Item #{i + 1}</span>
                             {detalles.length > 1 && (
                               <button onClick={() => removeDetalle(i)} className="text-red-600 text-sm flex items-center gap-1">
-                                🗑 Quitar
+                                Quitar
                               </button>
                             )}
                           </div>
@@ -488,12 +519,17 @@ export default function CompraForm({ onCreated }) {
                                           key={it.id}
                                           onClick={() => {
                                             updateDetalle(i, "item", it.id.toString());
+                                            updateDetalle(
+                                              i,
+                                              "unidad_medida",
+                                              it.unidad_medida ? it.unidad_medida.toString() : ""
+                                            );
                                             setSearchTerm("");
                                           }}
                                           className="w-full text-left px-3 py-2 text-sm hover:bg-blue-50"
                                         >
                                           <span className="font-medium">{it.codigo}</span>{" "}
-                                          <span className="text-gray-500">— {it.nombre}</span>
+                                          <span className="text-gray-500">- {it.nombre}</span>
                                         </button>
                                       ))
                                     ) : (

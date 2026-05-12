@@ -1,45 +1,52 @@
 "use client";
 
-import { useState, useEffect } from "react";
-import { compraAPI } from "@/lib/api";
+import { useEffect, useState } from "react";
+import { compraAPI, ordenCompraAPI } from "@/lib/api";
 import CompraTable from "@/components/compras/CompraTable";
 import CompraForm from "@/components/compras/CompraForm";
 import TipoCambioModal from "@/components/compras/TipoCambioModal";
-import {
-  Package,
-  Coins,
-  DollarSign,
-  Wrench,
-  Building2,
-} from "lucide-react";
+import OrdenCompraTable from "@/components/ordenes/OrdenCompraTable";
 
 export default function ComprasPage() {
+  const [view, setView] = useState("registros");
   const [refresh, setRefresh] = useState(false);
   const [compras, setCompras] = useState([]);
+  const [ordenesCompra, setOrdenesCompra] = useState([]);
   const [loading, setLoading] = useState(true);
   const [deletingCompraId, setDeletingCompraId] = useState(null);
 
   useEffect(() => {
-    loadCompras();
-  }, [refresh]);
+    let active = true;
 
-  const loadCompras = async () => {
-    setLoading(true);
-    try {
-      const res = await compraAPI.list();
-      setCompras(res.data);
-    } catch (error) {
-      console.error("Error cargando compras:", error);
-    } finally {
-      setLoading(false);
-    }
-  };
+    const loadData = async () => {
+      setLoading(true);
+      try {
+        const [comprasRes, ordenesRes] = await Promise.all([
+          compraAPI.list(),
+          ordenCompraAPI.list(),
+        ]);
+
+        if (!active) return;
+        setCompras(comprasRes.data || []);
+        setOrdenesCompra(ordenesRes.data || []);
+      } catch (error) {
+        console.error("Error cargando compras:", error);
+      } finally {
+        if (active) setLoading(false);
+      }
+    };
+
+    loadData();
+    return () => {
+      active = false;
+    };
+  }, [refresh]);
 
   const handleDeleteRegistro = async (compraId) => {
     setDeletingCompraId(compraId);
     try {
       await compraAPI.deleteRegistro(compraId);
-      setRefresh((r) => !r);
+      setRefresh((value) => !value);
     } catch (error) {
       console.error("Error eliminando registro de compra:", error);
       alert(error?.response?.data?.detail || "No se pudo eliminar el registro de compra.");
@@ -48,84 +55,80 @@ export default function ComprasPage() {
     }
   };
 
-  const stats = {
-    total: compras.length,
-    totalCostoSoles: compras
-      .filter((c) => c.moneda === "PEN")
-      .reduce((sum, c) => sum + Number(c.costo_total), 0),
-    totalCostoDolares: compras
-      .reduce((sum, c) => sum + Number(c.costo_total_usd || 0), 0),
-    totalCostoEuros: compras
-      .reduce((sum, c) => sum + Number(c.costo_total_eur || 0), 0),
-    itemsUnicos: new Set(compras.map((c) => c.item_codigo)).size,
-    proveedoresUnicos: new Set(
-      compras.filter((c) => c.proveedor_nombre).map((c) => c.proveedor_nombre)
-    ).size,
+  const handleAdvanceOrder = async (orden, nextState) => {
+    try {
+      await ordenCompraAPI.cambiarEstado(orden.id, nextState);
+      setRefresh((value) => !value);
+    } catch (error) {
+      console.error("Error cambiando estado de orden:", error);
+      alert(error?.response?.data?.detail || "No se pudo actualizar la orden.");
+    }
   };
 
   return (
     <div className="space-y-6">
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-2xl font-semibold text-[#1e3a8a]">
-            Gestión de Compras
-          </h1>
+      <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-end">
+        <div className="hidden">
+          <h1 className="text-2xl font-semibold text-[#1e3a8a]">Compras</h1>
           <p className="text-sm text-gray-500 mt-1">
-            Registro y seguimiento de adquisiciones
+            Gestiona registros de compra y órdenes emitidas desde almacén.
           </p>
         </div>
 
-        <div className="flex items-center gap-2">
-          <TipoCambioModal onCreated={() => setRefresh((r) => !r)} />
-          <CompraForm onCreated={() => setRefresh((r) => !r)} />
-        </div>
+        {view === "registros" && (
+          <div className="flex items-center gap-2">
+            <TipoCambioModal onCreated={() => setRefresh((value) => !value)} />
+            <CompraForm onCreated={() => setRefresh((value) => !value)} />
+          </div>
+        )}
       </div>
 
-      {!loading && (
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-6 gap-4">
-          <KPICard label="Total Compras" value={stats.total} icon={Package} color="blue" />
-          <KPICard label="Costo Total (S/)" value={`S/ ${stats.totalCostoSoles.toFixed(2)}`} icon={Coins} color="green" size="small" />
-          <KPICard label="Costo Total ($)" value={`$ ${stats.totalCostoDolares.toFixed(2)}`} icon={DollarSign} color="green" size="small" />
-          <KPICard label="Costo Total (€)" value={`€ ${stats.totalCostoEuros.toFixed(2)}`} icon={DollarSign} color="green" size="small" />
-          <KPICard label="Items Únicos" value={stats.itemsUnicos} icon={Wrench} color="gray" />
-          <KPICard label="Proveedores" value={stats.proveedoresUnicos} icon={Building2} color="gray" />
-        </div>
-      )}
+      <div className="flex flex-wrap gap-2">
+        <button
+          type="button"
+          onClick={() => setView("registros")}
+          className={`px-4 py-2 rounded-full text-sm font-medium border transition-colors ${
+            view === "registros"
+              ? "bg-[#1e3a8a] text-white border-[#1e3a8a]"
+              : "bg-white text-gray-700 border-gray-300 hover:bg-gray-50"
+          }`}
+        >
+          Registros de compra
+        </button>
+        <button
+          type="button"
+          onClick={() => setView("ordenes")}
+          className={`px-4 py-2 rounded-full text-sm font-medium border transition-colors ${
+            view === "ordenes"
+              ? "bg-[#1e3a8a] text-white border-[#1e3a8a]"
+              : "bg-white text-gray-700 border-gray-300 hover:bg-gray-50"
+          }`}
+        >
+          Órdenes de compra recibidas
+        </button>
+      </div>
 
       {loading ? (
         <div className="flex items-center justify-center py-16">
           <div className="text-center">
             <div className="w-12 h-12 border-4 border-[#1e3a8a] border-t-transparent rounded-full animate-spin mx-auto mb-4"></div>
-            <p className="text-sm text-gray-600">Cargando compras...</p>
+            <p className="text-sm text-gray-600">Cargando información de compras...</p>
           </div>
         </div>
+      ) : view === "registros" ? (
+        <CompraTable
+          compras={compras}
+          onDeleteRegistro={handleDeleteRegistro}
+          deletingCompraId={deletingCompraId}
+        />
       ) : (
-        <CompraTable compras={compras} onDeleteRegistro={handleDeleteRegistro} deletingCompraId={deletingCompraId} />
+        <OrdenCompraTable
+          ordenes={ordenesCompra}
+          mode="compras"
+          onAdvanceState={handleAdvanceOrder}
+          emptyMessage="Aún no hay órdenes de compra emitidas por almacén."
+        />
       )}
-    </div>
-  );
-}
-
-function KPICard({ label, value, icon: Icon, color, size = "normal" }) {
-  const colorClasses = {
-    blue: "text-[#1e3a8a]",
-    green: "text-[#84cc16]",
-    gray: "text-gray-600",
-  };
-
-  return (
-    <div className="bg-white rounded-xl border border-gray-200 p-4 hover:shadow-md transition-shadow">
-      <div className="flex items-center justify-between mb-2">
-        <div className="p-2 rounded-lg bg-gray-100">
-          <Icon className="w-5 h-5 text-gray-600" />
-        </div>
-
-        <span className={`${size === "small" ? "text-lg" : "text-3xl"} font-semibold ${colorClasses[color]}`}>
-          {value}
-        </span>
-      </div>
-
-      <p className="text-sm text-gray-600 font-medium">{label}</p>
     </div>
   );
 }

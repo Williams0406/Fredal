@@ -203,6 +203,18 @@ export const maquinariaAPI = {
   retrieve: (id) => api.get(`/api/maquinarias/${id}/`),
   unidades: (id) =>
     api.get(`/api/maquinarias/${id}/unidades/`),
+  gestionMatrix: () =>
+    api.get("/api/maquinarias/gestion-matriz/"),
+  gestionMatrixProveedoresRepuestos: () =>
+    api.get("/api/maquinarias/gestion-matriz-proveedores-repuestos/"),
+  gestionHistorialItems: (params) =>
+    api.get("/api/maquinarias/gestion-historial-items/", { params }),
+  gestionBubbleRepuestos: (params) =>
+    api.get("/api/maquinarias/gestion-bubble-repuestos/", { params }),
+  gestionSupervivenciaRepuestos: (params) =>
+    api.get("/api/maquinarias/gestion-supervivencia-repuestos/", { params }),
+  gestionIndicadoresMaquinaria: () =>
+    api.get("/api/maquinarias/gestion-indicadores-maquinaria/"),
   create: (data) => api.post("/api/maquinarias/", data),
   update: (id, data) => api.put(`/api/maquinarias/${id}/`, data),
   delete: (id) => api.delete(`/api/maquinarias/${id}/`),
@@ -278,6 +290,25 @@ export const compraAPI = {
   create: (data) => api.post("/api/compras/", data),
   batch: (data) => api.post("/api/compras/batch/", data),
   deleteRegistro: (compraId) => api.post("/api/compras/eliminar-registro/", { compra_id: compraId }),
+};
+
+export const ordenCompraAPI = {
+  list: (params) => api.get("/api/ordenes-compra/", { params }),
+  create: (data) => api.post("/api/ordenes-compra/", data),
+  cambiarEstado: (id, estado) =>
+    api.post(`/api/ordenes-compra/${id}/cambiar_estado/`, { estado }),
+  confirmarRecepcion: (id) =>
+    api.post(`/api/ordenes-compra/${id}/confirmar_recepcion/`),
+};
+
+export const ordenRequerimientoAPI = {
+  list: (params) => api.get("/api/ordenes-requerimiento/", { params }),
+  create: (data) => api.post("/api/ordenes-requerimiento/", data),
+  patch: (id, data) => api.patch(`/api/ordenes-requerimiento/${id}/`, data),
+  cambiarEstado: (id, estado) =>
+    api.post(`/api/ordenes-requerimiento/${id}/cambiar_estado/`, { estado }),
+  confirmarRecepcion: (id) =>
+    api.post(`/api/ordenes-requerimiento/${id}/confirmar_recepcion/`),
 };
 
 export const tipoCambioAPI = {

@@ -2,9 +2,11 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { tipoCambioAPI } from "@/lib/api";
+import TableActionButton from "@/components/ui/TableActionButton";
+import { getTodayDateInputValue } from "@/lib/utils";
 
 const buildInitialForm = () => ({
-  fecha: new Date().toISOString().split("T")[0],
+  fecha: getTodayDateInputValue(),
   compra_usd: "",
   venta_usd: "",
   compra_eur: "",
@@ -108,16 +110,17 @@ export default function TipoCambioModal({ onCreated }) {
 
       {open && (
         <div
-          className="fixed inset-0 z-50 bg-black/40 flex items-center justify-center p-4"
+          className="fixed inset-0 z-50 overflow-y-auto bg-black/40"
           onClick={() => {
             setOpen(false);
             resetForm();
           }}
         >
-          <div
-            className="bg-white rounded-xl w-full max-w-4xl max-h-[90vh] overflow-hidden"
-            onClick={(e) => e.stopPropagation()}
-          >
+          <div className="flex min-h-full items-start justify-center p-4 sm:items-center">
+            <div
+              className="flex max-h-[calc(100dvh-2rem)] w-full max-w-4xl flex-col overflow-hidden rounded-xl bg-white sm:max-h-[calc(100dvh-4rem)]"
+              onClick={(e) => e.stopPropagation()}
+            >
             <div className="px-6 py-4 border-b border-gray-200 flex items-center justify-between">
               <h3 className="text-lg font-semibold text-[#1e3a8a]">
                 {isEditing ? "Editar tipo de cambio diario" : "Registrar tipo de cambio diario"}
@@ -133,7 +136,7 @@ export default function TipoCambioModal({ onCreated }) {
               </button>
             </div>
 
-            <div className="p-6 space-y-4">
+            <div className="flex-1 overflow-y-auto p-6 space-y-4">
               <div className="grid grid-cols-1 md:grid-cols-5 gap-3">
                 <div>
                   <label className="block text-xs font-semibold text-gray-600 mb-1">Fecha</label>
@@ -237,13 +240,9 @@ export default function TipoCambioModal({ onCreated }) {
                           <td className="px-3 py-2 text-right">{Number(tc.compra_eur).toFixed(4)}</td>
                           <td className="px-3 py-2 text-right">{Number(tc.venta_eur).toFixed(4)}</td>
                           <td className="px-3 py-2 text-center">
-                            <button
-                              type="button"
-                              onClick={() => startEdit(tc)}
-                              className="px-3 py-1.5 text-xs font-medium border border-[#1e3a8a] text-[#1e3a8a] rounded-lg hover:bg-blue-50"
-                            >
+                            <TableActionButton type="button" onClick={() => startEdit(tc)} tone="primary" className="text-xs">
                               Editar
-                            </button>
+                            </TableActionButton>
                           </td>
                         </tr>
                       ))}
@@ -258,6 +257,7 @@ export default function TipoCambioModal({ onCreated }) {
                   </table>
                 </div>
               </div>
+            </div>
             </div>
           </div>
         </div>

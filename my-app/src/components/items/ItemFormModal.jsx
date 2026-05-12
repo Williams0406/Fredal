@@ -87,7 +87,11 @@ export default function ItemFormModal({ open, onClose, onSaved, item }) {
 
   useEffect(() => {
     if (!open) return;
-    if (form.tipo_insumo === "REPUESTO" && dimensionCantidad && unidadBaseCantidad) {
+    if (
+      (form.tipo_insumo === "REPUESTO" || form.tipo_insumo === "HERRAMIENTA") &&
+      dimensionCantidad &&
+      unidadBaseCantidad
+    ) {
       setForm((prev) => ({
         ...prev,
         dimension: String(dimensionCantidad.id),
@@ -157,15 +161,16 @@ export default function ItemFormModal({ open, onClose, onSaved, item }) {
   };
 
   return (
-    <div 
-      className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4"
+    <div
+      className="fixed inset-0 z-50 overflow-y-auto bg-black/40"
       onClick={onClose}
     >
-      <form
-        onSubmit={handleSubmit}
-        className="bg-white rounded-xl w-full max-w-lg"
-        onClick={(e) => e.stopPropagation()}
-      >
+      <div className="flex min-h-full items-start justify-center p-4 sm:items-center">
+        <form
+          onSubmit={handleSubmit}
+          className="flex max-h-[calc(100dvh-2rem)] w-full max-w-lg flex-col overflow-hidden rounded-xl bg-white shadow-xl sm:max-h-[calc(100dvh-4rem)]"
+          onClick={(e) => e.stopPropagation()}
+        >
         {/* Header */}
         <div className="border-b border-gray-200 px-6 py-4">
           <div className="flex items-center justify-between">
@@ -185,7 +190,7 @@ export default function ItemFormModal({ open, onClose, onSaved, item }) {
         </div>
 
         {/* Content */}
-        <div className="px-6 py-6 space-y-5">
+        <div className="flex-1 overflow-y-auto px-6 py-6 space-y-5">
           
           {/* Error message */}
           {error && (
@@ -272,11 +277,11 @@ export default function ItemFormModal({ open, onClose, onSaved, item }) {
                     ...prev,
                     tipo_insumo: e.target.value,
                     dimension:
-                      e.target.value === "REPUESTO"
+                      e.target.value === "REPUESTO" || e.target.value === "HERRAMIENTA"
                         ? String(dimensionCantidad?.id ?? "")
                         : prev.dimension,
                     unidad_medida:
-                      e.target.value === "REPUESTO"
+                      e.target.value === "REPUESTO" || e.target.value === "HERRAMIENTA"
                         ? String(unidadBaseCantidad?.id ?? "")
                         : prev.unidad_medida,
                   }))
@@ -287,6 +292,7 @@ export default function ItemFormModal({ open, onClose, onSaved, item }) {
               >
                 <option value="REPUESTO">Repuesto</option>
                 <option value="CONSUMIBLE">Consumible</option>
+                <option value="HERRAMIENTA">Herramienta</option>
               </select>
             </div>
 
@@ -304,7 +310,7 @@ export default function ItemFormModal({ open, onClose, onSaved, item }) {
                   });
                   if (error) setError("");
                 }}
-                disabled={form.tipo_insumo === "REPUESTO"}
+                disabled={form.tipo_insumo === "REPUESTO" || form.tipo_insumo === "HERRAMIENTA"}
                 className="w-full px-4 py-3 border border-gray-300 rounded-lg text-sm
                          focus:outline-none focus:ring-2 focus:ring-[#1e3a8a] focus:border-transparent
                          transition-all duration-200 placeholder:text-gray-400"
@@ -332,7 +338,11 @@ export default function ItemFormModal({ open, onClose, onSaved, item }) {
                 });
                 if (error) setError("");
               }}
-              disabled={form.tipo_insumo === "REPUESTO" || !form.dimension}
+              disabled={
+                form.tipo_insumo === "REPUESTO" ||
+                form.tipo_insumo === "HERRAMIENTA" ||
+                !form.dimension
+              }
               className="w-full px-4 py-3 border border-gray-300 rounded-lg text-sm
                        focus:outline-none focus:ring-2 focus:ring-[#1e3a8a] focus:border-transparent
                        transition-all duration-200 placeholder:text-gray-400"
@@ -442,7 +452,8 @@ export default function ItemFormModal({ open, onClose, onSaved, item }) {
             </button>
           </div>
         </div>
-      </form>
+        </form>
+      </div>
     </div>
   );
 }

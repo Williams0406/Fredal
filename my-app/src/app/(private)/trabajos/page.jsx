@@ -1,21 +1,16 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { maquinariaAPI, trabajoAPI, trabajadorAPI } from "@/lib/api";
+import { maquinariaAPI, ordenRequerimientoAPI, trabajoAPI, trabajadorAPI } from "@/lib/api";
 import { useAuth } from "@/context/AuthContext";
+import { formatDisplayDate } from "@/lib/utils";
 
 import KanbanBoard from "@/components/trabajos/KanbanBoard";
 import TrabajoFormModal from "@/components/trabajos/TrabajoFormModal";
 import TrabajoDetalleModal from "@/components/trabajos/TrabajoDetalleModal";
-import {
-  ClipboardList,
-  Clock,
-  Settings,
-  CheckCircle,
-  AlertTriangle,
-  Filter,
-  Search,
-} from "lucide-react";
+import OrdenRequerimientoTable from "@/components/ordenes/OrdenRequerimientoTable";
+import { FilterField, FilterInput, FilterPanel, FilterSelect } from "@/components/ui/FilterPanel";
+import { Search } from "lucide-react";
 
 const initialFilters = {
   prioridad: "",
@@ -37,14 +32,7 @@ const prettyLabel = (value = "") =>
 
 const formatTrabajoFecha = (value) => {
   if (!value) return "-";
-
-  if (/^\d{4}-\d{2}-\d{2}$/.test(value)) {
-    const [year, month, day] = value.split("-");
-    return `${day}/${month}/${year}`;
-  }
-
-  const date = new Date(value);
-  return Number.isNaN(date.getTime()) ? value : date.toLocaleDateString("es-PE");
+  return formatDisplayDate(value);
 };
 
 export default function TrabajosPage() {
@@ -57,6 +45,8 @@ export default function TrabajosPage() {
   const [detalleOpen, setDetalleOpen] = useState(false);
   const [detalleId, setDetalleId] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [requerimientosTecnico, setRequerimientosTecnico] = useState([]);
+  const [loadingRequerimientosTecnico, setLoadingRequerimientosTecnico] = useState(false);
   const [filtros, setFiltros] = useState(initialFilters);
   const [viewMode, setViewMode] = useState("kanban");
 
@@ -114,6 +104,33 @@ export default function TrabajosPage() {
     Array.isArray(trabajo?.tecnicos) && trabajadorId
       ? trabajo.tecnicos.includes(trabajadorId)
       : false;
+
+  useEffect(() => {
+    if (!isTecnico) {
+      setRequerimientosTecnico([]);
+      return;
+    }
+
+    let active = true;
+    setLoadingRequerimientosTecnico(true);
+
+    ordenRequerimientoAPI
+      .list()
+      .then((response) => {
+        if (!active) return;
+        setRequerimientosTecnico(response.data || []);
+      })
+      .catch((error) => {
+        console.error("Error cargando requerimientos del técnico:", error);
+      })
+      .finally(() => {
+        if (active) setLoadingRequerimientosTecnico(false);
+      });
+
+    return () => {
+      active = false;
+    };
+  }, [isTecnico, trabajadorId]);
   
   const tecnicoLookup = useMemo(
     () =>
@@ -200,6 +217,17 @@ export default function TrabajosPage() {
     setDetalleOpen(true);
   };
 
+  const handleConfirmarRequerimiento = async (orden) => {
+    try {
+      await ordenRequerimientoAPI.confirmarRecepcion(orden.id);
+      const response = await ordenRequerimientoAPI.list();
+      setRequerimientosTecnico(response.data || []);
+    } catch (error) {
+      console.error("Error confirmando requerimiento:", error);
+      alert(error?.response?.data?.detail || "No se pudo confirmar la recepción del requerimiento.");
+    }
+  };
+
   const trabajosFiltrados = trabajos.filter((t) => {
     if (isTecnico && !isTrabajoAsignado(t)) return false;
     if (filtros.prioridad && t.prioridad !== filtros.prioridad) return false;
@@ -227,20 +255,12 @@ export default function TrabajosPage() {
     return true;
   });
 
-  const stats = {
-    total: trabajosFiltrados.length,
-    pendientes: trabajosFiltrados.filter((t) => t.estatus === "PENDIENTE").length,
-    enProceso: trabajosFiltrados.filter((t) => t.estatus === "EN_PROCESO").length,
-    finalizados: trabajosFiltrados.filter((t) => t.estatus === "FINALIZADO").length,
-    urgentes: trabajosFiltrados.filter((t) => t.prioridad === "URGENTE" || t.prioridad === "EMERGENCIA").length,
-  };
-
   const hasFilters = Object.values(filtros).some(Boolean);
 
   return (
     <div className="space-y-6">
-      <div className="flex items-center justify-between gap-3">
-        <div>
+      <div className="flex items-center justify-end gap-3">
+        <div className="hidden">
           <h1 className="text-2xl font-semibold text-[#1e3a8a]">Órdenes de Trabajo</h1>
           <p className="text-sm text-gray-500 mt-1">Gestión y seguimiento de mantenimiento</p>
         </div>
@@ -273,92 +293,127 @@ export default function TrabajosPage() {
         <p className="text-sm text-gray-500">Los técnicos solo pueden visualizar e interactuar con órdenes asignadas.</p>
       )}
 
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4">
-        <KPICard label="Total" value={stats.total} icon={ClipboardList} color="blue" />
-        <KPICard label="Pendientes" value={stats.pendientes} icon={Clock} color="gray" />
-        <KPICard label="En Proceso" value={stats.enProceso} icon={Settings} color="blue" />
-        <KPICard label="Finalizados" value={stats.finalizados} icon={CheckCircle} color="green" />
-        <KPICard label="Urgentes" value={stats.urgentes} icon={AlertTriangle} color="red" />
-      </div>
-
-      <div className="bg-white rounded-xl border border-gray-200 p-4 space-y-4">
-        <div className="flex flex-wrap items-center justify-between gap-2">
-          <div className="flex items-center gap-2">
-            <div className="w-9 h-9 rounded-lg bg-blue-50 text-[#1e3a8a] flex items-center justify-center">
-              <Filter className="w-4 h-4" />
-            </div>
-            <div>
-              <p className="text-sm font-semibold text-gray-800">Filtros avanzados</p>
-              <p className="text-xs text-gray-500">Encuentra órdenes por fecha, maquinaria, técnicos, actividades y items asignados</p>
-            </div>
+      {isTecnico && (
+        <div className="space-y-3">
+          <div>
+            <h2 className="text-lg font-semibold text-[#1e3a8a]">Órdenes de requerimiento asignadas</h2>
+            <p className="text-sm text-gray-500 mt-1">
+              Aquí ves las entregas de almacén pendientes de validación por técnico.
+            </p>
           </div>
-
-          {hasFilters && (
-            <button
-              type="button"
-              onClick={() => setFiltros(initialFilters)}
-              className="text-sm text-gray-600 hover:text-gray-900 border border-gray-300 px-3 py-1.5 rounded-lg"
-            >
-              Limpiar filtros
-            </button>
-          )}
+          <OrdenRequerimientoTable
+            ordenes={requerimientosTecnico}
+            loading={loadingRequerimientosTecnico}
+            onConfirmarTecnico={handleConfirmarRequerimiento}
+            emptyMessage="No tienes órdenes de requerimiento pendientes."
+          />
         </div>
+      )}
 
-        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-12 gap-3">
-          <FieldSelect label="Prioridad" value={filtros.prioridad} onChange={(valor) => setFiltros((prev) => ({ ...prev, prioridad: valor }))} className="xl:col-span-2">
+      <FilterPanel
+        title="Filtros avanzados"
+        description="Encuentra órdenes por fecha, maquinaria, técnicos, actividades e items asignados."
+        collapsible
+        hasActiveFilters={hasFilters}
+        onClear={() => setFiltros(initialFilters)}
+        bodyClassName="space-y-3"
+      >
+        <div className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-12">
+          <FilterSelect
+            label="Prioridad"
+            value={filtros.prioridad}
+            onChange={(e) => setFiltros((prev) => ({ ...prev, prioridad: e.target.value }))}
+            className="xl:col-span-2"
+          >
             <option value="">Todas</option>
             <option value="REGULAR">Regular</option>
             <option value="URGENTE">Urgente</option>
             <option value="EMERGENCIA">Emergencia</option>
-          </FieldSelect>
+          </FilterSelect>
 
-          <FieldSelect label="Lugar" value={filtros.lugar} onChange={(valor) => setFiltros((prev) => ({ ...prev, lugar: valor }))} className="xl:col-span-2">
+          <FilterSelect
+            label="Lugar"
+            value={filtros.lugar}
+            onChange={(e) => setFiltros((prev) => ({ ...prev, lugar: e.target.value }))}
+            className="xl:col-span-2"
+          >
             <option value="">Todos</option>
             <option value="TALLER">Taller</option>
             <option value="CAMPO">Campo</option>
-          </FieldSelect>
+          </FilterSelect>
 
-          <FieldSelect label="Maquinaria" value={filtros.maquinariaId} onChange={(valor) => setFiltros((prev) => ({ ...prev, maquinariaId: valor }))} className="xl:col-span-4">
+          <FilterSelect
+            label="Maquinaria"
+            value={filtros.maquinariaId}
+            onChange={(e) => setFiltros((prev) => ({ ...prev, maquinariaId: e.target.value }))}
+            className="xl:col-span-4"
+          >
             <option value="">Todas las máquinas</option>
             {maquinarias.map((maq) => (
               <option key={maq.id} value={maq.id}>{maq.codigo_maquina} · {maq.nombre}</option>
             ))}
-          </FieldSelect>
+          </FilterSelect>
 
-          <FieldSelect label="Técnico asignado" value={filtros.tecnicoId} onChange={(valor) => setFiltros((prev) => ({ ...prev, tecnicoId: valor }))} className="xl:col-span-4">
+          <FilterSelect
+            label="Técnico asignado"
+            value={filtros.tecnicoId}
+            onChange={(e) => setFiltros((prev) => ({ ...prev, tecnicoId: e.target.value }))}
+            className="xl:col-span-4"
+          >
             <option value="">Todos los técnicos</option>
             {tecnicos.map((tec) => (
               <option key={tec.id} value={tec.id}>{`${tec.nombres} ${tec.apellidos}`.trim()}</option>
             ))}
-          </FieldSelect>
+          </FilterSelect>
 
-          <FieldInput label="Fecha desde" type="date" value={filtros.fechaDesde} onChange={(valor) => setFiltros((prev) => ({ ...prev, fechaDesde: valor }))} className="xl:col-span-2" />
-          <FieldInput label="Fecha hasta" type="date" value={filtros.fechaHasta} onChange={(valor) => setFiltros((prev) => ({ ...prev, fechaHasta: valor }))} className="xl:col-span-2" />
+          <FilterInput
+            label="Fecha desde"
+            type="date"
+            value={filtros.fechaDesde}
+            onChange={(e) => setFiltros((prev) => ({ ...prev, fechaDesde: e.target.value }))}
+            className="xl:col-span-2"
+          />
+          <FilterInput
+            label="Fecha hasta"
+            type="date"
+            value={filtros.fechaHasta}
+            onChange={(e) => setFiltros((prev) => ({ ...prev, fechaHasta: e.target.value }))}
+            className="xl:col-span-2"
+          />
 
-          <FieldSelect label="Tipo de actividad" value={filtros.tipoActividad} onChange={(valor) => setFiltros((prev) => ({ ...prev, tipoActividad: valor }))} className="xl:col-span-3">
+          <FilterSelect
+            label="Tipo de actividad"
+            value={filtros.tipoActividad}
+            onChange={(e) => setFiltros((prev) => ({ ...prev, tipoActividad: e.target.value }))}
+            className="xl:col-span-3"
+          >
             <option value="">Todas</option>
             {optionSets.tipoActividad.map((tipo) => (
               <option key={tipo} value={tipo}>{prettyLabel(tipo)}</option>
             ))}
-          </FieldSelect>
+          </FilterSelect>
 
-          <FieldSelect label="Tipo de mantenimiento" value={filtros.tipoMantenimiento} onChange={(valor) => setFiltros((prev) => ({ ...prev, tipoMantenimiento: valor }))} className="xl:col-span-3">
+          <FilterSelect
+            label="Tipo de mantenimiento"
+            value={filtros.tipoMantenimiento}
+            onChange={(e) => setFiltros((prev) => ({ ...prev, tipoMantenimiento: e.target.value }))}
+            className="xl:col-span-3"
+          >
             <option value="">Todos</option>
             {optionSets.tipoMantenimiento.map((tipo) => (
               <option key={tipo} value={tipo}>{prettyLabel(tipo)}</option>
             ))}
-          </FieldSelect>
+          </FilterSelect>
 
-          <div className="xl:col-span-4">
-            <label className="block text-xs font-semibold text-gray-600 mb-1">Item asignado</label>
+          <FilterField label="Item asignado" className="xl:col-span-4">
             <div className="relative">
-              <Search className="w-4 h-4 text-gray-400 absolute left-3 top-1/2 -translate-y-1/2" />
+              <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400" />
               <input
                 list="items-trabajo"
                 value={filtros.item}
                 onChange={(e) => setFiltros((prev) => ({ ...prev, item: e.target.value }))}
                 placeholder="Código o nombre del item"
-                className="w-full pl-9 pr-3 py-2.5 border border-gray-300 rounded-lg text-sm"
+                className="w-full rounded-lg border border-gray-300 bg-white py-2.5 pl-9 pr-3 text-sm text-gray-700 outline-none transition focus:border-[#1e3a8a] focus:ring-2 focus:ring-blue-100"
               />
             </div>
             <datalist id="items-trabajo">
@@ -366,13 +421,13 @@ export default function TrabajosPage() {
                 <option key={item} value={item} />
               ))}
             </datalist>
-          </div>
-
-          <div className="xl:col-span-12 text-xs text-gray-500">
-            Mostrando <span className="font-semibold text-[#1e3a8a]">{trabajosFiltrados.length}</span> de {trabajos.length} órdenes.
-          </div>
+          </FilterField>
         </div>
-      </div>
+
+        <div className="text-xs text-gray-500">
+          Mostrando <span className="font-semibold text-[#1e3a8a]">{trabajosFiltrados.length}</span> de {trabajos.length} órdenes.
+        </div>
+      </FilterPanel>
 
       {loading ? (
         <div className="flex items-center justify-center py-16">
@@ -525,49 +580,6 @@ function TrabajosTableView({ trabajos, onView, maquinariaLookup = {} }) {
           </tbody>
         </table>
       </div>
-    </div>
-  );
-}
-
-function FieldSelect({ label, value, onChange, className = "", children }) {
-  return (
-    <div className={className}>
-      <label className="block text-xs font-semibold text-gray-600 mb-1">{label}</label>
-      <select value={value} onChange={(e) => onChange(e.target.value)} className="w-full px-3 py-2.5 border border-gray-300 rounded-lg text-sm">
-        {children}
-      </select>
-    </div>
-  );
-}
-
-function FieldInput({ label, type = "text", value, onChange, className = "" }) {
-  return (
-    <div className={className}>
-      <label className="block text-xs font-semibold text-gray-600 mb-1">{label}</label>
-      <input type={type} value={value} onChange={(e) => onChange(e.target.value)} className="w-full px-3 py-2.5 border border-gray-300 rounded-lg text-sm" />
-    </div>
-  );
-}
-
-function KPICard({ label, value, icon: Icon, color }) {
-  const colorClasses = {
-    blue: "text-[#1e3a8a]",
-    green: "text-[#84cc16]",
-    red: "text-red-600",
-    gray: "text-gray-600",
-  };
-
-  return (
-    <div className="bg-white rounded-xl border border-gray-200 p-4 hover:shadow-md transition-shadow duration-200">
-      <div className="flex items-center justify-between mb-3">
-        <div className={`p-2 rounded-lg bg-gray-50 ${colorClasses[color]}`}>
-          <Icon className="w-5 h-5" />
-        </div>
-
-        <span className={`text-3xl font-semibold ${colorClasses[color]}`}>{value}</span>
-      </div>
-
-      <p className="text-sm text-gray-600 font-medium">{label}</p>
     </div>
   );
 }

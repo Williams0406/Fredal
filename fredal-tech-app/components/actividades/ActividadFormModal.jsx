@@ -28,7 +28,7 @@ const getErrorMessage = (error, fallback) =>
   error?.response?.data?.non_field_errors?.[0] ||
   fallback;
 
-export default function ActividadFormModal({ trabajoId, onClose }) {
+export default function ActividadFormModal({ trabajoId, onClose, esPlanificada = false }) {
   const [tipoAct, setTipoAct] = useState('');
   const [tipoMant, setTipoMant] = useState('');
   const [subtipo, setSubtipo] = useState('');
@@ -61,7 +61,7 @@ export default function ActividadFormModal({ trabajoId, onClose }) {
         tipo_mantenimiento: tipoAct === 'MANTENIMIENTO' ? tipoMant : undefined,
         subtipo: tipoAct === 'MANTENIMIENTO' ? subtipo : undefined,
         descripcion: desc.trim(),
-        es_planificada: false,
+        es_planificada: esPlanificada,
       });
     } catch (error) {
       Alert.alert('Error', getErrorMessage(error, 'No se pudo guardar la actividad.'));
@@ -76,8 +76,12 @@ export default function ActividadFormModal({ trabajoId, onClose }) {
       visible
       onClose={onClose}
       icon='create-outline'
-      title='Registrar actividad'
-      subtitle='Documenta la ejecucion real realizada en esta orden'
+      title={esPlanificada ? 'Planificar actividad' : 'Registrar actividad'}
+      subtitle={
+        esPlanificada
+          ? 'Define una actividad prevista para esta orden'
+          : 'Documenta la ejecucion real realizada en esta orden'
+      }
       footer={
         <View style={styles.footerRow}>
           <Pressable
@@ -98,7 +102,11 @@ export default function ActividadFormModal({ trabajoId, onClose }) {
               <Ionicons name='save-outline' size={16} color={colors.white} />
             )}
             <Text style={styles.saveText}>
-              {isSaving ? 'Guardando...' : 'Guardar actividad'}
+              {isSaving
+                ? 'Guardando...'
+                : esPlanificada
+                  ? 'Guardar plan'
+                  : 'Guardar actividad'}
             </Text>
           </Pressable>
         </View>

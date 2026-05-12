@@ -1,8 +1,13 @@
 import { Tabs } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { colors, shadows } from '../../lib/theme';
+import { useAuthStore } from '../../store/authStore';
+import { isStorageUser as isStorageUserByRole } from '../../lib/permissions';
 
 export default function TabsLayout() {
+  const { user } = useAuthStore();
+  const isStorageUser = isStorageUserByRole(user);
+
   return (
     <Tabs
       screenOptions={{
@@ -37,10 +42,18 @@ export default function TabsLayout() {
       <Tabs.Screen
         name='index'
         options={{
-          title: 'Trabajos',
+          title: isStorageUser ? 'Almacen' : 'Trabajos',
           tabBarIcon: ({ color, focused }) => (
             <Ionicons
-              name={focused ? 'clipboard' : 'clipboard-outline'}
+              name={
+                isStorageUser
+                  ? focused
+                    ? 'cube'
+                    : 'cube-outline'
+                  : focused
+                    ? 'clipboard'
+                    : 'clipboard-outline'
+              }
               size={20}
               color={color}
             />

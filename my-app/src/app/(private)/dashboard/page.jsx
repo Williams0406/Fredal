@@ -23,7 +23,7 @@ export default function DashboardRedirect() {
       else if (roles.includes("Tecnico"))
         router.replace("/trabajos");
       else if (roles.includes("Almacenero"))
-        router.replace("/items");
+        router.replace("/almacen");
       else
         router.replace("/unauthorized");
           }

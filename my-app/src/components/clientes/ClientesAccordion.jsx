@@ -1,10 +1,23 @@
 "use client";
 
 import { useMemo, useState } from "react";
+import {
+  Building2,
+  ChevronDown,
+  ChevronUp,
+  MapPin,
+  Pencil,
+  ReceiptText,
+  Trash2,
+} from "lucide-react";
+import TableActionButton from "@/components/ui/TableActionButton";
 
 const getClienteKey = (cliente) => cliente?.id ?? cliente?.nombre;
 const getUbicacionKey = (ubicacion) =>
-  ubicacion?.cliente ?? ubicacion?.cliente_id ?? ubicacion?.clienteId ?? ubicacion?.cliente_nombre;
+  ubicacion?.cliente ??
+  ubicacion?.cliente_id ??
+  ubicacion?.clienteId ??
+  ubicacion?.cliente_nombre;
 
 export default function ClientesAccordion({
   clientes,
@@ -28,117 +41,182 @@ export default function ClientesAccordion({
 
   if (!clientes.length) {
     return (
-      <div className="rounded-lg border border-dashed border-gray-300 bg-white p-6 text-center text-sm text-gray-500">
-        Aún no hay clientes registrados.
+      <div className="rounded-[28px] border border-dashed border-slate-300 bg-white px-6 py-12 text-center shadow-sm">
+        <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-[20px] bg-slate-100 text-[#173569]">
+          <Building2 className="h-6 w-6" strokeWidth={2.1} />
+        </div>
+        <p className="mt-4 text-base font-semibold text-[#12233D]">
+          Aun no hay clientes registrados
+        </p>
+        <p className="mt-2 text-sm text-[#5F6C80]">
+          Crea un cliente para comenzar a asociar ubicaciones y frentes
+          operativos.
+        </p>
       </div>
     );
   }
 
   return (
-    <div className="space-y-3">
+    <div className="space-y-4">
       {clientes.map((cliente) => {
         const key = getClienteKey(cliente);
         const ubicacionesCliente = ubicacionesByCliente[key] || [];
         const isOpen = openCliente === key;
+        const hasRuc = Boolean(String(cliente.ruc || "").trim());
 
         return (
-          <div key={key} className="rounded-lg border border-gray-200 bg-white">
-            <div className="flex w-full items-center justify-between gap-4 px-4 py-3">
-              
-              {/* Información cliente */}
-              <div>
-                <h3 className="text-base font-semibold text-[#1e3a8a]">
-                  {cliente.nombre}
-                </h3>
-                <p className="text-sm text-gray-500">
-                  RUC: {cliente.ruc || "Sin RUC"}
-                </p>
-              </div>
-
-              {/* Acciones + contador */}
-              <div className="flex items-center gap-4">
-
-                {/* Botones cliente */}
-                <div className="flex gap-2">
-                  <button
-                    type="button"
-                    className="rounded border border-gray-300 px-3 py-1 text-xs text-gray-700 hover:bg-gray-100"
-                    onClick={() => onEditCliente?.(cliente)}
+          <article
+            key={key}
+            className={`overflow-hidden rounded-[28px] border bg-white transition-all duration-200 ${
+              isOpen
+                ? "border-[#173569]/18 shadow-[0_20px_42px_rgba(15,35,70,0.12)]"
+                : "border-slate-200 shadow-sm"
+            }`}
+          >
+            <div className="flex flex-col gap-4 px-5 py-5 lg:flex-row lg:items-center lg:justify-between">
+              <div className="min-w-0 flex-1">
+                <div className="flex items-start gap-4">
+                  <div
+                    className={`flex h-12 w-12 shrink-0 items-center justify-center rounded-[18px] ${
+                      isOpen
+                        ? "bg-[#EAF1FF] text-[#173569]"
+                        : "bg-slate-100 text-slate-600"
+                    }`}
                   >
-                    Editar
-                  </button>
+                    <Building2 className="h-5 w-5" strokeWidth={2.1} />
+                  </div>
 
-                  <button
-                    type="button"
-                    className="rounded border border-red-300 px-3 py-1 text-xs text-red-600 hover:bg-red-50"
-                    onClick={() => onDeleteCliente?.(cliente)}
-                  >
-                    Eliminar
-                  </button>
+                  <div className="min-w-0">
+                    <h3 className="truncate text-lg font-semibold text-[#12233D]">
+                      {cliente.nombre}
+                    </h3>
+                    <p className="mt-1 text-sm text-[#5F6C80]">
+                      {hasRuc ? `RUC ${cliente.ruc}` : "Sin RUC registrado"}
+                    </p>
+                  </div>
                 </div>
 
-                {/* Botón que abre el acordeón */}
+                <div className="mt-4 flex flex-wrap gap-2">
+                  <InfoPill icon={MapPin}>
+                    {ubicacionesCliente.length}{" "}
+                    {ubicacionesCliente.length === 1
+                      ? "ubicacion"
+                      : "ubicaciones"}
+                  </InfoPill>
+                  <InfoPill icon={ReceiptText}>
+                    {hasRuc ? "RUC disponible" : "Pendiente de RUC"}
+                  </InfoPill>
+                </div>
+              </div>
+
+              <div className="flex flex-wrap items-center justify-end gap-2">
+                <TableActionButton
+                  type="button"
+                  tone="neutral"
+                  onClick={() => onEditCliente?.(cliente)}
+                  title="Editar cliente"
+                >
+                  <Pencil className="h-3.5 w-3.5" strokeWidth={2.1} />
+                  Editar
+                </TableActionButton>
+
+                <TableActionButton
+                  type="button"
+                  tone="danger"
+                  onClick={() => onDeleteCliente?.(cliente)}
+                  title="Eliminar cliente"
+                >
+                  <Trash2 className="h-3.5 w-3.5" strokeWidth={2.1} />
+                  Eliminar
+                </TableActionButton>
+
                 <button
                   type="button"
                   onClick={() => setOpenCliente(isOpen ? null : key)}
-                  className="flex items-center gap-2 text-sm text-gray-500"
+                  className={`inline-flex items-center gap-2 rounded-full border px-3 py-2 text-sm font-semibold transition ${
+                    isOpen
+                      ? "border-[#173569]/15 bg-[#EAF1FF] text-[#173569]"
+                      : "border-slate-200 bg-white text-slate-600 hover:bg-slate-50"
+                  }`}
                 >
-                  {ubicacionesCliente.length} ubicaciones
-                  <span
-                    className={`transition-transform ${
-                      isOpen ? "rotate-180" : ""
-                    }`}
-                  >
-                    ▼
-                  </span>
+                  Ver ubicaciones
+                  {isOpen ? (
+                    <ChevronUp className="h-4 w-4" strokeWidth={2.2} />
+                  ) : (
+                    <ChevronDown className="h-4 w-4" strokeWidth={2.2} />
+                  )}
                 </button>
-
               </div>
             </div>
 
-
-            {isOpen && (
-              <div className="border-t border-gray-200 px-4 py-3 space-y-3">
+            {isOpen ? (
+              <div className="border-t border-slate-200 bg-slate-50/70 px-5 py-4">
                 {ubicacionesCliente.length ? (
-                  <ul className="space-y-2">
+                  <div className="grid gap-3 md:grid-cols-2">
                     {ubicacionesCliente.map((ubicacion) => (
-                      <li
-                        key={ubicacion.id ?? `${ubicacion.nombre}-${ubicacion.direccion}`}
-                        className="rounded-md border border-gray-100 bg-gray-50 p-3"
+                      <div
+                        key={
+                          ubicacion.id ??
+                          `${ubicacion.nombre}-${ubicacion.direccion}`
+                        }
+                        className="rounded-[22px] border border-slate-200 bg-white p-4 shadow-sm"
                       >
-                        <div className="flex items-start justify-between gap-2">
-                          <div>
-                            <p className="text-sm font-medium text-gray-700">{ubicacion.nombre}</p>
-                            <p className="text-xs text-gray-500">{ubicacion.direccion || "Sin dirección"}</p>
+                        <div className="flex items-start justify-between gap-3">
+                          <div className="min-w-0">
+                            <div className="inline-flex h-9 w-9 items-center justify-center rounded-2xl bg-slate-100 text-[#173569]">
+                              <MapPin className="h-4 w-4" strokeWidth={2.2} />
+                            </div>
+                            <p className="mt-3 text-sm font-semibold text-[#12233D]">
+                              {ubicacion.nombre}
+                            </p>
+                            <p className="mt-1 text-sm leading-6 text-[#5F6C80]">
+                              {ubicacion.direccion || "Sin direccion registrada"}
+                            </p>
                           </div>
+
                           <div className="flex gap-2">
-                            <button
+                            <TableActionButton
                               type="button"
-                              className="rounded border border-gray-300 px-2 py-1 text-xs text-gray-700"
+                              tone="neutral"
+                              iconOnly
                               onClick={() => onEditUbicacion?.(ubicacion)}
+                              title="Editar ubicacion"
                             >
-                              Editar
-                            </button>
-                            <button
+                              <Pencil className="h-3.5 w-3.5" strokeWidth={2.1} />
+                            </TableActionButton>
+                            <TableActionButton
                               type="button"
-                              className="rounded border border-red-300 px-2 py-1 text-xs text-red-600"
+                              tone="danger"
+                              iconOnly
                               onClick={() => onDeleteUbicacion?.(ubicacion)}
+                              title="Eliminar ubicacion"
                             >
-                              Eliminar
-                            </button>
+                              <Trash2 className="h-3.5 w-3.5" strokeWidth={2.1} />
+                            </TableActionButton>
                           </div>
                         </div>
-                      </li>
+                      </div>
                     ))}
-                  </ul>
+                  </div>
                 ) : (
-                  <p className="text-sm text-gray-500">Sin ubicaciones registradas.</p>
+                  <div className="rounded-[22px] border border-dashed border-slate-300 bg-white px-5 py-6 text-sm text-[#5F6C80]">
+                    Este cliente aun no tiene ubicaciones asociadas.
+                  </div>
                 )}
               </div>
-            )}
-          </div>
+            ) : null}
+          </article>
         );
       })}
     </div>
+  );
+}
+
+function InfoPill({ icon: Icon, children }) {
+  return (
+    <span className="inline-flex items-center gap-1.5 rounded-full border border-slate-200 bg-slate-100 px-3 py-1.5 text-xs font-semibold text-[#5F6C80]">
+      <Icon className="h-3.5 w-3.5" strokeWidth={2.1} />
+      {children}
+    </span>
   );
 }

@@ -24,6 +24,7 @@ import {
   trabajadorAPI,
 } from '../../lib/api';
 import { API_URL } from '../../lib/constants';
+import { useAuthStore } from '../../store/authStore';
 import AppSheet from '../ui/AppSheet';
 import { colors, radius } from '../../lib/theme';
 
@@ -48,6 +49,13 @@ const createInitialForm = (tecnico = '') => ({
   cantidad: '1',
   tecnico,
 });
+
+const getTrabajadorIdFromUser = (user) =>
+  user?.trabajador_id ??
+  user?.trabajador?.id ??
+  user?.trabajador ??
+  user?.perfil?.trabajador?.id ??
+  null;
 
 const getErrorMessage = (error, fallback) =>
   error?.response?.data?.detail ||
@@ -86,6 +94,7 @@ const mergePickedAssets = (current, assets = []) => {
 };
 
 export default function MovimientoModal({ actividad, trabajoId, onClose }) {
+  const { user } = useAuthStore();
   const qc = useQueryClient();
   const uploadEvidencias = useUploadActividadEvidencias(trabajoId);
   const deleteEvidencia = useDeleteActividadEvidencia(trabajoId);
@@ -96,6 +105,7 @@ export default function MovimientoModal({ actividad, trabajoId, onClose }) {
   const [tecnicos, setTecnicos] = useState([]);
   const [stockConsumible, setStockConsumible] = useState(0);
   const [loading, setLoading] = useState(true);
+  const [loadingItems, setLoadingItems] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
   const [evidenciasPendientes, setEvidenciasPendientes] = useState([]);
@@ -107,13 +117,16 @@ export default function MovimientoModal({ actividad, trabajoId, onClose }) {
   const esActPlanificada = Boolean(actividad?.es_planificada);
   const canManageEvidence = !esActPlanificada;
   const selectedItem = items.find((item) => String(item.id) === String(form.item));
+  const selectedTecnico = tecnicos.find((tecnico) => String(tecnico.id) === String(form.tecnico));
   const isBusy = saving || uploadEvidencias.isPending || deleteEvidencia.isPending;
+  const currentTrabajadorId = getTrabajadorIdFromUser(user);
 
   useEffect(() => {
     setTipo('REPUESTO');
     setForm(createInitialForm());
     setUnidades([]);
     setStockConsumible(0);
+    setLoadingItems(false);
     setError('');
     setRemovingEvidenceId(null);
     setEvidenciasPendientes([]);
@@ -125,39 +138,79 @@ export default function MovimientoModal({ actividad, trabajoId, onClose }) {
 
     setLoading(true);
     setError('');
+    setItems([]);
 
-    const requests = isMaintenance
-      ? [
-          itemAPI.list({ actividad: actividad.id, disponibles: 1 }),
-          trabajoAPI.retrieve(trabajoId),
-          trabajadorAPI.list(),
-        ]
-      : [trabajoAPI.retrieve(trabajoId), trabajadorAPI.list()];
-
-    Promise.all(requests)
-      .then((responses) => {
-        if (isMaintenance) {
-          const [itemsRes, trabajoRes, trabRes] = responses;
-          setItems(itemsRes.data || []);
-          const ids = trabajoRes.data?.tecnicos || [];
-          setTecnicos((trabRes.data || []).filter((trabajador) => ids.includes(trabajador.id)));
-          return;
-        }
-
-        const [trabajoRes, trabRes] = responses;
-        setItems([]);
+    Promise.all([trabajoAPI.retrieve(trabajoId), trabajadorAPI.list()])
+      .then(([trabajoRes, trabRes]) => {
         const ids = trabajoRes.data?.tecnicos || [];
-        setTecnicos((trabRes.data || []).filter((trabajador) => ids.includes(trabajador.id)));
+        const tecnicosAsignados = (trabRes.data || [])
+          .filter((trabajador) => ids.includes(trabajador.id))
+          .sort((left, right) => ids.indexOf(left.id) - ids.indexOf(right.id));
+
+        setTecnicos(tecnicosAsignados);
+
+        setForm((prev) => ({
+          ...prev,
+          tecnico: (() => {
+            const tecnicoPrevio = tecnicosAsignados.find(
+              (trabajador) => String(trabajador.id) === String(prev.tecnico)
+            );
+            const tecnicoActual =
+              (currentTrabajadorId &&
+                tecnicosAsignados.find(
+                  (trabajador) => String(trabajador.id) === String(currentTrabajadorId)
+                )) ||
+              tecnicosAsignados[0] ||
+              null;
+
+            if (tecnicoPrevio) return String(tecnicoPrevio.id);
+            if (tecnicoActual) return String(tecnicoActual.id);
+            return '';
+          })(),
+          item: '',
+          item_unidad: '',
+          cantidad: '1',
+        }));
       })
       .catch(() =>
         setError(
           isMaintenance
-            ? 'No se pudieron cargar los materiales disponibles.'
+            ? 'No se pudo cargar la orden y sus tecnicos asignados.'
             : 'No se pudo cargar la informacion de la actividad.'
         )
       )
       .finally(() => setLoading(false));
-  }, [actividad?.id, isMaintenance, trabajoId]);
+  }, [actividad?.id, currentTrabajadorId, isMaintenance, trabajoId]);
+
+  useEffect(() => {
+    if (!isMaintenance) {
+      setItems([]);
+      setLoadingItems(false);
+      return;
+    }
+
+    if (!actividad?.id || !form.tecnico) {
+      setItems([]);
+      setLoadingItems(false);
+      return;
+    }
+
+    setLoadingItems(true);
+    setError('');
+
+    itemAPI
+      .list({
+        actividad: actividad.id,
+        tecnico: form.tecnico,
+        disponibles: 1,
+      })
+      .then((response) => setItems(response.data || []))
+      .catch(() => {
+        setItems([]);
+        setError('No se pudieron cargar los materiales del tecnico seleccionado.');
+      })
+      .finally(() => setLoadingItems(false));
+  }, [actividad?.id, form.tecnico, isMaintenance]);
 
   useEffect(() => {
     if (!isMaintenance) return;
@@ -165,7 +218,7 @@ export default function MovimientoModal({ actividad, trabajoId, onClose }) {
     setError('');
     setForm((prev) => ({ ...prev, item_unidad: '', cantidad: '1' }));
 
-    if (!form.item) {
+    if (!form.item || !form.tecnico) {
       setUnidades([]);
       setStockConsumible(0);
       return;
@@ -173,7 +226,7 @@ export default function MovimientoModal({ actividad, trabajoId, onClose }) {
 
     if (tipo === 'REPUESTO') {
       itemAPI
-        .unidadesAsignables(form.item, { actividad: actividad.id })
+        .unidadesAsignables(form.item, { actividad: actividad.id, tecnico: form.tecnico })
         .then((response) => setUnidades(response.data || []))
         .catch(() => setUnidades([]));
       setStockConsumible(0);
@@ -181,11 +234,11 @@ export default function MovimientoModal({ actividad, trabajoId, onClose }) {
     }
 
     itemAPI
-      .lotesDisponibles(form.item, { actividad: actividad.id })
+      .lotesDisponibles(form.item, { actividad: actividad.id, tecnico: form.tecnico })
       .then((response) => setStockConsumible(Number(response.data?.cantidad_disponible || 0)))
       .catch(() => setStockConsumible(0));
     setUnidades([]);
-  }, [actividad?.id, form.item, isMaintenance, tipo]);
+  }, [actividad?.id, form.item, form.tecnico, isMaintenance, tipo]);
 
   const filteredItems = useMemo(
     () => items.filter((item) => item.tipo_insumo === tipo),
@@ -193,9 +246,11 @@ export default function MovimientoModal({ actividad, trabajoId, onClose }) {
   );
 
   const helperText = esActPlanificada
-    ? 'Esta actividad es planificada: el tecnico es obligatorio para registrar el movimiento.'
+    ? 'Esta actividad es planificada: el tecnico es obligatorio y el movimiento solo se guarda como planificacion, sin crear historial.'
     : isMaintenance
-      ? 'Puedes registrar materiales y adjuntar evidencias desde este modal.'
+      ? selectedTecnico
+        ? `Mostrando los materiales disponibles para ${selectedTecnico.nombres} ${selectedTecnico.apellidos}.`
+        : 'Selecciona un tecnico asignado a la OT para ver solo los materiales que tiene disponibles.'
       : 'Usa este modal para adjuntar evidencias fotograficas de la revision realizada.';
 
   const resetMovementForm = () => {
@@ -303,6 +358,11 @@ export default function MovimientoModal({ actividad, trabajoId, onClose }) {
     }
 
     if (hasMovementDraft) {
+      if (!form.tecnico) {
+        setError('Selecciona el tecnico responsable.');
+        return;
+      }
+
       if (tipo === 'REPUESTO' && !form.item_unidad) {
         setError('Selecciona una unidad disponible.');
         return;
@@ -320,10 +380,6 @@ export default function MovimientoModal({ actividad, trabajoId, onClose }) {
         }
       }
 
-      if (esActPlanificada && !form.tecnico) {
-        setError('Selecciona el tecnico responsable.');
-        return;
-      }
     }
 
     setSaving(true);
@@ -442,6 +498,70 @@ export default function MovimientoModal({ actividad, trabajoId, onClose }) {
           {isMaintenance ? (
             <>
               <View style={styles.block}>
+                <Text style={styles.blockTitle}>Tecnico *</Text>
+                {tecnicos.length === 0 ? (
+                  <View style={styles.emptyListCard}>
+                    <Ionicons name='person-outline' size={26} color={colors.textSoft} />
+                    <Text style={styles.emptyListTitle}>No hay tecnicos asignados</Text>
+                    <Text style={styles.emptyListText}>
+                      Esta orden necesita al menos un tecnico asignado para mostrar materiales.
+                    </Text>
+                  </View>
+                ) : (
+                  <>
+                    <View style={styles.typeStack}>
+                      {tecnicos.map((tecnico) => {
+                        const selected = String(form.tecnico) === String(tecnico.id);
+                        return (
+                          <Pressable
+                            key={tecnico.id}
+                            style={[styles.techCard, selected ? styles.techCardSelected : null]}
+                            onPress={() =>
+                              setForm((prev) => ({
+                                ...prev,
+                                tecnico: selected ? '' : String(tecnico.id),
+                                item: '',
+                                item_unidad: '',
+                                cantidad: '1',
+                              }))
+                            }
+                          >
+                            <View style={styles.techAvatar}>
+                              <Ionicons
+                                name='person-outline'
+                                size={16}
+                                color={selected ? colors.white : colors.navy}
+                              />
+                            </View>
+                            <View style={{ flex: 1 }}>
+                              <Text
+                                style={[styles.techTitle, selected ? styles.techTitleSelected : null]}
+                              >
+                                {tecnico.nombres} {tecnico.apellidos}
+                              </Text>
+                              <Text
+                                style={[styles.techMeta, selected ? styles.techMetaSelected : null]}
+                              >
+                                Tecnico asignado a la orden
+                              </Text>
+                            </View>
+                            {selected ? (
+                              <Ionicons name='checkmark-circle' size={18} color={colors.navy} />
+                            ) : null}
+                          </Pressable>
+                        );
+                      })}
+                    </View>
+                    <Text style={styles.helperText}>
+                      {selectedTecnico
+                        ? 'El listado de materiales se filtrara segun este tecnico.'
+                        : 'Selecciona un tecnico para cargar sus materiales disponibles.'}
+                    </Text>
+                  </>
+                )}
+              </View>
+
+              <View style={styles.block}>
                 <Text style={styles.blockTitle}>Tipo de material</Text>
                 <View style={styles.typeStack}>
                   {TYPE_OPTIONS.map((option) => {
@@ -492,13 +612,19 @@ export default function MovimientoModal({ actividad, trabajoId, onClose }) {
 
               <View style={styles.block}>
                 <Text style={styles.blockTitle}>Selecciona el material</Text>
-                {filteredItems.length === 0 ? (
+                {loadingItems ? (
+                  <View style={styles.inlineLoadingCard}>
+                    <ActivityIndicator size='small' color={colors.navy} />
+                    <Text style={styles.inlineLoadingText}>Cargando materiales del tecnico...</Text>
+                  </View>
+                ) : filteredItems.length === 0 ? (
                   <View style={styles.emptyListCard}>
                     <Ionicons name='cube-outline' size={26} color={colors.textSoft} />
                     <Text style={styles.emptyListTitle}>No hay materiales disponibles</Text>
                     <Text style={styles.emptyListText}>
-                      No encontramos {tipo === 'REPUESTO' ? 'repuestos' : 'consumibles'} listos
-                      para usar.
+                      {form.tecnico
+                        ? `No encontramos ${tipo === 'REPUESTO' ? 'repuestos' : 'consumibles'} listos para usar para este tecnico.`
+                        : 'Selecciona primero un tecnico para consultar sus materiales.'}
                     </Text>
                   </View>
                 ) : (
@@ -619,52 +745,6 @@ export default function MovimientoModal({ actividad, trabajoId, onClose }) {
                 </View>
               ) : null}
             </>
-          ) : null}
-
-          {esActPlanificada && tecnicos.length > 0 ? (
-            <View style={styles.block}>
-              <Text style={styles.blockTitle}>Tecnico *</Text>
-              <View style={styles.typeStack}>
-                {tecnicos.map((tecnico) => {
-                  const selected = String(form.tecnico) === String(tecnico.id);
-                  return (
-                    <Pressable
-                      key={tecnico.id}
-                      style={[styles.techCard, selected ? styles.techCardSelected : null]}
-                      onPress={() =>
-                        setForm((prev) => ({
-                          ...prev,
-                          tecnico: selected ? '' : String(tecnico.id),
-                        }))
-                      }
-                    >
-                      <View style={styles.techAvatar}>
-                        <Ionicons
-                          name='person-outline'
-                          size={16}
-                          color={selected ? colors.white : colors.navy}
-                        />
-                      </View>
-                      <View style={{ flex: 1 }}>
-                        <Text
-                          style={[styles.techTitle, selected ? styles.techTitleSelected : null]}
-                        >
-                          {tecnico.nombres} {tecnico.apellidos}
-                        </Text>
-                        <Text
-                          style={[styles.techMeta, selected ? styles.techMetaSelected : null]}
-                        >
-                          Tecnico asignado a la orden
-                        </Text>
-                      </View>
-                      {selected ? (
-                        <Ionicons name='checkmark-circle' size={18} color={colors.navy} />
-                      ) : null}
-                    </Pressable>
-                  );
-                })}
-              </View>
-            </View>
           ) : null}
 
           {canManageEvidence ? (
@@ -1022,6 +1102,23 @@ const styles = StyleSheet.create({
   helperText: {
     marginTop: 6,
     fontSize: 12,
+    color: colors.textMuted,
+  },
+  inlineLoadingCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 10,
+    borderRadius: radius.lg,
+    borderWidth: 1,
+    borderColor: colors.border,
+    backgroundColor: colors.surfaceMuted,
+    paddingHorizontal: 18,
+    paddingVertical: 20,
+  },
+  inlineLoadingText: {
+    fontSize: 13,
+    fontWeight: '700',
     color: colors.textMuted,
   },
   techCard: {

@@ -21,7 +21,34 @@ def can_manage_planned_activities(user):
     if user.is_staff:
         return True
 
-    return user_in_any_group(user, ["Jefe de Almaceneros", "Almacenero"])
+    return user_in_any_group(
+        user,
+        ["Jefe de Almaceneros", "Jefe de Tecnicos", "Jefe de Mantenimiento"],
+    )
+
+
+def is_storage_user(user):
+    if not user or not user.is_authenticated:
+        return False
+    return user.is_staff or user_in_any_group(user, ["Jefe de Almaceneros", "Almacenero"])
+
+
+def is_compras_user(user):
+    if not user or not user.is_authenticated:
+        return False
+    return user.is_staff or user_in_any_group(user, ["ManageCompras", "Compras"])
+
+
+def is_maintenance_boss(user):
+    if not user or not user.is_authenticated:
+        return False
+    return user.is_staff or user_in_any_group(user, ["Jefe de Tecnicos", "Jefe de Mantenimiento"])
+
+
+def is_tecnico_user(user):
+    if not user or not user.is_authenticated:
+        return False
+    return user.is_staff or user_in_group(user, "Tecnico")
 
 
 # ==========================
@@ -101,7 +128,8 @@ class TrabajoPermission(BasePermission):
 class CambioEquipoPermission(BasePermission):
     """
     Reglas:
-    - Admin / Jefe de Almaceneros / Almacenero → CRUD
+    - Admin / Jefe de Almaceneros / Almacenero / Jefe de Tecnicos / Jefe de Mantenimiento → CRUD
+    - Tecnico → registrar y consultar
     - Otros → solo lectura
     """
 
@@ -118,6 +146,9 @@ class CambioEquipoPermission(BasePermission):
             return True
 
         if user_in_group(user, "Almacenero"):
+            return True
+
+        if user_in_any_group(user, ["Jefe de Tecnicos", "Jefe de Mantenimiento"]):
             return True
 
         if user_in_group(user, "Tecnico"):
@@ -152,6 +183,40 @@ class CompraPermission(BasePermission):
         return request.method in SAFE_METHODS
 
 
+class OrdenCompraPermission(BasePermission):
+    """
+    Órdenes de compra:
+    - Admin / Compras / Almacén -> acceso
+    """
+
+    def has_permission(self, request, view):
+        user = request.user
+
+        if not user or not user.is_authenticated:
+            return False
+
+        return is_storage_user(user) or is_compras_user(user)
+
+
+class OrdenRequerimientoPermission(BasePermission):
+    """
+    Órdenes de requerimiento:
+    - Admin / Jefe de mantenimiento / Almacén / Técnico -> acceso
+    """
+
+    def has_permission(self, request, view):
+        user = request.user
+
+        if not user or not user.is_authenticated:
+            return False
+
+        return (
+            is_storage_user(user)
+            or is_maintenance_boss(user)
+            or is_tecnico_user(user)
+        )
+
+
 # ==========================
 # Stock / Items
 # ==========================
@@ -162,6 +227,7 @@ class ItemPermission(BasePermission):
     - Admin / Jefe de Almaceneros → CRUD
     - Almacenero → ver
     - Tecnico → ver
+    - Jefe de Tecnicos / Jefe de Mantenimiento → ver
     - ManageCompras → ver (necesita ítems para gestionar compras)
     """
 
@@ -181,6 +247,9 @@ class ItemPermission(BasePermission):
             return request.method in SAFE_METHODS
 
         if user_in_group(user, "Tecnico"):
+            return request.method in SAFE_METHODS
+
+        if user_in_any_group(user, ["Jefe de Tecnicos", "Jefe de Mantenimiento"]):
             return request.method in SAFE_METHODS
 
         # ✅ ManageCompras necesita ver ítems para asociarlos a compras

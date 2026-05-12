@@ -47,13 +47,13 @@ export default function Modal({ open, onClose, title, children, size = "md" }) {
       />
 
       {/* Modal Container */}
-      <div className="flex min-h-full items-center justify-center p-4">
+      <div className="flex min-h-full items-start justify-center p-3 sm:items-center sm:p-6">
         <div
-          className={`relative bg-white rounded-2xl shadow-2xl w-full ${sizeClasses[size]} transform transition-all`}
+          className={`relative flex max-h-[calc(100dvh-1.5rem)] w-full flex-col overflow-hidden rounded-2xl bg-white shadow-2xl ${sizeClasses[size]} transform transition-all sm:max-h-[calc(100dvh-3rem)]`}
           onClick={(e) => e.stopPropagation()}
         >
           {/* Header */}
-          <div className="flex items-center justify-between px-6 py-5 border-b border-gray-200">
+          <div className="flex items-center justify-between border-b border-gray-200 px-6 py-5">
             <h2 className="text-xl font-semibold text-[#1e3a8a]">
               {title}
             </h2>
@@ -79,7 +79,7 @@ export default function Modal({ open, onClose, title, children, size = "md" }) {
           </div>
 
           {/* Content */}
-          <div className="px-6 py-6">
+          <div className="flex-1 overflow-y-auto px-6 py-6">
             {children}
           </div>
         </div>

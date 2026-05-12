@@ -10,33 +10,34 @@ export default function MaquinariaFormModal({
   maquinaria = null,
 }) {
   const isEdit = Boolean(maquinaria);
-
-  const [form, setForm] = useState({
-    codigo_maquina: "",
-    nombre: "",
-    descripcion: "",
-    observacion: "",
+  const hasHorometro = (value) =>
+    value !== null && value !== undefined && value !== "";
+  const buildInitialForm = (source = null) => ({
+    codigo_maquina: source?.codigo_maquina || "",
+    nombre: source?.nombre || "",
+    descripcion: source?.descripcion || "",
+    observacion: source?.observacion || "",
+    horometro_manual: source?.horometro_manual ?? "",
   });
+  const formatHorometroDate = (value) => {
+    if (!value) return null;
+    const safeValue =
+      typeof value === "string" && value.includes("T")
+        ? value
+        : `${value}T00:00:00`;
+    return new Date(safeValue).toLocaleDateString("es-PE");
+  };
+
+  const [form, setForm] = useState(buildInitialForm());
 
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
 
   useEffect(() => {
     if (maquinaria) {
-      setForm({
-        codigo_maquina: maquinaria.codigo_maquina || "",
-        nombre: maquinaria.nombre || "",
-        descripcion: maquinaria.descripcion || "",
-        observacion: maquinaria.observacion || "",
-      });
+      setForm(buildInitialForm(maquinaria));
     } else {
-      // Reset form cuando se abre para crear nueva
-      setForm({
-        codigo_maquina: "",
-        nombre: "",
-        descripcion: "",
-        observacion: "",
-      });
+      setForm(buildInitialForm());
     }
     setError("");
   }, [maquinaria, open]);
@@ -55,7 +56,6 @@ export default function MaquinariaFormModal({
       ...form,
       [e.target.name]: e.target.value,
     });
-    // Limpiar error al escribir
     if (error) setError("");
   };
 
@@ -65,10 +65,16 @@ export default function MaquinariaFormModal({
     setError("");
 
     try {
+      const payload = {
+        ...form,
+        horometro_manual:
+          form.horometro_manual === "" ? null : Number(form.horometro_manual),
+      };
+
       if (isEdit) {
-        await maquinariaAPI.update(maquinaria.id, form);
+        await maquinariaAPI.update(maquinaria.id, payload);
       } else {
-        await maquinariaAPI.create(form);
+        await maquinariaAPI.create(payload);
       }
 
       onSaved();
@@ -76,7 +82,7 @@ export default function MaquinariaFormModal({
     } catch (err) {
       console.error(err);
       setError(
-        err.response?.data?.message || 
+        err.response?.data?.message ||
         "Error al guardar la maquinaria. Por favor intente nuevamente."
       );
     } finally {
@@ -88,25 +94,25 @@ export default function MaquinariaFormModal({
 
   return (
     <div
-      className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4"
+      className="fixed inset-0 z-50 overflow-y-auto bg-black/40"
       onClick={onClose}
     >
+      <div className="flex min-h-full items-start justify-center p-4 sm:items-center">
       <div
-        className="bg-white rounded-2xl w-full max-w-lg shadow-xl"
+        className="flex max-h-[calc(100dvh-2rem)] w-full max-w-lg flex-col overflow-hidden rounded-2xl bg-white shadow-xl sm:max-h-[calc(100dvh-4rem)]"
         onClick={(e) => e.stopPropagation()}
       >
-        {/* HEADER */}
-        <div className="flex items-center justify-between px-6 py-5 border-b border-gray-200">
+        <div className="flex items-center justify-between border-b border-gray-200 px-6 py-5">
           <h2 className="text-xl font-semibold text-[#1e3a8a]">
             {isEdit ? "Editar Maquinaria" : "Nueva Maquinaria"}
           </h2>
           <button
             onClick={onClose}
-            className="text-gray-400 hover:text-gray-600 transition-colors"
+            className="text-gray-400 transition-colors hover:text-gray-600"
             disabled={loading}
           >
             <svg
-              className="w-6 h-6"
+              className="h-6 w-6"
               fill="none"
               stroke="currentColor"
               viewBox="0 0 24 24"
@@ -121,14 +127,13 @@ export default function MaquinariaFormModal({
           </button>
         </div>
 
-        {/* FORM */}
-        <form onSubmit={handleSubmit} className="px-6 py-6">
+        <form onSubmit={handleSubmit} className="flex flex-1 flex-col overflow-hidden">
+          <div className="flex-1 overflow-y-auto px-6 py-6">
           <div className="space-y-5">
-            {/* Error Message */}
             {error && (
-              <div className="bg-red-50 border border-red-200 rounded-lg p-3 flex items-start gap-3">
+              <div className="flex items-start gap-3 rounded-lg border border-red-200 bg-red-50 p-3">
                 <svg
-                  className="w-5 h-5 text-red-600 flex-shrink-0 mt-0.5"
+                  className="mt-0.5 h-5 w-5 flex-shrink-0 text-red-600"
                   fill="none"
                   stroke="currentColor"
                   viewBox="0 0 24 24"
@@ -144,11 +149,10 @@ export default function MaquinariaFormModal({
               </div>
             )}
 
-            {/* Código */}
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-2">
-                Código de Maquinaria
-                <span className="text-red-500 ml-1">*</span>
+              <label className="mb-2 block text-sm font-medium text-gray-700">
+                Codigo de Maquinaria
+                <span className="ml-1 text-red-500">*</span>
               </label>
               <input
                 type="text"
@@ -157,15 +161,14 @@ export default function MaquinariaFormModal({
                 value={form.codigo_maquina}
                 onChange={handleChange}
                 required
-                className="w-full px-4 py-2.5 border rounded-lg text-gray-900 transition-colors bg-white border-gray-300 hover:border-[#1e3a8a] focus:border-[#1e3a8a] focus:ring-2 focus:ring-blue-100 outline-none"
+                className="w-full rounded-lg border border-gray-300 bg-white px-4 py-2.5 text-gray-900 outline-none transition-colors hover:border-[#1e3a8a] focus:border-[#1e3a8a] focus:ring-2 focus:ring-blue-100"
               />
             </div>
 
-            {/* Nombre */}
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-2">
+              <label className="mb-2 block text-sm font-medium text-gray-700">
                 Nombre
-                <span className="text-red-500 ml-1">*</span>
+                <span className="ml-1 text-red-500">*</span>
               </label>
               <input
                 type="text"
@@ -174,28 +177,74 @@ export default function MaquinariaFormModal({
                 value={form.nombre}
                 onChange={handleChange}
                 required
-                className="w-full px-4 py-2.5 border border-gray-300 rounded-lg text-gray-900 hover:border-[#1e3a8a] focus:border-[#1e3a8a] focus:ring-2 focus:ring-blue-100 outline-none transition-colors"
+                className="w-full rounded-lg border border-gray-300 px-4 py-2.5 text-gray-900 outline-none transition-colors hover:border-[#1e3a8a] focus:border-[#1e3a8a] focus:ring-2 focus:ring-blue-100"
               />
             </div>
 
-            {/* Descripción */}
+            {isEdit && (
+              <div className="space-y-4">
+                <div>
+                  <label className="mb-2 block text-sm font-medium text-gray-700">
+                    Horometro actual
+                  </label>
+                  <div className="rounded-lg border border-gray-200 bg-gray-50 px-4 py-3">
+                    <p className="text-base font-semibold text-gray-900">
+                      {hasHorometro(maquinaria?.horometro_actual)
+                        ? Number(maquinaria.horometro_actual).toLocaleString("es-PE", {
+                            minimumFractionDigits: 2,
+                            maximumFractionDigits: 2,
+                          })
+                        : "Sin registro"}
+                    </p>
+                    <p className="mt-1 text-xs text-gray-500">
+                      {maquinaria?.horometro_fuente === "MANUAL" &&
+                      maquinaria?.horometro_manual_actualizado_en
+                        ? `Valor manual actualizado el ${formatHorometroDate(maquinaria.horometro_manual_actualizado_en)}.`
+                        : maquinaria?.fecha_ultimo_horometro
+                          ? `Ultima OT registrada el ${formatHorometroDate(maquinaria.fecha_ultimo_horometro)}.`
+                          : "Se toma del horometro de la orden de trabajo mas reciente para esta maquinaria."}
+                    </p>
+                  </div>
+                </div>
+
+                <div>
+                  <label className="mb-2 block text-sm font-medium text-gray-700">
+                    Horometro manual
+                  </label>
+                  <input
+                    type="number"
+                    name="horometro_manual"
+                    step="0.01"
+                    min="0"
+                    placeholder="Ej: 1250.50"
+                    value={form.horometro_manual}
+                    onChange={handleChange}
+                    className="w-full rounded-lg border border-gray-300 px-4 py-2.5 text-gray-900 outline-none transition-colors hover:border-[#1e3a8a] focus:border-[#1e3a8a] focus:ring-2 focus:ring-blue-100"
+                  />
+                  <p className="mt-2 text-xs text-gray-500">
+                    Puedes corregirlo manualmente. Si luego aparece una OT mas reciente con horometro,
+                    ese ultimo registro volvera a ser el valor actual.
+                  </p>
+                </div>
+              </div>
+            )}
+
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-2">
-                Descripción
+              <label className="mb-2 block text-sm font-medium text-gray-700">
+                Descripcion
               </label>
               <textarea
                 name="descripcion"
-                placeholder="Detalles técnicos y características del equipo..."
+                placeholder="Detalles tecnicos y caracteristicas del equipo..."
                 value={form.descripcion}
                 onChange={handleChange}
                 rows={3}
-                className="w-full px-4 py-2.5 border border-gray-300 rounded-lg text-gray-900 hover:border-[#1e3a8a] focus:border-[#1e3a8a] focus:ring-2 focus:ring-blue-100 outline-none resize-none transition-colors"
+                className="w-full resize-none rounded-lg border border-gray-300 px-4 py-2.5 text-gray-900 outline-none transition-colors hover:border-[#1e3a8a] focus:border-[#1e3a8a] focus:ring-2 focus:ring-blue-100"
               />
             </div>
 
-            {/* Observaciones */}
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-2">
+              <label className="mb-2 block text-sm font-medium text-gray-700">
                 Observaciones
               </label>
               <textarea
@@ -204,18 +253,18 @@ export default function MaquinariaFormModal({
                 value={form.observacion}
                 onChange={handleChange}
                 rows={3}
-                className="w-full px-4 py-2.5 border border-gray-300 rounded-lg text-gray-900 hover:border-[#1e3a8a] focus:border-[#1e3a8a] focus:ring-2 focus:ring-blue-100 outline-none resize-none transition-colors"
+                className="w-full resize-none rounded-lg border border-gray-300 px-4 py-2.5 text-gray-900 outline-none transition-colors hover:border-[#1e3a8a] focus:border-[#1e3a8a] focus:ring-2 focus:ring-blue-100"
               />
             </div>
           </div>
+          </div>
 
-          {/* FOOTER */}
-          <div className="flex items-center justify-end gap-3 mt-8 pt-6 border-t border-gray-200">
+          <div className="mt-8 flex items-center justify-end gap-3 border-t border-gray-200 pt-6">
             <button
               type="button"
               onClick={onClose}
               disabled={loading}
-              className="px-5 py-2.5 text-gray-700 font-medium bg-gray-100 hover:bg-gray-200 rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+              className="rounded-lg bg-gray-100 px-5 py-2.5 font-medium text-gray-700 transition-colors hover:bg-gray-200 disabled:cursor-not-allowed disabled:opacity-50"
             >
               Cancelar
             </button>
@@ -223,17 +272,17 @@ export default function MaquinariaFormModal({
             <button
               type="submit"
               disabled={loading}
-              className="px-5 py-2.5 bg-[#1e3a8a] text-white font-medium rounded-lg hover:bg-[#1e40af] transition-colors disabled:opacity-50 disabled:cursor-not-allowed inline-flex items-center gap-2"
+              className="inline-flex items-center gap-2 rounded-lg bg-[#1e3a8a] px-5 py-2.5 font-medium text-white transition-colors hover:bg-[#1e40af] disabled:cursor-not-allowed disabled:opacity-50"
             >
               {loading ? (
                 <>
-                  <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin"></div>
+                  <div className="h-4 w-4 animate-spin rounded-full border-2 border-white/30 border-t-white"></div>
                   Guardando...
                 </>
               ) : (
                 <>
                   <svg
-                    className="w-5 h-5"
+                    className="h-5 w-5"
                     fill="none"
                     stroke="currentColor"
                     viewBox="0 0 24 24"
@@ -251,6 +300,7 @@ export default function MaquinariaFormModal({
             </button>
           </div>
         </form>
+      </div>
       </div>
     </div>
   );

@@ -9,12 +9,16 @@ import {
   movimientoRepuestoAPI,
   movimientoConsumibleAPI,
   actividadTrabajoAPI,
+  ordenRequerimientoAPI,
   ubicacionClienteAPI,
 } from "@/lib/api";
+import { getTodayDateInputValue } from "@/lib/utils";
 import { useAuth } from "@/context/AuthContext";
 import ActividadTrabajoModal from "./ActividadTrabajoModal";
 import MovimientoRepuestoModal from "./MovimientoRepuestoModal";
 import FinalizarOrdenModal from "./FinalizarOrdenModal";
+import OrdenRequerimientoFormModal from "@/components/ordenes/OrdenRequerimientoFormModal";
+import OrdenRequerimientoTable from "@/components/ordenes/OrdenRequerimientoTable";
 
 /* =========================
    CONSTANTES
@@ -59,6 +63,8 @@ export default function TrabajoDetalleModal({ open, trabajoId, onClose, onUpdate
   const [actividadSeleccionada, setActividadSeleccionada] = useState(null);
   const [showFinalizarModal, setShowFinalizarModal] = useState(false);
   const [unidadesPorActividad, setUnidadesPorActividad] = useState({});
+  const [ordenesRequerimiento, setOrdenesRequerimiento] = useState([]);
+  const [loadingRequerimientos, setLoadingRequerimientos] = useState(false);
 
   /* =========================
      FLAGS DE ESTADO
@@ -68,6 +74,7 @@ export default function TrabajoDetalleModal({ open, trabajoId, onClose, onUpdate
   const esFinalizado = trabajo?.estatus === "FINALIZADO";
 
   const readOnly = esFinalizado;
+  const ubicacionEsCampo = form?.lugar === "CAMPO";
 
   const actividadesPlanificadas = actividades.filter((a) => a.es_planificada);
   const actividadesRegistradas = actividades.filter((a) => !a.es_planificada);
@@ -90,9 +97,25 @@ export default function TrabajoDetalleModal({ open, trabajoId, onClose, onUpdate
   const canAssignTecnicos = currentUserRoles
     .map((role) => normalizeRole(role))
     .some((role) => role === "admin" || role === "jefe de almaceneros" || role === "jefe de tecnicos");
+  const canCreateRequerimiento = currentUserRoles
+    .map((role) => normalizeRole(role))
+    .some((role) => role === "admin" || role === "jefe de tecnicos" || role === "jefe de mantenimiento");
 
-  const getToday = () => new Date().toISOString().split("T")[0];
+  const getToday = () => getTodayDateInputValue();
   const getCurrentTime = () => new Date().toTimeString().slice(0, 5);
+
+  const loadOrdenesRequerimiento = async () => {
+    if (!trabajoId) return;
+    setLoadingRequerimientos(true);
+    try {
+      const response = await ordenRequerimientoAPI.list({ trabajo: trabajoId });
+      setOrdenesRequerimiento(response.data || []);
+    } catch (error) {
+      console.error("Error cargando órdenes de requerimiento:", error);
+    } finally {
+      setLoadingRequerimientos(false);
+    }
+  };
   
 
   /* =========================
@@ -137,6 +160,11 @@ export default function TrabajoDetalleModal({ open, trabajoId, onClose, onUpdate
       setUbicacionesCliente(ubiRes.data);
       setLoading(false);
     });
+  }, [open, trabajoId]);
+
+  useEffect(() => {
+    if (!open || !trabajoId) return;
+    loadOrdenesRequerimiento();
   }, [open, trabajoId]);
 
   useEffect(() => {
@@ -205,7 +233,7 @@ export default function TrabajoDetalleModal({ open, trabajoId, onClose, onUpdate
     hora_inicio: currentForm.hora_inicio,
     hora_fin: currentForm.hora_fin,
     horometro: currentForm.horometro,
-    ubicacion_detalle: currentForm.ubicacion_detalle || "",
+    ubicacion_detalle: currentForm.lugar === "CAMPO" ? (currentForm.ubicacion_detalle || "") : "",
     observaciones: currentForm.observaciones || "",
     maquinaria: currentForm.maquinaria,
     tecnicos: currentForm.tecnicos,
@@ -233,7 +261,15 @@ export default function TrabajoDetalleModal({ open, trabajoId, onClose, onUpdate
   const handleChange = (e) => {
     const { name, value } = e.target;
     const parsedValue = name === "maquinaria" && value !== "" ? Number(value) : value;
-    const nextForm = { ...form, [name]: parsedValue };
+    const nextForm = {
+      ...form,
+      [name]: parsedValue,
+    };
+
+    if (name === "lugar" && value === "TALLER") {
+      nextForm.ubicacion_detalle = "";
+    }
+
     persistCambios(nextForm);
   };
 
@@ -266,6 +302,47 @@ export default function TrabajoDetalleModal({ open, trabajoId, onClose, onUpdate
       onUpdated?.(res.data);
     } finally {
       setSaving(false);
+    }
+  };
+
+  const handleAssignTecnicoRequerimiento = async (orden, tecnicoId) => {
+    if (!tecnicoId) return;
+    try {
+      await ordenRequerimientoAPI.patch(orden.id, { tecnico_asignado: Number(tecnicoId) });
+      await loadOrdenesRequerimiento();
+    } catch (error) {
+      console.error("Error asignando técnico al requerimiento:", error);
+      alert(error?.response?.data?.detail || "No se pudo asignar el técnico.");
+    }
+  };
+
+  const handleSinStockRequerimiento = async (orden) => {
+    try {
+      await ordenRequerimientoAPI.cambiarEstado(orden.id, "SIN_STOCK");
+      await loadOrdenesRequerimiento();
+    } catch (error) {
+      console.error("Error marcando requerimiento sin stock:", error);
+      alert(error?.response?.data?.detail || "No se pudo actualizar el estado.");
+    }
+  };
+
+  const handleEntregarRequerimiento = async (orden) => {
+    try {
+      await ordenRequerimientoAPI.cambiarEstado(orden.id, "ENTREGADO");
+      await loadOrdenesRequerimiento();
+    } catch (error) {
+      console.error("Error entregando requerimiento:", error);
+      alert(error?.response?.data?.detail || "No se pudo entregar la orden.");
+    }
+  };
+
+  const handleConfirmarRequerimiento = async (orden) => {
+    try {
+      await ordenRequerimientoAPI.confirmarRecepcion(orden.id);
+      await loadOrdenesRequerimiento();
+    } catch (error) {
+      console.error("Error confirmando requerimiento:", error);
+      alert(error?.response?.data?.detail || "No se pudo confirmar la recepción.");
     }
   };
 
@@ -382,16 +459,21 @@ export default function TrabajoDetalleModal({ open, trabajoId, onClose, onUpdate
 
               <div className="mt-4">
                 <Select
-                  label="Ubicación"
+                  label="Ubicacion"
                   name="ubicacion_detalle"
-                  value={form.ubicacion_detalle || ""}
+                  value={ubicacionEsCampo ? (form.ubicacion_detalle || "") : ""}
                   onChange={handleChange}
-                  disabled={readOnly}
+                  disabled={readOnly || !ubicacionEsCampo}
                   options={ubicacionesCliente.map((u) => ({
                     value: `${u.cliente_nombre} - ${u.nombre}`,
                     label: `${u.cliente_nombre} - ${u.nombre}`,
                   }))}
                 />
+                {!ubicacionEsCampo && (
+                  <p className="mt-2 text-sm text-gray-500">
+                    Cuando el trabajo se realiza en taller, la ubicacion queda vacia porque el destino ya es taller.
+                  </p>
+                )}
               </div>
             </section>
 
@@ -504,6 +586,52 @@ export default function TrabajoDetalleModal({ open, trabajoId, onClose, onUpdate
             </section>
 
             {/* SECCIÓN: Actividades */}
+            <section className="border-t border-gray-200 pt-6">
+              <div className="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
+                <div>
+                  <h3 className="text-base font-semibold text-gray-900 mb-1 flex items-center gap-2">
+                    <svg className="w-5 h-5 text-[#1e3a8a]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
+                        d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-6 9l2 2 4-4" />
+                    </svg>
+                    Órdenes de requerimiento
+                  </h3>
+                  <p className="text-sm text-gray-500">
+                    Solicitudes de materiales asociadas a esta orden de trabajo.
+                  </p>
+                </div>
+
+                {canCreateRequerimiento && (
+                  <div className="flex flex-col items-start gap-2">
+                    <OrdenRequerimientoFormModal
+                      trabajoId={trabajoId}
+                      onCreated={loadOrdenesRequerimiento}
+                      disabled={!esPendiente}
+                      disabledReason="Solo puedes crear una orden de requerimiento cuando la orden de trabajo esta en pendiente."
+                    />
+                    {!esPendiente && (
+                      <p className="text-xs text-gray-500">
+                        Disponible solo mientras la orden de trabajo este en pendiente.
+                      </p>
+                    )}
+                  </div>
+                )}
+              </div>
+
+              <div className="mt-4">
+                <OrdenRequerimientoTable
+                  ordenes={ordenesRequerimiento}
+                  loading={loadingRequerimientos}
+                  tecnicos={tecnicosFiltrados}
+                  onAssignTecnico={handleAssignTecnicoRequerimiento}
+                  onMarkSinStock={handleSinStockRequerimiento}
+                  onDeliver={handleEntregarRequerimiento}
+                  onConfirmarTecnico={handleConfirmarRequerimiento}
+                  emptyMessage="No hay requerimientos creados para esta orden."
+                />
+              </div>
+            </section>
+
             {(esPendiente || esEnProceso || esFinalizado) && (
               <section className="border-t border-gray-200 pt-6">
                 <div className="space-y-8">

@@ -1,70 +1,110 @@
 "use client";
 
+import { Layers3, Pencil, Trash2 } from "lucide-react";
+import TableActionButton from "@/components/ui/TableActionButton";
+
 export default function DimensionesTable({ dimensiones, onEdit, onDelete }) {
   return (
-    <div className="rounded-lg border bg-white p-4">
-      <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-        <div>
-          <h2 className="font-semibold">Dimensiones registradas</h2>
-          <p className="text-xs text-gray-500">
-            Define dimensiones como Longitud, Volumen o Cantidad.
-          </p>
+    <section className="overflow-hidden rounded-[28px] border border-slate-200 bg-white shadow-sm">
+      <header className="flex flex-wrap items-start justify-between gap-3 border-b border-slate-200 px-5 py-5">
+        <div className="flex items-start gap-3">
+          <div className="flex h-11 w-11 items-center justify-center rounded-[18px] bg-[#EAF1FF] text-[#173569]">
+            <Layers3 className="h-5 w-5" strokeWidth={2.1} />
+          </div>
+          <div>
+            <h2 className="text-base font-semibold text-[#12233D]">
+              Dimensiones registradas
+            </h2>
+            <p className="mt-1 text-sm text-[#5F6C80]">
+              Define estructuras como volumen, longitud o cantidad.
+            </p>
+          </div>
         </div>
-        <span className="text-xs text-gray-400">
-          Total: {dimensiones.length}
-        </span>
-      </div>
 
-      <div className="mt-4 overflow-x-auto">
-        <table className="w-full text-sm">
-          <thead>
-            <tr className="text-left text-xs text-gray-500">
-              <th>Código</th>
-              <th>Nombre</th>
-              <th>Descripción</th>
-              <th>Estado</th>
-              <th>Acciones</th>
+        <span className="rounded-full border border-slate-200 bg-slate-100 px-3 py-1 text-xs font-semibold text-slate-600">
+          {dimensiones.length} registros
+        </span>
+      </header>
+
+      <div className="overflow-x-auto">
+        <table className="w-full min-w-[620px] text-sm">
+          <thead className="bg-slate-50">
+            <tr className="text-left text-xs font-semibold uppercase tracking-[0.16em] text-slate-500">
+              <th className="px-5 py-3">Codigo</th>
+              <th className="px-5 py-3">Nombre</th>
+              <th className="px-5 py-3">Descripcion</th>
+              <th className="px-5 py-3">Estado</th>
+              <th className="px-5 py-3 text-right">Acciones</th>
             </tr>
           </thead>
-          <tbody>
+
+          <tbody className="divide-y divide-slate-200">
             {dimensiones.map((dimension) => (
-              <tr key={dimension.id} className="border-t">
-                <td className="py-2 font-medium">{dimension.codigo}</td>
-                <td className="py-2">{dimension.nombre}</td>
-                <td className="py-2 text-xs text-gray-500">
+              <tr key={dimension.id} className="transition hover:bg-slate-50/80">
+                <td className="px-5 py-4">
+                  <span className="font-mono text-sm font-semibold text-[#173569]">
+                    {dimension.codigo}
+                  </span>
+                </td>
+                <td className="px-5 py-4 font-medium text-[#12233D]">
+                  {dimension.nombre}
+                </td>
+                <td className="px-5 py-4 text-sm text-[#5F6C80]">
                   {dimension.descripcion || "-"}
                 </td>
-                <td className="py-2">
-                  {dimension.activo ? "Activo" : "Inactivo"}
+                <td className="px-5 py-4">
+                  <StatusBadge active={dimension.activo} />
                 </td>
-                <td className="py-2">
-                  <div className="flex flex-wrap gap-2">
-                    <button
-                      className="text-xs font-semibold text-[#1e3a8a]"
+                <td className="px-5 py-4">
+                  <div className="flex justify-end gap-2">
+                    <TableActionButton
                       onClick={() => onEdit(dimension)}
+                      title="Editar dimension"
+                      tone="neutral"
                     >
+                      <Pencil className="h-3.5 w-3.5" strokeWidth={2.1} />
                       Editar
-                    </button>
-                    <button
-                      className="text-xs font-semibold text-rose-600"
+                    </TableActionButton>
+                    <TableActionButton
                       onClick={() => onDelete(dimension)}
+                      title="Eliminar dimension"
+                      tone="danger"
                     >
+                      <Trash2 className="h-3.5 w-3.5" strokeWidth={2.1} />
                       Eliminar
-                    </button>
+                    </TableActionButton>
                   </div>
                 </td>
               </tr>
             ))}
+
             {dimensiones.length === 0 ? (
               <tr>
-                <td className="py-6 text-center text-sm text-gray-500" colSpan={5}>
-                  Aún no tienes dimensiones registradas.
+                <td
+                  className="px-5 py-12 text-center text-sm text-[#5F6C80]"
+                  colSpan={5}
+                >
+                  Aun no tienes dimensiones registradas.
                 </td>
               </tr>
             ) : null}
           </tbody>
         </table>
       </div>
-    </div>
+    </section>
+  );
+}
+
+function StatusBadge({ active }) {
+  return (
+    <span
+      className={`inline-flex rounded-full px-3 py-1 text-xs font-semibold ${
+        active
+          ? "bg-emerald-50 text-emerald-700 ring-1 ring-emerald-200"
+          : "bg-slate-100 text-slate-500 ring-1 ring-slate-200"
+      }`}
+    >
+      {active ? "Activo" : "Inactivo"}
+    </span>
   );
 }

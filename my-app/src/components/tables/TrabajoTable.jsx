@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { trabajoAPI } from "@/lib/api";
 import { Button } from "@/components/ui/button";
+import TableActionButton from "@/components/ui/TableActionButton";
 import Link from "next/link";
 
 export default function TrabajoTable() {
@@ -45,7 +46,7 @@ export default function TrabajoTable() {
               <td className="p-2">{t.estatus}</td>
               <td className="p-2">
                 <Link href={`/trabajos/${t.id}`}>
-                  <Button size="sm">Ver</Button>
+                  <TableActionButton tone="primary" className="text-xs">Ver</TableActionButton>
                 </Link>
               </td>
             </tr>

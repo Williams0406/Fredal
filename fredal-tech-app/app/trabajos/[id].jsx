@@ -13,14 +13,22 @@ import {
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 import { StatusBar } from 'expo-status-bar';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { usePatchTrabajo, useTrabajo } from '../../hooks/useTrabajos';
 import { useActividades, useDeleteActividad } from '../../hooks/useActividades';
 import ActividadFormModal from '../../components/actividades/ActividadFormModal';
+import OrdenRequerimientoSheet from '../../components/ordenes/OrdenRequerimientoSheet';
 import FinalizarModal from '../../components/trabajos/FinalizarModal';
+import TrabajoFormSheet from '../../components/trabajos/TrabajoFormSheet';
 import MovimientoModal from '../../components/movimientos/MovimientoModal';
 import { useAuthStore } from '../../store/authStore';
 import { API_URL } from '../../lib/constants';
-import { canManagePlannedActivities } from '../../lib/permissions';
+import { ordenRequerimientoAPI } from '../../lib/api';
+import {
+  canEditTrabajoData,
+  canCreateRequirementOrders,
+  canManagePlannedActivities,
+} from '../../lib/permissions';
 import {
   colors,
   formatStatusLabel,
@@ -30,6 +38,18 @@ import {
   shadows,
 } from '../../lib/theme';
 
+const REQUERIMIENTO_STATUS_LABELS = {
+  POR_REVISAR: 'Por revisar',
+  ENTREGADO: 'Entregado',
+  SIN_STOCK: 'Sin stock',
+};
+
+const REQUERIMIENTO_STATUS_STYLES = {
+  POR_REVISAR: { bg: colors.amberSoft, text: colors.amber },
+  ENTREGADO: { bg: colors.greenSoft, text: colors.green },
+  SIN_STOCK: { bg: colors.redSoft, text: colors.red },
+};
+
 const resolveMediaUrl = (url) => {
   if (!url) return null;
   if (url.startsWith('http://') || url.startsWith('https://') || url.startsWith('file://')) {
@@ -37,6 +57,28 @@ const resolveMediaUrl = (url) => {
   }
 
   return `${API_URL}${url.startsWith('/') ? '' : '/'}${url}`;
+};
+
+const parseCollection = (value) => {
+  if (Array.isArray(value)) return value;
+  if (Array.isArray(value?.results)) return value.results;
+  return [];
+};
+
+const formatRequirementDate = (value) => {
+  if (!value) return 'Sin fecha';
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return 'Sin fecha';
+  return date.toLocaleDateString('es-PE');
+};
+
+const formatRequirementQty = (value) => {
+  const numberValue = Number(value ?? 0);
+  if (!Number.isFinite(numberValue)) return '0';
+  return numberValue.toLocaleString('es-PE', {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  });
 };
 
 function InfoRow({ icon, label, value }) {
@@ -74,6 +116,145 @@ function AccessNote({ text }) {
         <Ionicons name='lock-closed-outline' size={16} color={colors.navy} />
       </View>
       <Text style={styles.accessNoteText}>{text}</Text>
+    </View>
+  );
+}
+
+function RequirementStatusBadge({ status }) {
+  const current =
+    REQUERIMIENTO_STATUS_STYLES[status] || REQUERIMIENTO_STATUS_STYLES.POR_REVISAR;
+
+  return (
+    <View style={[styles.requirementStatusBadge, { backgroundColor: current.bg }]}>
+      <Text style={[styles.requirementStatusText, { color: current.text }]}>
+        {REQUERIMIENTO_STATUS_LABELS[status] || status}
+      </Text>
+    </View>
+  );
+}
+
+function RequirementCard({
+  orden,
+  onChangeEstado,
+  onConfirmarRecepcion,
+  isChanging,
+  isConfirming,
+}) {
+  return (
+    <View style={styles.requirementCard}>
+      <View style={styles.requirementHeader}>
+        <View style={{ flex: 1 }}>
+          <View style={styles.requirementTitleRow}>
+            <Text style={styles.requirementCode}>{orden.codigo}</Text>
+            <RequirementStatusBadge status={orden.estado} />
+          </View>
+          <Text style={styles.requirementMeta}>
+            Trabajo {orden.trabajo_codigo} • Emitida {formatRequirementDate(orden.created_at)}
+          </Text>
+          <Text style={styles.requirementMeta}>
+            Técnico: {orden.tecnico_asignado_nombre || 'Sin asignar'}
+          </Text>
+        </View>
+      </View>
+
+      {orden.pendiente_confirmacion_tecnico ? (
+        <View style={styles.infoPill}>
+          <Ionicons name='hourglass-outline' size={14} color={colors.navy} />
+          <Text style={styles.infoPillText}>Pendiente de confirmacion del tecnico</Text>
+        </View>
+      ) : null}
+
+      {orden.recepcion_confirmada_tecnico ? (
+        <View style={[styles.infoPill, styles.successPill]}>
+          <Ionicons name='checkmark-circle-outline' size={14} color={colors.green} />
+          <Text style={[styles.infoPillText, styles.successText]}>
+            Recepcion validada por tecnico
+          </Text>
+        </View>
+      ) : null}
+
+      {orden.observaciones ? (
+        <View style={styles.requirementNoteCard}>
+          <Text style={styles.requirementNoteText}>{orden.observaciones}</Text>
+        </View>
+      ) : null}
+
+      <View style={styles.requirementItemsCard}>
+        {(orden.items || []).map((item) => (
+          <View key={item.id} style={styles.requirementItemRow}>
+            <View style={styles.requirementItemDot} />
+            <View style={{ flex: 1 }}>
+              <Text style={styles.requirementItemTitle}>
+                {item.item_codigo} - {item.item_nombre}
+              </Text>
+              <Text style={styles.requirementItemMeta}>
+                {formatRequirementQty(item.cantidad)}
+                {item.proveedor_nombre ? ` • ${item.proveedor_nombre}` : ''}
+              </Text>
+            </View>
+          </View>
+        ))}
+      </View>
+
+      {orden.puede_marcar_entregado || orden.puede_marcar_sin_stock ? (
+        <View style={styles.requirementActions}>
+          {orden.puede_marcar_sin_stock ? (
+            <Pressable
+              style={[
+                styles.requirementSecondaryAction,
+                isChanging ? styles.buttonDisabled : null,
+              ]}
+              onPress={() => onChangeEstado(orden, 'SIN_STOCK')}
+              disabled={isChanging}
+            >
+              {isChanging ? (
+                <ActivityIndicator size='small' color={colors.red} />
+              ) : (
+                <Ionicons name='close-circle-outline' size={16} color={colors.red} />
+              )}
+              <Text style={styles.requirementSecondaryActionText}>Marcar sin stock</Text>
+            </Pressable>
+          ) : null}
+
+          {orden.puede_marcar_entregado ? (
+            <Pressable
+              style={[
+                styles.requirementPrimaryAction,
+                isChanging ? styles.buttonDisabled : null,
+              ]}
+              onPress={() => onChangeEstado(orden, 'ENTREGADO')}
+              disabled={isChanging}
+            >
+              {isChanging ? (
+                <ActivityIndicator size='small' color={colors.white} />
+              ) : (
+                <Ionicons name='checkmark-done-outline' size={16} color={colors.white} />
+              )}
+              <Text style={styles.requirementPrimaryActionText}>Marcar entregado</Text>
+            </Pressable>
+          ) : null}
+        </View>
+      ) : null}
+
+      {orden.puede_confirmar_tecnico ? (
+        <View style={styles.requirementActions}>
+          <Pressable
+            style={[
+              styles.requirementSuccessAction,
+              isConfirming ? styles.buttonDisabled : null,
+            ]}
+            onPress={() => onConfirmarRecepcion(orden)}
+            disabled={isConfirming}
+          >
+            {isConfirming ? (
+              <ActivityIndicator size='small' color={colors.white} />
+            ) : (
+              <Ionicons name='checkmark-circle-outline' size={16} color={colors.white} />
+            )}
+            <Text style={styles.requirementSuccessActionText}>Confirmar recepcion</Text>
+          </Pressable>
+        </View>
+      ) : null}
     </View>
   );
 }
@@ -234,18 +415,53 @@ export default function TrabajoDetalleScreen() {
   const router = useRouter();
   const trabajoId = Number(id);
   const { user } = useAuthStore();
+  const queryClient = useQueryClient();
 
   const { data: trabajo, isLoading } = useTrabajo(trabajoId);
   const { data: actividades = [] } = useActividades(trabajoId);
+  const { data: requerimientos = [], isLoading: isLoadingRequerimientos } = useQuery({
+    queryKey: ['ordenes-requerimiento-mobile', trabajoId],
+    queryFn: async () => {
+      const { data } = await ordenRequerimientoAPI.list({ trabajo: trabajoId });
+      return parseCollection(data);
+    },
+    enabled: Boolean(trabajoId),
+  });
   const patchTrabajoMut = usePatchTrabajo();
 
+  const changeRequirementStateMut = useMutation({
+    mutationFn: ({ id: requirementId, estado }) =>
+      ordenRequerimientoAPI.cambiarEstado(requirementId, estado),
+    onSuccess: () => {
+      queryClient.invalidateQueries({
+        queryKey: ['ordenes-requerimiento-mobile', trabajoId],
+      });
+      queryClient.invalidateQueries({ queryKey: ['ordenes-requerimiento-mobile'] });
+    },
+  });
+
+  const confirmRequirementReceiptMut = useMutation({
+    mutationFn: (requirementId) => ordenRequerimientoAPI.confirmarRecepcion(requirementId),
+    onSuccess: () => {
+      queryClient.invalidateQueries({
+        queryKey: ['ordenes-requerimiento-mobile', trabajoId],
+      });
+      queryClient.invalidateQueries({ queryKey: ['ordenes-requerimiento-mobile'] });
+    },
+  });
+
   const [showActModal, setShowActModal] = useState(false);
+  const [isPlanningActivity, setIsPlanningActivity] = useState(false);
+  const [showReqModal, setShowReqModal] = useState(false);
   const [showFinModal, setShowFinModal] = useState(false);
+  const [showEditSheet, setShowEditSheet] = useState(false);
   const [actividadSeleccionada, setActividadSeleccionada] = useState(null);
 
   const esFinalizado = trabajo?.estatus === 'FINALIZADO';
   const esPendiente = trabajo?.estatus === 'PENDIENTE';
   const esEnProceso = trabajo?.estatus === 'EN_PROCESO';
+  const canEditTrabajo = canEditTrabajoData(user) && !esFinalizado;
+  const canCreateRequirements = canCreateRequirementOrders(user);
   const canManagePlanned = canManagePlannedActivities(user);
   const plannedReadonly = esFinalizado || !canManagePlanned;
 
@@ -272,6 +488,58 @@ export default function TrabajoDetalleScreen() {
   );
 
   const handleAddMovimiento = (actividad) => setActividadSeleccionada(actividad);
+
+  const handleChangeRequirementState = (orden, estado) => {
+    const actionLabel =
+      estado === 'ENTREGADO' ? 'marcar como entregada' : 'marcar como sin stock';
+
+    Alert.alert(
+      'Actualizar requerimiento',
+      `Se registrara ${orden.codigo} como ${REQUERIMIENTO_STATUS_LABELS[estado].toLowerCase()}.`,
+      [
+        { text: 'Cancelar', style: 'cancel' },
+        {
+          text: 'Confirmar',
+          onPress: () =>
+            changeRequirementStateMut.mutate(
+              { id: orden.id, estado },
+              {
+                onError: (err) => {
+                  Alert.alert(
+                    'No se pudo actualizar',
+                    err?.response?.data?.detail ||
+                      `No se pudo ${actionLabel} desde el movil.`
+                  );
+                },
+              }
+            ),
+        },
+      ]
+    );
+  };
+
+  const handleConfirmRequirementReceipt = (orden) => {
+    Alert.alert(
+      'Confirmar recepcion',
+      `Se validara la recepcion del requerimiento ${orden.codigo}.`,
+      [
+        { text: 'Cancelar', style: 'cancel' },
+        {
+          text: 'Confirmar',
+          onPress: () =>
+            confirmRequirementReceiptMut.mutate(orden.id, {
+              onError: (err) => {
+                Alert.alert(
+                  'No se pudo confirmar',
+                  err?.response?.data?.detail ||
+                    'No se pudo confirmar la recepcion del requerimiento.'
+                );
+              },
+            }),
+        },
+      ]
+    );
+  };
 
   const handleIniciarTrabajo = () => {
     patchTrabajoMut.mutate(
@@ -341,8 +609,19 @@ export default function TrabajoDetalleScreen() {
       >
         <View style={styles.summaryCard}>
           <View style={styles.summaryHeader}>
-            <Text style={styles.sectionTitle}>Resumen operativo</Text>
-            <Text style={styles.sectionMeta}>OT activa</Text>
+            <View style={{ flex: 1 }}>
+              <Text style={styles.sectionTitle}>Resumen operativo</Text>
+              <Text style={styles.sectionMeta}>OT activa</Text>
+            </View>
+            {canEditTrabajo ? (
+              <Pressable
+                style={styles.summaryEditButton}
+                onPress={() => setShowEditSheet(true)}
+              >
+                <Ionicons name='create-outline' size={15} color={colors.navy} />
+                <Text style={styles.summaryEditButtonText}>Editar</Text>
+              </Pressable>
+            ) : null}
           </View>
 
           <View style={styles.metricsRow}>
@@ -382,16 +661,78 @@ export default function TrabajoDetalleScreen() {
         </View>
 
         <SectionHeader
+          title='Ordenes de requerimiento'
+          count={requerimientos.length}
+          subtitle='Solicitudes de materiales asociadas a esta orden de trabajo.'
+          action={
+            canCreateRequirements && esPendiente ? (
+              <Pressable
+                style={styles.primaryMiniButton}
+                onPress={() => setShowReqModal(true)}
+              >
+                <Ionicons name='add' size={16} color={colors.white} />
+                <Text style={styles.primaryMiniButtonText}>Nueva orden</Text>
+              </Pressable>
+            ) : null
+          }
+        />
+        {canCreateRequirements && !esPendiente ? (
+          <AccessNote text='Los requerimientos se emiten solo mientras la OT está en estado pendiente.' />
+        ) : null}
+        {isLoadingRequerimientos ? (
+          <View style={styles.loadingInlineCard}>
+            <ActivityIndicator size='small' color={colors.navy} />
+            <Text style={styles.loadingInlineText}>Cargando requerimientos...</Text>
+          </View>
+        ) : requerimientos.length === 0 ? (
+          <EmptySection
+            title='Sin ordenes de requerimiento'
+            subtitle='Cuando se emitan materiales para esta OT aparecerán aquí con su estado y seguimiento.'
+          />
+        ) : (
+          requerimientos.map((orden) => (
+            <RequirementCard
+              key={orden.id}
+              orden={orden}
+              onChangeEstado={handleChangeRequirementState}
+              onConfirmarRecepcion={handleConfirmRequirementReceipt}
+              isChanging={
+                changeRequirementStateMut.isPending &&
+                changeRequirementStateMut.variables?.id === orden.id
+              }
+              isConfirming={
+                confirmRequirementReceiptMut.isPending &&
+                confirmRequirementReceiptMut.variables === orden.id
+              }
+            />
+          ))
+        )}
+
+        <SectionHeader
           title='Actividades planificadas'
           count={planificadas.length}
           subtitle={
             canManagePlanned
               ? 'Plan de trabajo y materiales previstos para esta orden'
-              : 'Vista referencial. Solo Almacen puede registrar o modificar el plan.'
+              : 'Vista referencial. Solo Jefe de Tecnicos y Jefe de Almaceneros pueden registrar o modificar el plan.'
+          }
+          action={
+            canManagePlanned && !esFinalizado ? (
+              <Pressable
+                style={styles.primaryMiniButton}
+                onPress={() => {
+                  setIsPlanningActivity(true);
+                  setShowActModal(true);
+                }}
+              >
+                <Ionicons name='add' size={16} color={colors.white} />
+                <Text style={styles.primaryMiniButtonText}>Agregar</Text>
+              </Pressable>
+            ) : null
           }
         />
         {!canManagePlanned ? (
-          <AccessNote text='Como tecnico, esta seccion es solo de consulta. La gestion del plan le corresponde a Almacen.' />
+          <AccessNote text='Esta seccion es solo de consulta. La gestion del plan le corresponde al jefe de tecnicos o al jefe de almaceneros.' />
         ) : null}
         {planificadas.length === 0 ? (
           <EmptySection
@@ -415,7 +756,13 @@ export default function TrabajoDetalleScreen() {
           subtitle='Ejecución real realizada por el técnico'
           action={
             esEnProceso ? (
-              <Pressable style={styles.primaryMiniButton} onPress={() => setShowActModal(true)}>
+              <Pressable
+                style={styles.primaryMiniButton}
+                onPress={() => {
+                  setIsPlanningActivity(false);
+                  setShowActModal(true);
+                }}
+              >
                 <Ionicons name='add' size={16} color={colors.white} />
                 <Text style={styles.primaryMiniButtonText}>Agregar</Text>
               </Pressable>
@@ -473,11 +820,46 @@ export default function TrabajoDetalleScreen() {
       ) : null}
 
       {showActModal ? (
-        <ActividadFormModal trabajoId={trabajoId} onClose={() => setShowActModal(false)} />
+        <ActividadFormModal
+          trabajoId={trabajoId}
+          esPlanificada={isPlanningActivity}
+          onClose={() => {
+            setShowActModal(false);
+            setIsPlanningActivity(false);
+          }}
+        />
+      ) : null}
+
+      {showReqModal ? (
+        <OrdenRequerimientoSheet
+          visible={showReqModal}
+          trabajoId={trabajoId}
+          tecnicosIds={trabajo?.tecnicos || []}
+          onClose={() => setShowReqModal(false)}
+          onCreated={() => {
+            setShowReqModal(false);
+            Alert.alert('Requerimiento emitido', 'La orden de requerimiento ya aparece en esta OT.');
+          }}
+        />
       ) : null}
 
       {showFinModal ? (
         <FinalizarModal trabajo={trabajo} onClose={() => setShowFinModal(false)} />
+      ) : null}
+
+      {showEditSheet ? (
+        <TrabajoFormSheet
+          visible={showEditSheet}
+          trabajo={trabajo}
+          onClose={() => setShowEditSheet(false)}
+          onSaved={() => {
+            setShowEditSheet(false);
+            Alert.alert(
+              'Orden actualizada',
+              'Los datos de la orden de trabajo se actualizaron correctamente.'
+            );
+          }}
+        />
       ) : null}
 
       {actividadSeleccionada ? (
@@ -634,6 +1016,24 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'space-between',
     marginBottom: 14,
+    gap: 12,
+  },
+  summaryEditButton: {
+    minHeight: 38,
+    borderRadius: radius.pill,
+    borderWidth: 1,
+    borderColor: '#CFE0FF',
+    backgroundColor: colors.navySoft,
+    paddingHorizontal: 14,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+  },
+  summaryEditButtonText: {
+    fontSize: 12,
+    fontWeight: '800',
+    color: colors.navy,
   },
   sectionTitle: {
     fontSize: 17,
@@ -789,6 +1189,163 @@ const styles = StyleSheet.create({
   },
   primaryMiniButtonText: {
     fontSize: 12,
+    fontWeight: '800',
+    color: colors.white,
+  },
+  loadingInlineCard: {
+    minHeight: 68,
+    borderRadius: radius.lg,
+    borderWidth: 1,
+    borderColor: colors.border,
+    backgroundColor: colors.surface,
+    marginBottom: 12,
+    paddingHorizontal: 18,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    ...shadows.card,
+  },
+  loadingInlineText: {
+    fontSize: 13,
+    color: colors.textMuted,
+    fontWeight: '600',
+  },
+  requirementCard: {
+    borderRadius: radius.lg,
+    borderWidth: 1,
+    borderColor: colors.border,
+    backgroundColor: colors.surface,
+    padding: 16,
+    marginBottom: 12,
+    ...shadows.card,
+  },
+  requirementHeader: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 12,
+  },
+  requirementTitleRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    flexWrap: 'wrap',
+  },
+  requirementCode: {
+    fontSize: 16,
+    fontWeight: '800',
+    color: colors.navy,
+  },
+  requirementMeta: {
+    marginTop: 6,
+    fontSize: 13,
+    color: colors.textMuted,
+    fontWeight: '500',
+  },
+  requirementStatusBadge: {
+    borderRadius: radius.pill,
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+  },
+  requirementStatusText: {
+    fontSize: 11,
+    fontWeight: '800',
+  },
+  requirementNoteCard: {
+    marginTop: 12,
+    borderRadius: radius.md,
+    borderWidth: 1,
+    borderColor: colors.border,
+    backgroundColor: colors.surfaceMuted,
+    padding: 12,
+  },
+  requirementNoteText: {
+    fontSize: 13,
+    lineHeight: 20,
+    color: colors.textMuted,
+  },
+  requirementItemsCard: {
+    marginTop: 14,
+    borderRadius: radius.md,
+    borderWidth: 1,
+    borderColor: colors.border,
+    backgroundColor: colors.surfaceMuted,
+    padding: 12,
+    gap: 10,
+  },
+  requirementItemRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 10,
+  },
+  requirementItemDot: {
+    width: 8,
+    height: 8,
+    borderRadius: 999,
+    backgroundColor: colors.lime,
+    marginTop: 6,
+  },
+  requirementItemTitle: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: colors.text,
+  },
+  requirementItemMeta: {
+    marginTop: 3,
+    fontSize: 12,
+    color: colors.textMuted,
+  },
+  requirementActions: {
+    marginTop: 14,
+    flexDirection: 'row',
+    gap: 10,
+  },
+  requirementSecondaryAction: {
+    flex: 1,
+    minHeight: 46,
+    borderRadius: radius.md,
+    borderWidth: 1,
+    borderColor: '#F0C3BB',
+    backgroundColor: colors.redSoft,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    paddingHorizontal: 14,
+  },
+  requirementSecondaryActionText: {
+    fontSize: 13,
+    fontWeight: '800',
+    color: colors.red,
+  },
+  requirementPrimaryAction: {
+    flex: 1.2,
+    minHeight: 46,
+    borderRadius: radius.md,
+    backgroundColor: colors.navy,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    paddingHorizontal: 14,
+  },
+  requirementPrimaryActionText: {
+    fontSize: 13,
+    fontWeight: '800',
+    color: colors.white,
+  },
+  requirementSuccessAction: {
+    flex: 1,
+    minHeight: 46,
+    borderRadius: radius.md,
+    backgroundColor: colors.green,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    paddingHorizontal: 14,
+  },
+  requirementSuccessActionText: {
+    fontSize: 13,
     fontWeight: '800',
     color: colors.white,
   },

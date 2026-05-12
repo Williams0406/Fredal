@@ -21,7 +21,7 @@
 */
 
 import { useState, useEffect } from "react";
-import { trabajoAPI, actividadTrabajoAPI, maquinariaAPI } from "@/lib/api";
+import { trabajoAPI, maquinariaAPI } from "@/lib/api";
 import {
   DashboardStyles, AreaBanner, SectionTitle,
   StatCard, Card, Grid, DataTable,
@@ -55,13 +55,7 @@ export default function MantenimientoDashboard() {
           maquinariaAPI.list().then(r => r.data?.results ?? r.data ?? []),
         ]);
         setTrabajos(tjs); setMaquinarias(mqs);
-        const acts = await Promise.all(
-          tjs.slice(0, 60).map(t =>
-            actividadTrabajoAPI.listByTrabajo(t.id)
-              .then(r => r.data?.results ?? r.data ?? []).catch(() => [])
-          )
-        );
-        setActividades(acts.flat());
+        setActividades(tjs.flatMap(t => t.actividades ?? []));
       } catch (e) { console.error(e); }
       finally { setLoading(false); }
     })();

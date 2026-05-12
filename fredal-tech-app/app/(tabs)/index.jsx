@@ -16,9 +16,13 @@ import { StatusBar } from 'expo-status-bar';
 import { useTrabajos } from '../../hooks/useTrabajos';
 import TrabajoCard from '../../components/trabajos/TrabajoCard';
 import TrabajoFormSheet from '../../components/trabajos/TrabajoFormSheet';
+import AlmacenDashboard from '../../components/almacen/AlmacenDashboard';
 import { useAuthStore } from '../../store/authStore';
 import { colors, formatStatusLabel, getStatusPalette, radius, shadows } from '../../lib/theme';
-import { canCreateTrabajo as canCreateTrabajoByRole } from '../../lib/permissions';
+import {
+  canCreateTrabajo as canCreateTrabajoByRole,
+  isStorageUser as isStorageUserByRole,
+} from '../../lib/permissions';
 
 const TABS = [
   { key: 'PENDIENTE', label: 'Pendientes', icon: 'time-outline' },
@@ -66,6 +70,10 @@ export default function TrabajosScreen() {
         return haystack.includes(needle);
       });
   }, [trabajos, activeTab, query]);
+
+  if (isStorageUserByRole(user)) {
+    return <AlmacenDashboard />;
+  }
 
   const currentStatus = getStatusPalette(activeTab);
   const canCreateTrabajo = canCreateTrabajoByRole(user);

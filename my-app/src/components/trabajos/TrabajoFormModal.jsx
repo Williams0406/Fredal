@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { maquinariaAPI, trabajoAPI, ubicacionClienteAPI } from "@/lib/api";
+import { getTodayDateInputValue } from "@/lib/utils";
 
 const ESTADOS = ["PENDIENTE", "EN_PROCESO", "FINALIZADO"];
 
@@ -12,7 +13,7 @@ export default function TrabajoFormModal({
   trabajo,
 }) {
   const isEdit = Boolean(trabajo);
-  const getToday = () => new Date().toISOString().split("T")[0];
+  const getToday = () => getTodayDateInputValue();
   const getCurrentTime = () => new Date().toTimeString().slice(0, 5);
 
   const [form, setForm] = useState({
@@ -33,6 +34,8 @@ export default function TrabajoFormModal({
   const [ubicacionesCliente, setUbicacionesCliente] = useState([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
+
+  const ubicacionEsCampo = form.lugar === "CAMPO";
 
   // Reset form cuando se abre sin trabajo
   useEffect(() => {
@@ -84,10 +87,17 @@ export default function TrabajoFormModal({
   }, [trabajo]);
 
   const handleChange = (e) => {
-    setForm({
+    const { name, value } = e.target;
+    const nextForm = {
       ...form,
-      [e.target.name]: e.target.value,
-    });
+      [name]: value,
+    };
+
+    if (name === "lugar" && value === "TALLER") {
+      nextForm.ubicacion_detalle = "";
+    }
+
+    setForm(nextForm);
     if (error) setError("");
   };
 
@@ -109,13 +119,16 @@ export default function TrabajoFormModal({
       return;
     }
 
-    if (!form.ubicacion_detalle?.trim()) {
-      setError("La ubicación es obligatoria");
+    if (ubicacionEsCampo && !form.ubicacion_detalle?.trim()) {
+      setError("La ubicacion es obligatoria cuando el trabajo se realiza en campo");
       setLoading(false);
       return;
     }
 
-    const payload = { ...form };
+    const payload = {
+      ...form,
+      ubicacion_detalle: ubicacionEsCampo ? form.ubicacion_detalle : "",
+    };
 
     // Limpiar campos vacíos
     Object.keys(payload).forEach((key) => {
@@ -270,23 +283,26 @@ export default function TrabajoFormModal({
             </div>
           </div>
 
-          {/* Ubicación detalle */}
+                    {/* Ubicacion detalle */}
           <div>
             <label htmlFor="ubicacion_detalle" className="block text-sm font-medium text-gray-700 mb-2">
-              Ubicación exacta <span className="text-red-500">*</span>
+              Ubicacion exacta {ubicacionEsCampo && <span className="text-red-500">*</span>}
             </label>
             <select
               id="ubicacion_detalle"
               name="ubicacion_detalle"
-              value={form.ubicacion_detalle}
+              value={ubicacionEsCampo ? form.ubicacion_detalle : ""}
               onChange={handleChange}
-              required
-              className="w-full px-4 py-3 border border-gray-300 rounded-lg text-sm
+              required={ubicacionEsCampo}
+              disabled={!ubicacionEsCampo}
+              className={`w-full px-4 py-3 border border-gray-300 rounded-lg text-sm
                        focus:outline-none focus:ring-2 focus:ring-[#1e3a8a] focus:border-transparent
-                       transition-all duration-200"
+                       transition-all duration-200 ${!ubicacionEsCampo ? "bg-gray-50 text-gray-500 cursor-not-allowed" : ""}`}
             >
-              <option value="">Seleccione una ubicación</option>
-              {ubicacionesCliente.map((ubicacion) => {
+              <option value="">
+                {ubicacionEsCampo ? "Seleccione una ubicacion" : "Taller"}
+              </option>
+              {ubicacionEsCampo && ubicacionesCliente.map((ubicacion) => {
                 const label = `${ubicacion.cliente_nombre} - ${ubicacion.nombre}`;
                 return (
                   <option key={ubicacion.id ?? label} value={label}>
@@ -295,6 +311,11 @@ export default function TrabajoFormModal({
                 );
               })}
             </select>
+            {!ubicacionEsCampo && (
+              <p className="mt-2 text-xs text-gray-500">
+                Cuando el lugar es taller, la ubicacion se asume automaticamente.
+              </p>
+            )}
           </div>
 
           {/* Campos técnicos solo al finalizar */}

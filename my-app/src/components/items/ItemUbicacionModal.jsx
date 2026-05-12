@@ -1,7 +1,8 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import { itemAPI, maquinariaAPI, trabajadorAPI, almacenAPI } from "@/lib/api";
+import { useEffect, useMemo, useState } from "react";
+import { itemAPI, maquinariaAPI, trabajadorAPI, almacenAPI, userAPI } from "@/lib/api";
+import TableActionButton from "@/components/ui/TableActionButton";
 
 const ESTADOS_UNIDAD = {
   NUEVO: "Nuevo",
@@ -16,6 +17,7 @@ export default function ItemUbicacionModal({ itemId, open, onClose }) {
   const [almacenes, setAlmacenes] = useState([]);
   const [maquinarias, setMaquinarias] = useState([]);
   const [trabajadores, setTrabajadores] = useState([]);
+  const [users, setUsers] = useState([]);
   const [editingUnitId, setEditingUnitId] = useState(null);
   const [consumibleUbicaciones, setConsumibleUbicaciones] = useState([]);
   const [editingConsumibleId, setEditingConsumibleId] = useState(null);
@@ -23,6 +25,55 @@ export default function ItemUbicacionModal({ itemId, open, onClose }) {
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
+
+  const tecnicos = useMemo(() => {
+    const rolesPorTrabajador = (users || []).reduce((acc, user) => {
+      const trabajadorId = user.trabajador_id ?? user.trabajador?.id ?? user.trabajador;
+      if (!trabajadorId) return acc;
+      acc[trabajadorId] = (user.roles || []).map((role) =>
+        String(role?.name || role?.nombre || role || "").toLowerCase().trim()
+      );
+      return acc;
+    }, {});
+
+    return (trabajadores || []).filter((trabajador) => {
+      const roles = rolesPorTrabajador[trabajador.id] || [];
+      return roles.includes("tecnico") || String(trabajador.puesto || "").toLowerCase().includes("tecnico");
+    });
+  }, [trabajadores, users]);
+
+  const trabajadoresDestino = item?.tipo_insumo === "HERRAMIENTA" ? tecnicos : trabajadores;
+
+  const consumibleResumen = useMemo(() => {
+    const grouped = new Map();
+
+    for (const row of consumibleUbicaciones) {
+      const tipo = row.tipo_ubicacion || "SIN_UBICACION";
+      const ubicacionId =
+        row.almacen_id || row.maquinaria_id || row.trabajador_id || row.ubicacion;
+      const key = `${tipo}-${ubicacionId}`;
+
+      const current = grouped.get(key) || {
+        key,
+        tipo_ubicacion: tipo,
+        ubicacion: row.ubicacion,
+        cantidad_total: 0,
+        registros: 0,
+      };
+
+      current.cantidad_total += Number(row.cantidad_ubicacion || 0);
+      current.registros += 1;
+      grouped.set(key, current);
+    }
+
+    return Array.from(grouped.values()).sort((left, right) =>
+      `${left.tipo_ubicacion} ${left.ubicacion}`.localeCompare(
+        `${right.tipo_ubicacion} ${right.ubicacion}`,
+        "es",
+        { sensitivity: "base" }
+      )
+    );
+  }, [consumibleUbicaciones]);
 
   useEffect(() => {
     if (open && itemId) {
@@ -33,17 +84,19 @@ export default function ItemUbicacionModal({ itemId, open, onClose }) {
   const loadData = async () => {
     setLoading(true);
     try {
-      const [itemRes, almRes, maqRes, traRes] = await Promise.all([
+      const [itemRes, almRes, maqRes, traRes, usersRes] = await Promise.all([
         itemAPI.retrieve(itemId),
         almacenAPI.list(),
         maquinariaAPI.list(),
         trabajadorAPI.list(),
+        userAPI.list(),
       ]);
 
       setItem(itemRes.data);
       setAlmacenes(almRes.data || []);
       setMaquinarias(maqRes.data || []);
       setTrabajadores(traRes.data || []);
+      setUsers(usersRes.data || []);
 
       if (itemRes.data?.tipo_insumo === "CONSUMIBLE") {
         const consumibleRes = await itemAPI.ubicacionesConsumible(itemId);
@@ -76,7 +129,6 @@ export default function ItemUbicacionModal({ itemId, open, onClose }) {
     }
 
     setEditValues({
-      estado: unidad.estado,
       tipoUbicacion,
       ubicacion: ubicacionId,
     });
@@ -85,15 +137,14 @@ export default function ItemUbicacionModal({ itemId, open, onClose }) {
     setError("");
   };
 
-  const handleSave = async (unidadId) => {
-    // Validaciones
+  const handleSave = async (unidad) => {
     if (!editValues.tipoUbicacion) {
-      setError("Selecciona un tipo de ubicación");
+      setError("Selecciona un tipo de ubicacion");
       return;
     }
 
     if (!editValues.ubicacion) {
-      setError("Selecciona una ubicación específica");
+      setError("Selecciona una ubicacion especifica");
       return;
     }
 
@@ -102,8 +153,8 @@ export default function ItemUbicacionModal({ itemId, open, onClose }) {
 
     try {
       await itemAPI.cambiarEstadoUnidad(item.id, {
-        unidad_id: unidadId,
-        nuevo_estado: editValues.estado,
+        unidad_id: unidad.id,
+        nuevo_estado: unidad.estado,
         almacen_id:
           editValues.tipoUbicacion === "almacen"
             ? Number(editValues.ubicacion)
@@ -199,6 +250,14 @@ export default function ItemUbicacionModal({ itemId, open, onClose }) {
     return `${ubicacionActual.tipo} - ${ubicacionActual.nombre}`;
   };
 
+  const formatHorometro = (value) => {
+    if (value === null || value === undefined || value === "") return "—";
+    return Number(value).toLocaleString("es-PE", {
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 2,
+    });
+  };
+
   if (!open) return null;
 
   return (
@@ -223,7 +282,10 @@ export default function ItemUbicacionModal({ itemId, open, onClose }) {
                 Gestión de Ubicaciones
               </h2>
               <p className="text-sm text-gray-600 mt-1">
-                {item?.nombre} - Administra el estado y ubicación de cada unidad
+                {item?.nombre} -{" "}
+                {item?.tipo_insumo === "CONSUMIBLE"
+                  ? "Rastrea cantidades activas por ubicación"
+                  : "Administra el estado y ubicación de cada unidad"}
               </p>
             </div>
             <button
@@ -270,77 +332,115 @@ export default function ItemUbicacionModal({ itemId, open, onClose }) {
             <div className="border border-gray-200 rounded-lg overflow-hidden">
               <div className="overflow-x-auto">
                 {item?.tipo_insumo === "CONSUMIBLE" ? (
-                  <table className="w-full">
-                    <thead className="bg-gray-50 border-b border-gray-200">
-                      <tr>
-                        <th className="px-4 py-3 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider">Lote</th>
-                        <th className="px-4 py-3 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider">Cantidad Ubicación</th>
-                        <th className="px-4 py-3 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider">Ubicación</th>
-                        <th className="px-4 py-3 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider">Fecha Asignación</th>
-                        <th className="px-4 py-3 text-center text-xs font-semibold text-gray-700 uppercase tracking-wider">Acciones</th>
-                      </tr>
-                    </thead>
-                    <tbody className="bg-white divide-y divide-gray-200">
-                      {consumibleUbicaciones.map((u) => {
-                        const isEditingConsumible = editingConsumibleId === u.id;
-
-                        return (
-                          <tr key={u.id} className="hover:bg-gray-50 transition-colors duration-150">
-                            <td className="px-4 py-3 text-sm font-mono text-gray-900">Lote #{u.lote}</td>
-                            <td className="px-4 py-3 text-sm text-gray-700">{Number(u.cantidad_ubicacion).toFixed(2)}</td>
-                            <td className="px-4 py-3 text-sm text-gray-700">
-                              {isEditingConsumible ? (
-                                <div className="flex gap-2">
-                                  <select
-                                    value={consumibleEditValues.tipoUbicacion}
-                                    onChange={(e) => setConsumibleEditValues({ tipoUbicacion: e.target.value, ubicacion: "" })}
-                                    className="px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-[#1e3a8a] focus:border-transparent"
-                                  >
-                                    <option value="">Tipo...</option>
-                                    <option value="almacen">Almacén</option>
-                                    <option value="maquinaria">Maquinaria</option>
-                                    <option value="trabajador">Trabajador</option>
-                                  </select>
-                                  <select
-                                    value={consumibleEditValues.ubicacion || ""}
-                                    onChange={(e) => setConsumibleEditValues((prev) => ({ ...prev, ubicacion: e.target.value }))}
-                                    disabled={!consumibleEditValues.tipoUbicacion}
-                                    className={`flex-1 px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-[#1e3a8a] focus:border-transparent ${!consumibleEditValues.tipoUbicacion ? "bg-gray-50 cursor-not-allowed" : ""}`}
-                                  >
-                                    <option value="">Seleccione...</option>
-                                    {consumibleEditValues.tipoUbicacion === "almacen" && almacenes.map((a) => (<option key={a.id} value={a.id}>{a.nombre}</option>))}
-                                    {consumibleEditValues.tipoUbicacion === "maquinaria" && maquinarias.map((m) => (<option key={m.id} value={m.id}>{m.codigo_maquina} - {m.nombre}</option>))}
-                                    {consumibleEditValues.tipoUbicacion === "trabajador" && trabajadores.map((t) => (<option key={t.id} value={t.id}>{t.nombres} {t.apellidos}</option>))}
-                                  </select>
-                                </div>
-                              ) : (
-                                <span className="font-medium">{u.ubicacion}</span>
-                              )}
-                            </td>
-                            <td className="px-4 py-3 text-sm text-gray-600">{u.fecha_inicio ? new Date(u.fecha_inicio).toLocaleDateString('es-PE') : <span className="text-gray-400">—</span>}</td>
-                            <td className="px-4 py-3 text-center">
-                              {isEditingConsumible ? (
-                                <div className="flex items-center justify-center gap-2">
-                                  <button onClick={() => handleSaveConsumible(u.id)} disabled={saving} className="px-3 py-1.5 text-xs font-medium text-white bg-[#84cc16] rounded-lg hover:bg-[#84cc16]/90 transition-all duration-200 disabled:opacity-50">Guardar</button>
-                                  <button onClick={handleCancelConsumible} disabled={saving} className="px-3 py-1.5 text-xs font-medium text-gray-700 bg-gray-100 border border-gray-300 rounded-lg hover:bg-gray-200 transition-all duration-200">Cancelar</button>
-                                </div>
-                              ) : (
-                                <button onClick={() => startEditConsumible(u)} className="px-3 py-1.5 text-xs font-medium text-white bg-[#1e3a8a] rounded-lg hover:bg-[#1e3a8a]/90 transition-all duration-200">Editar</button>
-                              )}
-                            </td>
+                  <div className="space-y-4 p-4">
+                    <div className="rounded-lg border border-slate-200 overflow-hidden">
+                      <div className="border-b border-slate-200 bg-slate-50 px-4 py-3">
+                        <h3 className="text-sm font-semibold text-slate-800">Resumen actual por ubicación</h3>
+                        <p className="mt-1 text-xs text-slate-500">
+                          Cantidad total del consumible disponible en almacén, trabajador y maquinaria.
+                        </p>
+                      </div>
+                      <table className="min-w-[820px] w-full">
+                        <thead className="bg-white border-b border-gray-200">
+                          <tr>
+                            <th className="px-4 py-3 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider">Tipo</th>
+                            <th className="px-4 py-3 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider">Ubicación</th>
+                            <th className="px-4 py-3 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider">Cantidad Total</th>
+                            <th className="px-4 py-3 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider">Registros</th>
                           </tr>
-                        );
-                      })}
-                    </tbody>
-                  </table>
+                        </thead>
+                        <tbody className="bg-white divide-y divide-gray-200">
+                          {consumibleResumen.map((row) => (
+                            <tr key={row.key} className="hover:bg-gray-50 transition-colors duration-150">
+                              <td className="px-4 py-3 text-sm font-medium text-gray-700">{row.tipo_ubicacion}</td>
+                              <td className="px-4 py-3 text-sm text-gray-900">{row.ubicacion}</td>
+                              <td className="px-4 py-3 text-sm text-gray-700">{row.cantidad_total.toFixed(2)}</td>
+                              <td className="px-4 py-3 text-sm text-gray-600">{row.registros}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+
+                    <div className="rounded-lg border border-slate-200 overflow-hidden">
+                      <div className="border-b border-slate-200 bg-slate-50 px-4 py-3">
+                        <h3 className="text-sm font-semibold text-slate-800">Detalle activo por lote</h3>
+                        <p className="mt-1 text-xs text-slate-500">
+                          Cada fila representa una cantidad activa del consumible que puedes mover entre ubicaciones.
+                        </p>
+                      </div>
+                      <table className="min-w-[820px] w-full">
+                        <thead className="bg-white border-b border-gray-200">
+                          <tr>
+                            <th className="px-4 py-3 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider">Lote</th>
+                            <th className="px-4 py-3 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider">Cantidad ubicacion</th>
+                            <th className="px-4 py-3 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider">Ubicacion actual</th>
+                            <th className="px-4 py-3 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider">Fecha asignacion</th>
+                            <th className="px-4 py-3 text-center text-xs font-semibold text-gray-700 uppercase tracking-wider">Acciones</th>
+                          </tr>
+                        </thead>
+                        <tbody className="bg-white divide-y divide-gray-200">
+                          {consumibleUbicaciones.map((u) => {
+                            const isEditingConsumible = editingConsumibleId === u.id;
+
+                            return (
+                              <tr key={u.id} className="hover:bg-gray-50 transition-colors duration-150">
+                                <td className="px-4 py-3 text-sm font-mono text-gray-900">Lote #{u.lote}</td>
+                                <td className="px-4 py-3 text-sm text-gray-700">{Number(u.cantidad_ubicacion).toFixed(2)}</td>
+                                <td className="px-4 py-3 text-sm text-gray-700">
+                                  {isEditingConsumible ? (
+                                    <div className="flex gap-2">
+                                      <select
+                                        value={consumibleEditValues.tipoUbicacion}
+                                        onChange={(e) => setConsumibleEditValues({ tipoUbicacion: e.target.value, ubicacion: "" })}
+                                        className="px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-[#1e3a8a] focus:border-transparent"
+                                      >
+                                        <option value="">Tipo...</option>
+                                        <option value="almacen">Almacen</option>
+                                        <option value="maquinaria">Maquinaria</option>
+                                        <option value="trabajador">Trabajador</option>
+                                      </select>
+                                      <select
+                                        value={consumibleEditValues.ubicacion || ""}
+                                        onChange={(e) => setConsumibleEditValues((prev) => ({ ...prev, ubicacion: e.target.value }))}
+                                        disabled={!consumibleEditValues.tipoUbicacion}
+                                        className={`flex-1 px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-[#1e3a8a] focus:border-transparent ${!consumibleEditValues.tipoUbicacion ? "bg-gray-50 cursor-not-allowed" : ""}`}
+                                      >
+                                        <option value="">Seleccione...</option>
+                                        {consumibleEditValues.tipoUbicacion === "almacen" && almacenes.map((a) => (<option key={a.id} value={a.id}>{a.nombre}</option>))}
+                                        {consumibleEditValues.tipoUbicacion === "maquinaria" && maquinarias.map((m) => (<option key={m.id} value={m.id}>{m.codigo_maquina} - {m.nombre}</option>))}
+                                        {consumibleEditValues.tipoUbicacion === "trabajador" && trabajadores.map((t) => (<option key={t.id} value={t.id}>{t.nombres} {t.apellidos}</option>))}
+                                      </select>
+                                    </div>
+                                  ) : (
+                                    <span className="font-medium">{u.ubicacion}</span>
+                                  )}
+                                </td>
+                                <td className="px-4 py-3 text-sm text-gray-600">{u.fecha_inicio ? new Date(u.fecha_inicio).toLocaleDateString("es-PE") : <span className="text-gray-400">-</span>}</td>
+                                <td className="px-4 py-3 text-center">
+                                  {isEditingConsumible ? (
+                                    <div className="flex items-center justify-center gap-2">
+                                      <TableActionButton onClick={() => handleSaveConsumible(u.id)} disabled={saving} tone="success" className="text-xs">Guardar</TableActionButton>
+                                      <TableActionButton onClick={handleCancelConsumible} disabled={saving} tone="neutral" className="text-xs">Cancelar</TableActionButton>
+                                    </div>
+                                  ) : (
+                                    <TableActionButton onClick={() => startEditConsumible(u)} tone="primary" className="text-xs">Editar</TableActionButton>
+                                  )}
+                                </td>
+                              </tr>
+                            );
+                          })}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
                 ) : (
-                  <table className="w-full">
+                  <table className="min-w-[820px] w-full">
                     <thead className="bg-gray-50 border-b border-gray-200">
                       <tr>
                         <th className="px-4 py-3 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider">Serie</th>
-                        <th className="px-4 py-3 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider">Estado</th>
-                        <th className="px-4 py-3 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider">Ubicación</th>
-                        <th className="px-4 py-3 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider">Fecha Asignación</th>
+                        <th className="px-4 py-3 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider">Ubicacion actual</th>
+                        <th className="px-4 py-3 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider">Fecha asignacion</th>
                         <th className="px-4 py-3 text-center text-xs font-semibold text-gray-700 uppercase tracking-wider">Acciones</th>
                       </tr>
                     </thead>
@@ -353,46 +453,37 @@ export default function ItemUbicacionModal({ itemId, open, onClose }) {
                             <td className="px-4 py-3 text-sm font-mono text-gray-900">{u.serie || <span className="text-gray-400">Sin serie</span>}</td>
                             <td className="px-4 py-3 text-sm">
                               {isEditing ? (
-                                <select value={editValues.estado} onChange={(e) => setEditValues({ ...editValues, estado: e.target.value })} className="px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-[#1e3a8a] focus:border-transparent">
-                                  {Object.entries(ESTADOS_UNIDAD).map(([key, label]) => (
-                                    <option key={key} value={key}>{label}</option>
-                                  ))}
-                                </select>
-                              ) : (
-                                <span className={`inline-flex px-2.5 py-1 rounded-full text-xs font-semibold ${u.estado === "NUEVO" ? "bg-blue-100 text-blue-700" : ""} ${u.estado === "USADO" ? "bg-gray-100 text-gray-700" : ""} ${u.estado === "INOPERATIVO" ? "bg-red-100 text-red-700" : ""} ${u.estado === "REPARADO" ? "bg-green-100 text-green-700" : ""}`}>{ESTADOS_UNIDAD[u.estado] || u.estado}</span>
-                              )}
-                            </td>
-                            <td className="px-4 py-3 text-sm">
-                              {isEditing ? (
                                 <div className="flex gap-2">
                                   <select value={editValues.tipoUbicacion} onChange={(e) => setEditValues({ ...editValues, tipoUbicacion: e.target.value, ubicacion: "" })} className="px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-[#1e3a8a] focus:border-transparent">
                                     <option value="">Tipo...</option>
-                                    <option value="almacen">Almacén</option>
-                                    <option value="maquinaria">Maquinaria</option>
+                                    <option value="almacen">Almacen</option>
+                                    {item?.tipo_insumo !== "HERRAMIENTA" && (
+                                      <option value="maquinaria">Maquinaria</option>
+                                    )}
                                     <option value="trabajador">Trabajador</option>
                                   </select>
                                   <select value={editValues.ubicacion || ""} onChange={(e) => setEditValues({ ...editValues, ubicacion: e.target.value })} disabled={!editValues.tipoUbicacion} className={`flex-1 px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-[#1e3a8a] focus:border-transparent ${!editValues.tipoUbicacion ? "bg-gray-50 cursor-not-allowed" : ""}`}>
                                     <option value="">Seleccione...</option>
                                     {editValues.tipoUbicacion === "almacen" && almacenes.map((a) => (<option key={a.id} value={a.id}>{a.nombre}</option>))}
                                     {editValues.tipoUbicacion === "maquinaria" && maquinarias.map((m) => (<option key={m.id} value={m.id}>{m.codigo_maquina} - {m.nombre}</option>))}
-                                    {editValues.tipoUbicacion === "trabajador" && trabajadores.map((t) => (<option key={t.id} value={t.id}>{t.nombres} {t.apellidos}</option>))}
+                                    {editValues.tipoUbicacion === "trabajador" && trabajadoresDestino.map((t) => (<option key={t.id} value={t.id}>{t.nombres} {t.apellidos}</option>))}
                                   </select>
                                 </div>
                               ) : u.ubicacion_actual ? (
                                 <div className="font-medium text-gray-900">{getUbicacionLabel(u.ubicacion_actual)}</div>
                               ) : (
-                                <span className="text-gray-400 italic">Sin ubicación</span>
+                                <span className="text-gray-400 italic">Sin ubicacion</span>
                               )}
                             </td>
-                            <td className="px-4 py-3 text-sm text-gray-600">{u.ubicacion_actual?.fecha_inicio ? new Date(u.ubicacion_actual.fecha_inicio).toLocaleDateString('es-PE') : <span className="text-gray-400">—</span>}</td>
+                            <td className="px-4 py-3 text-sm text-gray-600">{u.ubicacion_actual?.fecha_inicio ? new Date(u.ubicacion_actual.fecha_inicio).toLocaleDateString("es-PE") : <span className="text-gray-400">-</span>}</td>
                             <td className="px-4 py-3 text-center">
                               {isEditing ? (
                                 <div className="flex items-center justify-center gap-2">
-                                  <button onClick={() => handleSave(u.id)} disabled={saving} className="px-3 py-1.5 text-xs font-medium text-white bg-[#84cc16] rounded-lg hover:bg-[#84cc16]/90 transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-1">{saving ? <>Guardando</> : <>Guardar</>}</button>
-                                  <button onClick={handleCancel} disabled={saving} className="px-3 py-1.5 text-xs font-medium text-gray-700 bg-gray-100 border border-gray-300 rounded-lg hover:bg-gray-200 transition-all duration-200 disabled:opacity-50">Cancelar</button>
+                                  <TableActionButton onClick={() => handleSave(u)} disabled={saving} tone="success" className="text-xs">{saving ? "Guardando" : "Guardar"}</TableActionButton>
+                                  <TableActionButton onClick={handleCancel} disabled={saving} tone="neutral" className="text-xs">Cancelar</TableActionButton>
                                 </div>
                               ) : (
-                                <button onClick={() => startEditUnidad(u)} className="px-3 py-1.5 text-xs font-medium text-white bg-[#1e3a8a] rounded-lg hover:bg-[#1e3a8a]/90 transition-all duration-200 flex items-center gap-1 mx-auto">Editar</button>
+                                <TableActionButton onClick={() => startEditUnidad(u)} tone="primary" className="mx-auto text-xs">Editar</TableActionButton>
                               )}
                             </td>
                           </tr>

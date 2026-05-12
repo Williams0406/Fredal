@@ -6,10 +6,18 @@ from django.contrib.contenttypes.models import ContentType
 from django.core.exceptions import ValidationError
 from django.db.models import Max
 import uuid
-from datetime import timedelta
+from datetime import datetime, time, timedelta
 from decimal import Decimal, ROUND_HALF_UP
 from django.db import transaction
 from django.db.models import Avg
+from zoneinfo import ZoneInfo
+
+
+LIMA_TIME_ZONE = ZoneInfo("America/Lima")
+
+
+def current_local_date():
+    return datetime.now(LIMA_TIME_ZONE).date()
 
 # =========================
 # MODELOS BASE
@@ -36,6 +44,60 @@ class Maquinaria(models.Model):
     descripcion = models.TextField(blank=True)
     observacion = models.TextField(blank=True)
     gasto = models.DecimalField(max_digits=12, decimal_places=2, default=0)
+    horometro_manual = models.DecimalField(max_digits=10, decimal_places=2, null=True, blank=True)
+    horometro_manual_actualizado_en = models.DateTimeField(null=True, blank=True)
+
+    def obtener_ultima_orden_con_horometro(self):
+        if hasattr(self, "_ultima_orden_con_horometro_cache"):
+            return self._ultima_orden_con_horometro_cache
+
+        self._ultima_orden_con_horometro_cache = (
+            OrdenTrabajo.objects
+            .filter(maquinaria=self)
+            .exclude(horometro__isnull=True)
+            .order_by("-fecha", "-id")
+            .only("horometro", "fecha", "hora_inicio", "hora_fin")
+            .first()
+        )
+        return self._ultima_orden_con_horometro_cache
+
+    def _orden_tiene_prioridad_sobre_manual(self, ultima_orden=None):
+        ultima_orden = ultima_orden or self.obtener_ultima_orden_con_horometro()
+        if not ultima_orden:
+            return False
+        if self.horometro_manual is None or not self.horometro_manual_actualizado_en:
+            return True
+
+        hora_orden = ultima_orden.hora_fin or ultima_orden.hora_inicio or time.max
+        fecha_orden = datetime.combine(ultima_orden.fecha, hora_orden)
+        if timezone.is_aware(self.horometro_manual_actualizado_en):
+            fecha_orden = timezone.make_aware(
+                fecha_orden,
+                timezone.get_current_timezone(),
+            )
+        return fecha_orden >= self.horometro_manual_actualizado_en
+
+    def obtener_fuente_horometro_actual(self):
+        ultima_orden = self.obtener_ultima_orden_con_horometro()
+        if ultima_orden and self._orden_tiene_prioridad_sobre_manual(ultima_orden):
+            return "ORDEN_TRABAJO"
+        if self.horometro_manual is not None:
+            return "MANUAL"
+        return None
+
+    def obtener_horometro_actual(self):
+        ultima_orden = self.obtener_ultima_orden_con_horometro()
+        if ultima_orden and self._orden_tiene_prioridad_sobre_manual(ultima_orden):
+            return ultima_orden.horometro
+        return self.horometro_manual
+
+    def obtener_fecha_ultimo_horometro(self):
+        ultima_orden = self.obtener_ultima_orden_con_horometro()
+        if ultima_orden and self._orden_tiene_prioridad_sobre_manual(ultima_orden):
+            return ultima_orden.fecha
+        if self.horometro_manual_actualizado_en:
+            return self.horometro_manual_actualizado_en.date()
+        return None
 
     def calcular_centro_costos(self):
         """Suma el centro de costos en PEN de repuestos y consumibles activos en la maquinaria."""
@@ -244,6 +306,7 @@ class Item(TimeStampedModel):
     class TipoInsumo(models.TextChoices):
         REPUESTO = "REPUESTO"
         CONSUMIBLE = "CONSUMIBLE"
+        HERRAMIENTA = "HERRAMIENTA"
 
     codigo = models.CharField(max_length=50, unique=True)
     nombre = models.CharField(max_length=150)
@@ -271,6 +334,10 @@ class Item(TimeStampedModel):
     favorito = models.BooleanField(default=False)
     volvo = models.BooleanField(default=False)
     ultimo_correlativo = models.PositiveIntegerField(default=0)
+
+    @classmethod
+    def tipos_con_unidades(cls):
+        return [cls.TipoInsumo.REPUESTO, cls.TipoInsumo.HERRAMIENTA]
 
     def __str__(self):
         return f"{self.codigo} - {self.nombre}"
@@ -303,8 +370,61 @@ class ItemUnidad(models.Model):
         choices=Estado.choices,
         default=Estado.NUEVO
     )
+    almacen_actual = models.ForeignKey(
+        "Almacen",
+        null=True,
+        blank=True,
+        on_delete=models.PROTECT,
+        related_name="item_unidades_actuales",
+    )
+    trabajador_actual = models.ForeignKey(
+        "Trabajador",
+        null=True,
+        blank=True,
+        on_delete=models.PROTECT,
+        related_name="item_unidades_actuales",
+    )
+    maquinaria_actual = models.ForeignKey(
+        "Maquinaria",
+        null=True,
+        blank=True,
+        on_delete=models.PROTECT,
+        related_name="item_unidades_actuales",
+    )
 
     creado_en = models.DateTimeField(auto_now_add=True)
+
+    def sincronizar_ubicacion_actual(self):
+        historial_activo = (
+            self.historial
+            .select_related("almacen", "trabajador", "maquinaria")
+            .filter(fecha_fin__isnull=True)
+            .order_by("-fecha_inicio", "-id")
+            .first()
+        )
+
+        updates = {
+            "almacen_actual": historial_activo.almacen if historial_activo else None,
+            "trabajador_actual": historial_activo.trabajador if historial_activo else None,
+            "maquinaria_actual": historial_activo.maquinaria if historial_activo else None,
+        }
+
+        changed_fields = [
+            field_name
+            for field_name, value in updates.items()
+            if getattr(self, field_name) != value
+        ]
+        if not changed_fields:
+            return
+
+        for field_name, value in updates.items():
+            setattr(self, field_name, value)
+
+        self.__class__.objects.filter(pk=self.pk).update(
+            almacen_actual=updates["almacen_actual"],
+            trabajador_actual=updates["trabajador_actual"],
+            maquinaria_actual=updates["maquinaria_actual"],
+        )
 
     def save(self, *args, **kwargs):
         if not self.serie:
@@ -438,7 +558,7 @@ class OrdenTrabajo(models.Model):
 
     codigo_orden = models.CharField(max_length=50, unique=True, editable=False )
     maquinaria = models.ForeignKey(Maquinaria, on_delete=models.PROTECT)
-    fecha = models.DateField(default=timezone.now)
+    fecha = models.DateField(default=current_local_date)
     hora_inicio = models.TimeField(null=True, blank=True)
     hora_fin = models.TimeField(null=True, blank=True)
     horometro = models.DecimalField(max_digits=10, decimal_places=2, null=True, blank=True)
@@ -634,6 +754,12 @@ class MovimientoRepuesto(models.Model):
     )
 
     item_unidad = models.ForeignKey(ItemUnidad, on_delete=models.PROTECT)
+    tecnico = models.ForeignKey(
+        Trabajador,
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+    )
     fecha = models.DateTimeField(auto_now_add=True)
 
     def clean(self):
@@ -653,6 +779,12 @@ class MovimientoConsumible(models.Model):
 
     item = models.ForeignKey(Item, on_delete=models.PROTECT)
     cantidad = models.DecimalField(max_digits=16, decimal_places=6)
+    tecnico = models.ForeignKey(
+        Trabajador,
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+    )
     unidad_medida = models.ForeignKey(
         UnidadMedida,
         on_delete=models.PROTECT,
@@ -698,15 +830,24 @@ class Compra(models.Model):
         USD = "USD", "Dólares"
         EUR = "EUR", "Euros"
 
-    tipo_comprobante = models.CharField(max_length=10, choices=TipoComprobante.choices)
-    codigo_comprobante = models.CharField(max_length=50)
+    tipo_comprobante = models.CharField(
+        max_length=10,
+        choices=TipoComprobante.choices,
+        null=True,
+        blank=True,
+    )
+    codigo_comprobante = models.CharField(
+        max_length=50,
+        null=True,
+        blank=True,
+    )
     proveedor = models.ForeignKey(Proveedor, on_delete=models.PROTECT, related_name="compras", null=True, blank=True)
     moneda = models.CharField(
         max_length=3,
         choices=Moneda.choices,
         default=Moneda.PEN
     )
-    fecha = models.DateField(default=timezone.localdate)
+    fecha = models.DateField(default=current_local_date)
     
     class Meta:
         unique_together = ("tipo_comprobante", "codigo_comprobante")
@@ -755,6 +896,177 @@ class CompraDetalle(models.Model):
     @property
     def costo_total(self):
         return self.valor_total * self.IGV
+
+
+class OrdenCompra(TimeStampedModel):
+
+    class Estado(models.TextChoices):
+        PENDIENTE = "PENDIENTE", "Pendiente"
+        REVISADO = "REVISADO", "Revisado"
+        EN_PROCESO = "EN_PROCESO", "En proceso"
+        RECIBIDO = "RECIBIDO", "Recibido"
+
+    codigo = models.CharField(max_length=50, unique=True, editable=False)
+    estado = models.CharField(
+        max_length=20,
+        choices=Estado.choices,
+        default=Estado.PENDIENTE,
+    )
+    observaciones = models.TextField(blank=True, default="")
+    emitido_por = models.ForeignKey(
+        User,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="ordenes_compra_emitidas",
+    )
+    recepcion_confirmada = models.BooleanField(default=False)
+    fecha_confirmacion_recepcion = models.DateTimeField(null=True, blank=True)
+    confirmado_por = models.ForeignKey(
+        User,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="ordenes_compra_confirmadas",
+    )
+
+    class Meta:
+        ordering = ["-created_at", "-id"]
+
+    def save(self, *args, **kwargs):
+        if not self.codigo:
+            year = timezone.now().year
+            last = (
+                OrdenCompra.objects
+                .filter(codigo__startswith=f"OC-{year}")
+                .aggregate(max_code=Max("codigo"))
+                ["max_code"]
+            )
+            seq = int(last.split("-")[-1]) + 1 if last else 1
+            self.codigo = f"OC-{year}-{seq:05d}"
+
+        super().save(*args, **kwargs)
+
+    def __str__(self):
+        return self.codigo
+
+
+class OrdenCompraDetalle(models.Model):
+    orden_compra = models.ForeignKey(
+        OrdenCompra,
+        on_delete=models.CASCADE,
+        related_name="detalles",
+    )
+    item = models.ForeignKey(Item, on_delete=models.PROTECT)
+    cantidad = models.DecimalField(max_digits=16, decimal_places=6)
+    proveedor = models.ForeignKey(
+        Proveedor,
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name="ordenes_compra_detalle",
+    )
+
+    class Meta:
+        ordering = ["id"]
+
+    def clean(self):
+        if self.cantidad <= 0:
+            raise ValidationError("La cantidad debe ser mayor a cero")
+
+    def __str__(self):
+        return f"{self.orden_compra.codigo} - {self.item.codigo}"
+
+
+class OrdenRequerimiento(TimeStampedModel):
+
+    class Estado(models.TextChoices):
+        POR_REVISAR = "POR_REVISAR", "Por revisar"
+        ENTREGADO = "ENTREGADO", "Entregado"
+        SIN_STOCK = "SIN_STOCK", "Sin stock"
+
+    codigo = models.CharField(max_length=50, unique=True, editable=False)
+    trabajo = models.ForeignKey(
+        OrdenTrabajo,
+        on_delete=models.CASCADE,
+        related_name="ordenes_requerimiento",
+    )
+    estado = models.CharField(
+        max_length=20,
+        choices=Estado.choices,
+        default=Estado.POR_REVISAR,
+    )
+    tecnico_asignado = models.ForeignKey(
+        Trabajador,
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name="ordenes_requerimiento_asignadas",
+    )
+    observaciones = models.TextField(blank=True, default="")
+    emitido_por = models.ForeignKey(
+        User,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="ordenes_requerimiento_emitidas",
+    )
+    recepcion_confirmada_tecnico = models.BooleanField(default=False)
+    fecha_confirmacion_tecnico = models.DateTimeField(null=True, blank=True)
+    confirmado_por_tecnico = models.ForeignKey(
+        User,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="ordenes_requerimiento_confirmadas",
+    )
+
+    class Meta:
+        ordering = ["-created_at", "-id"]
+
+    def save(self, *args, **kwargs):
+        if not self.codigo:
+            year = timezone.now().year
+            last = (
+                OrdenRequerimiento.objects
+                .filter(codigo__startswith=f"OR-{year}")
+                .aggregate(max_code=Max("codigo"))
+                ["max_code"]
+            )
+            seq = int(last.split("-")[-1]) + 1 if last else 1
+            self.codigo = f"OR-{year}-{seq:05d}"
+
+        super().save(*args, **kwargs)
+
+    def __str__(self):
+        return self.codigo
+
+
+class OrdenRequerimientoDetalle(models.Model):
+    orden_requerimiento = models.ForeignKey(
+        OrdenRequerimiento,
+        on_delete=models.CASCADE,
+        related_name="detalles",
+    )
+    item = models.ForeignKey(Item, on_delete=models.PROTECT)
+    cantidad = models.DecimalField(max_digits=16, decimal_places=6)
+    proveedor = models.ForeignKey(
+        Proveedor,
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name="ordenes_requerimiento_detalle",
+    )
+
+    class Meta:
+        ordering = ["id"]
+
+    def clean(self):
+        if self.cantidad <= 0:
+            raise ValidationError("La cantidad debe ser mayor a cero")
+
+    def __str__(self):
+        return f"{self.orden_requerimiento.codigo} - {self.item.codigo}"
 
 
 class LoteConsumible(models.Model):
@@ -880,6 +1192,8 @@ class HistorialUbicacionItem(models.Model):
 
     fecha_inicio = models.DateTimeField(auto_now_add=True)
     fecha_fin = models.DateTimeField(null=True, blank=True)
+    horometro_inicio = models.DecimalField(max_digits=10, decimal_places=2, null=True, blank=True)
+    horometro_fin = models.DecimalField(max_digits=10, decimal_places=2, null=True, blank=True)
     estado = models.CharField(
         max_length=15,
         choices=ItemUnidad.Estado.choices,
@@ -891,25 +1205,45 @@ class HistorialUbicacionItem(models.Model):
         if sum(bool(d) for d in destinos) != 1:
             raise ValidationError("Debe existir un único destino")
     
+    def _obtener_horometro_maquinaria(self):
+        if not self.maquinaria:
+            return None
+        return self.maquinaria.obtener_horometro_actual()
+
+    def cerrar(self, fecha=None, horometro_fin=None):
+        if self.fecha_fin:
+            return
+
+        self.fecha_fin = fecha or timezone.now()
+        update_fields = ["fecha_fin"]
+        if (
+            horometro_fin is not None
+            and self.maquinaria_id
+            and self.orden_trabajo_id
+        ):
+            self.horometro_fin = horometro_fin
+            update_fields.append("horometro_fin")
+        self.save(update_fields=update_fields)
+
     def save(self, *args, **kwargs):
-        from django.utils import timezone
 
         is_new = self.pk is None
 
         if is_new:
-            # 🔒 Cerrar ubicación activa anterior
-            (
+            historiales_activos = list(
                 HistorialUbicacionItem.objects
                 .filter(
                     item_unidad=self.item_unidad,
                     fecha_fin__isnull=True
                 )
-                .update(fecha_fin=timezone.now())
             )
+            for historial_activo in historiales_activos:
+                historial_activo.cerrar()
 
         self.full_clean()
         
         super().save(*args, **kwargs)
+        self.item_unidad.sincronizar_ubicacion_actual()
 
 class HistorialConsumible(models.Model):
 
@@ -964,6 +1298,8 @@ class HistorialConsumible(models.Model):
 
     fecha_inicio = models.DateTimeField(auto_now_add=True)
     fecha_fin = models.DateTimeField(null=True, blank=True)
+    horometro_inicio = models.DecimalField(max_digits=10, decimal_places=2, null=True, blank=True)
+    horometro_fin = models.DecimalField(max_digits=10, decimal_places=2, null=True, blank=True)
 
     def clean(self):
         destinos = [self.maquinaria, self.trabajador, self.almacen]
@@ -972,3 +1308,31 @@ class HistorialConsumible(models.Model):
 
         if self.cantidad > self.lote.cantidad_disponible:
             raise ValidationError("No hay suficiente cantidad disponible en el lote")
+
+    def _obtener_horometro_maquinaria(self):
+        if not self.maquinaria:
+            return None
+        return self.maquinaria.obtener_horometro_actual()
+
+    def cerrar(self, fecha=None, cantidad=None, horometro_fin=None):
+        if self.fecha_fin:
+            return
+
+        self.fecha_fin = fecha or timezone.now()
+        if cantidad is not None:
+            self.cantidad = cantidad
+
+        update_fields = ["fecha_fin"]
+        if (
+            horometro_fin is not None
+            and self.maquinaria_id
+            and self.orden_trabajo_id
+        ):
+            self.horometro_fin = horometro_fin
+            update_fields.append("horometro_fin")
+        if cantidad is not None:
+            update_fields.append("cantidad")
+        self.save(update_fields=update_fields)
+
+    def save(self, *args, **kwargs):
+        super().save(*args, **kwargs)

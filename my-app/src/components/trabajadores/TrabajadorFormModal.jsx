@@ -16,14 +16,15 @@ export default function TrabajadorFormModal({
   return (
     // Overlay con transición suave
     <div
-      className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4 animate-fadeIn"
+      className="fixed inset-0 z-50 overflow-y-auto bg-black/40 animate-fadeIn"
       onClick={onClose}
     >
-      {/* Modal Container */}
-      <div
-        className="bg-white rounded-2xl w-full max-w-md shadow-xl animate-slideUp"
-        onClick={(e) => e.stopPropagation()}
-      >
+      <div className="flex min-h-full items-start justify-center p-4 sm:items-center">
+        {/* Modal Container */}
+        <div
+          className="flex max-h-[calc(100dvh-2rem)] w-full max-w-md flex-col overflow-hidden rounded-2xl bg-white shadow-xl animate-slideUp sm:max-h-[calc(100dvh-4rem)]"
+          onClick={(e) => e.stopPropagation()}
+        >
         {/* Header del modal */}
         <div className="px-6 py-5 border-b border-gray-200">
           <div className="flex items-center justify-between">
@@ -58,7 +59,8 @@ export default function TrabajadorFormModal({
         </div>
 
         {/* Form Body */}
-        <form onSubmit={onSubmit} className="px-6 py-6">
+        <form onSubmit={onSubmit} className="flex flex-1 flex-col overflow-hidden">
+          <div className="flex-1 overflow-y-auto px-6 py-6">
           <div className="space-y-5">
             {/* Nombres */}
             <div>
@@ -125,6 +127,7 @@ export default function TrabajadorFormModal({
               />
             </div>
           </div>
+          </div>
 
           {/* Footer con botones */}
           <div className="flex items-center justify-end gap-3 mt-8 pt-6 border-t border-gray-200">
@@ -144,6 +147,7 @@ export default function TrabajadorFormModal({
             </button>
           </div>
         </form>
+      </div>
       </div>
 
       {/* Estilos de animación */}
