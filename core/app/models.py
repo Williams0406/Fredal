@@ -55,11 +55,20 @@ class Maquinaria(models.Model):
             OrdenTrabajo.objects
             .filter(maquinaria=self)
             .exclude(horometro__isnull=True)
-            .order_by("-fecha", "-id")
+            .order_by("-fecha", "-hora_fin", "-hora_inicio", "-id")
             .only("horometro", "fecha", "hora_inicio", "hora_fin")
             .first()
         )
         return self._ultima_orden_con_horometro_cache
+
+    @staticmethod
+    def _normalizar_datetime_local(valor):
+        if not valor:
+            return None
+        if timezone.is_aware(valor):
+            valor = timezone.localtime(valor, timezone.get_current_timezone())
+            return valor.replace(tzinfo=None)
+        return valor
 
     def _orden_tiene_prioridad_sobre_manual(self, ultima_orden=None):
         ultima_orden = ultima_orden or self.obtener_ultima_orden_con_horometro()
@@ -68,14 +77,23 @@ class Maquinaria(models.Model):
         if self.horometro_manual is None or not self.horometro_manual_actualizado_en:
             return True
 
-        hora_orden = ultima_orden.hora_fin or ultima_orden.hora_inicio or time.max
+        fecha_manual = self._normalizar_datetime_local(
+            self.horometro_manual_actualizado_en
+        )
+        if not fecha_manual:
+            return True
+
+        if ultima_orden.fecha > fecha_manual.date():
+            return True
+        if ultima_orden.fecha < fecha_manual.date():
+            return False
+
+        hora_orden = ultima_orden.hora_fin or ultima_orden.hora_inicio
+        if not hora_orden:
+            return False
+
         fecha_orden = datetime.combine(ultima_orden.fecha, hora_orden)
-        if timezone.is_aware(self.horometro_manual_actualizado_en):
-            fecha_orden = timezone.make_aware(
-                fecha_orden,
-                timezone.get_current_timezone(),
-            )
-        return fecha_orden >= self.horometro_manual_actualizado_en
+        return fecha_orden >= fecha_manual
 
     def obtener_fuente_horometro_actual(self):
         ultima_orden = self.obtener_ultima_orden_con_horometro()

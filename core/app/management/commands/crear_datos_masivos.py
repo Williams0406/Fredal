@@ -4,6 +4,7 @@ import random
 from dataclasses import dataclass
 from datetime import time, timedelta
 from decimal import Decimal, ROUND_HALF_UP
+from types import SimpleNamespace
 
 from django.contrib.auth.models import User
 from django.core.management import call_command
@@ -55,11 +56,25 @@ class ItemSeed:
     proveedor: Proveedor
 
 
+@dataclass
+class ConsumibleSeed:
+    seed: ItemSeed
+    cantidad: Decimal
+
+
+@dataclass
+class MaterialPlan:
+    repuestos: list[ItemSeed]
+    consumibles: list[ConsumibleSeed]
+
+
 class Command(BaseCommand):
     help = (
         "Limpia los datos operativos actuales y crea un dataset masivo para "
-        "probar indicadores, ordenes de trabajo, materiales e historiales, "
-        "preservando usuarios y trabajadores."
+        "probar el flujo actual de la plataforma: ordenes de trabajo con "
+        "actividades planificadas y realizadas, requerimientos, entregas de "
+        "almacen, compras, materiales e historiales, preservando usuarios y "
+        "trabajadores."
     )
 
     CLIENTES_BASE = [
@@ -186,6 +201,18 @@ class Command(BaseCommand):
             help="Fraccion de ordenes de trabajo que recibiran orden de requerimiento.",
         )
         parser.add_argument(
+            "--fraccion-pendientes",
+            type=float,
+            default=0.18,
+            help="Fraccion de ordenes de trabajo que permaneceran en estado pendiente.",
+        )
+        parser.add_argument(
+            "--fraccion-en-proceso",
+            type=float,
+            default=0.24,
+            help="Fraccion de ordenes de trabajo que permaneceran en proceso.",
+        )
+        parser.add_argument(
             "--yes",
             action="store_true",
             help="Confirma la limpieza y generacion sin pedir texto adicional.",
@@ -196,11 +223,33 @@ class Command(BaseCommand):
         self.random = random.Random(options["seed"])
         self.actividades_min = options["actividades_min"]
         self.actividades_max = options["actividades_max"]
+        self.fraccion_pendientes = Decimal(str(options["fraccion_pendientes"]))
+        self.fraccion_en_proceso = Decimal(str(options["fraccion_en_proceso"]))
         self.today = current_local_date()
-        self.user_emisor = User.objects.order_by("id").first()
+        self.user_planificador = self._resolver_usuario_referencia(
+            ["Jefe de Tecnicos", "Jefe de Almaceneros", "Jefe de Mantenimiento"]
+        )
+        self.user_almacen = self._resolver_usuario_referencia(
+            ["Jefe de Almaceneros", "Almacenero"]
+        )
+        self.user_compras = self._resolver_usuario_referencia(["ManageCompras", "Compras"])
+        self.user_emisor = (
+            self.user_planificador
+            or self.user_almacen
+            or self.user_compras
+            or User.objects.order_by("id").first()
+        )
+        self.requirement_purchase_candidates = []
 
         if self.actividades_min <= 0 or self.actividades_max < self.actividades_min:
             raise CommandError("Los limites de actividades no son validos.")
+
+        if self.fraccion_pendientes < 0 or self.fraccion_en_proceso < 0:
+            raise CommandError("Las fracciones de estados deben ser mayores o iguales a cero.")
+        if self.fraccion_pendientes + self.fraccion_en_proceso >= 1:
+            raise CommandError(
+                "La suma de fraccion-pendientes y fraccion-en-proceso debe ser menor a 1."
+            )
 
         if options["ordenes"] <= 0:
             raise CommandError("Debes solicitar al menos una orden de trabajo.")
@@ -244,6 +293,10 @@ class Command(BaseCommand):
         self.maquinarias = self._crear_maquinarias(options["maquinarias"])
         self.repuestos = self._crear_repuestos(options["repuestos"], options["ordenes"])
         self.consumibles = self._crear_consumibles(options["consumibles"], options["ordenes"])
+        self.seeds_by_item_id = {
+            seed.item.id: seed
+            for seed in (self.repuestos + self.consumibles)
+        }
         self._crear_item_grupos()
         self._crear_tipos_cambio()
 
@@ -278,6 +331,37 @@ class Command(BaseCommand):
         if tecnicos:
             return tecnicos
         return []
+
+    def _resolver_usuario_referencia(self, grupos):
+        user = (
+            User.objects.filter(groups__name__in=grupos)
+            .distinct()
+            .order_by("id")
+            .first()
+        )
+        if user:
+            return user
+        return (
+            User.objects.filter(is_staff=True)
+            .order_by("id")
+            .first()
+        )
+
+    @staticmethod
+    def _request_context(user):
+        if not user:
+            return {}
+        return {"request": SimpleNamespace(user=user)}
+
+    @staticmethod
+    def _decimal_entera(valor):
+        return Decimal(valor).quantize(Decimal("1"))
+
+    def _usuario_de_trabajador(self, trabajador):
+        if not trabajador:
+            return None
+        perfil = PerfilUsuario.objects.filter(trabajador=trabajador).select_related("user").first()
+        return perfil.user if perfil else None
 
     def _crear_unidades_base(self):
         unidades = [
@@ -503,133 +587,295 @@ class Command(BaseCommand):
             horometro_cursor = maquinaria.obtener_horometro_actual() or Decimal("1000.00")
             repuestos_pool = self._pool_por_maquina(self.repuestos, maquina_index, minimo=3)
             consumibles_pool = self._pool_por_maquina(self.consumibles, maquina_index * 2, minimo=2)
+            estados_plan = self._construir_estados_para_maquina(cantidad)
 
-            for orden_index in range(cantidad):
+            for orden_index, estado_objetivo in enumerate(estados_plan):
                 fecha_cursor += timedelta(days=self.random.randint(2, 7))
                 tecnicos = self._seleccionar_tecnicos()
                 orden = self._crear_orden_trabajo(
                     maquinaria=maquinaria,
-                    fecha_orden=fecha_cursor,
+                    fecha_orden=self._resolver_fecha_orden(fecha_cursor, estado_objetivo),
                     tecnicos=tecnicos,
                 )
-
-                if orden_index % 4 == 0:
-                    self._crear_actividad(
-                        orden=orden,
-                        es_planificada=True,
-                        indice=orden_index,
-                        descripcion_base="Planificacion de recursos y tareas previas",
-                    )
-
-                actividades_registradas = [
-                    self._crear_actividad(
-                        orden=orden,
-                        es_planificada=False,
-                        indice=actividad_index,
-                        descripcion_base=f"Intervencion tecnica {actividad_index + 1}",
-                    )
-                    for actividad_index in range(
-                        self.random.randint(self.actividades_min, self.actividades_max)
-                    )
-                ]
-
-                repuestos_usados = self._seleccionar_items_para_orden(
-                    repuestos_pool,
-                    orden_index,
-                    minimo=1,
-                    maximo=min(2, len(repuestos_pool)),
-                )
-                consumibles_usados = self._seleccionar_items_para_orden(
-                    consumibles_pool,
-                    orden_index,
-                    minimo=1,
-                    maximo=min(2, len(consumibles_pool)),
-                )
-
-                detalle_materiales = []
                 tecnico_principal = tecnicos[0]
+                actividades_planificadas = self._crear_actividades_planificadas(
+                    orden,
+                    estado_objetivo=estado_objetivo,
+                    indice_base=orden_index,
+                )
+                material_plan = self._crear_plan_materiales(
+                    repuestos_pool=repuestos_pool,
+                    consumibles_pool=consumibles_pool,
+                    indice=orden_index,
+                    estado_objetivo=estado_objetivo,
+                )
 
-                for repuesto_seed in repuestos_usados:
-                    self._asegurar_stock_repuesto(repuesto_seed)
-                    unidad = (
-                        ItemUnidad.objects.filter(
-                            item=repuesto_seed.item,
-                            almacen_actual__isnull=False,
-                        )
-                        .exclude(estado=ItemUnidad.Estado.INOPERATIVO)
-                        .order_by("id")
-                        .first()
-                    )
-                    if not unidad:
-                        raise CommandError(
-                            f"No se encontro una unidad disponible para el repuesto {repuesto_seed.item.codigo}."
-                        )
-
-                    actividad = self.random.choice(actividades_registradas)
-                    serializer = MovimientoRepuestoSerializer(
-                        data={
-                            "actividad": actividad.id,
-                            "item_unidad": unidad.id,
-                        }
-                    )
-                    serializer.is_valid(raise_exception=True)
-                    serializer.save()
-                    detalle_materiales.append((repuesto_seed.item, Decimal("1"), repuesto_seed.proveedor))
-
-                for consumible_seed in consumibles_usados:
-                    cantidad_consumo = Decimal(self.random.randint(1, 6))
-                    self._asegurar_stock_consumible(consumible_seed, cantidad_consumo * Decimal("4"))
-                    self._asignar_consumible_a_tecnico(
-                        item=consumible_seed.item,
-                        tecnico=tecnico_principal,
-                        cantidad=cantidad_consumo,
-                    )
-                    actividad = self.random.choice(actividades_registradas)
-                    serializer = MovimientoConsumibleSerializer(
-                        data={
-                            "actividad": actividad.id,
-                            "item": consumible_seed.item.id,
-                            "cantidad": str(cantidad_consumo),
-                            "unidad_medida": consumible_seed.item.unidad_medida_id,
-                        }
-                    )
-                    serializer.is_valid(raise_exception=True)
-                    serializer.save()
-                    detalle_materiales.append(
-                        (consumible_seed.item, cantidad_consumo, consumible_seed.proveedor)
-                    )
-
-                if requerimientos_creados < requerimientos_meta and self.random.random() < 0.58:
-                    self._crear_orden_requerimiento(
+                requerimiento = None
+                requerimiento_entregado = False
+                if (
+                    self._material_plan_tiene_detalles(material_plan)
+                    and requerimientos_creados < requerimientos_meta
+                    and self._debe_crear_requerimiento(estado_objetivo)
+                ):
+                    requerimiento = self._crear_orden_requerimiento(
                         orden=orden,
                         tecnico=tecnico_principal,
-                        detalle_materiales=detalle_materiales,
+                        material_plan=material_plan,
                     )
                     requerimientos_creados += 1
+                    requerimiento_entregado = self._aplicar_flujo_requerimiento(
+                        requerimiento,
+                        estado_objetivo=estado_objetivo,
+                    )
 
-                hora_inicio, hora_fin = self._generar_horas_trabajo()
-                horometro_cursor = (horometro_cursor + Decimal(self.random.randint(35, 180))).quantize(
-                    Decimal("0.01")
-                )
+                if estado_objetivo in {
+                    OrdenTrabajo.Estatus.EN_PROCESO,
+                    OrdenTrabajo.Estatus.FINALIZADO,
+                }:
+                    self._marcar_orden_en_proceso(orden)
 
-                serializer_final = OrdenTrabajoSerializer(
-                    orden,
-                    data={
-                        "hora_inicio": hora_inicio.strftime("%H:%M:%S"),
-                        "hora_fin": hora_fin.strftime("%H:%M:%S"),
-                        "horometro": str(horometro_cursor),
-                        "estado_equipo": self.random.choice(self.ESTADOS_EQUIPO),
-                        "estatus": OrdenTrabajo.Estatus.FINALIZADO,
-                        "observaciones": self._observacion_final_orden(
-                            maquinaria=maquinaria,
-                            repuestos=len(repuestos_usados),
-                            consumibles=len(consumibles_usados),
-                        ),
-                    },
-                    partial=True,
+                    if (
+                        requerimiento_entregado
+                        and actividades_planificadas
+                        and self.user_planificador
+                        and self.random.random() < 0.65
+                    ):
+                        self._crear_materiales_planificados(
+                            actividad=actividades_planificadas[0],
+                            tecnico=tecnico_principal,
+                            material_plan=material_plan,
+                        )
+
+                    actividades_registradas = self._crear_actividades_registradas(
+                        orden,
+                        estado_objetivo=estado_objetivo,
+                    )
+
+                    if requerimiento_entregado:
+                        self._registrar_materiales_ejecucion(
+                            actividades=actividades_registradas,
+                            tecnico=tecnico_principal,
+                            material_plan=material_plan,
+                        )
+
+                    if estado_objetivo == OrdenTrabajo.Estatus.FINALIZADO:
+                        hora_inicio, hora_fin = self._generar_horas_trabajo()
+                        horometro_cursor = (
+                            horometro_cursor + Decimal(self.random.randint(35, 180))
+                        ).quantize(Decimal("0.01"))
+
+                        serializer_final = OrdenTrabajoSerializer(
+                            orden,
+                            data={
+                                "hora_inicio": hora_inicio.strftime("%H:%M:%S"),
+                                "hora_fin": hora_fin.strftime("%H:%M:%S"),
+                                "horometro": str(horometro_cursor),
+                                "estado_equipo": self.random.choice(self.ESTADOS_EQUIPO),
+                                "estatus": OrdenTrabajo.Estatus.FINALIZADO,
+                                "observaciones": self._observacion_final_orden(
+                                    maquinaria=maquinaria,
+                                    repuestos=len(material_plan.repuestos),
+                                    consumibles=len(material_plan.consumibles),
+                                ),
+                            },
+                            partial=True,
+                        )
+                        serializer_final.is_valid(raise_exception=True)
+                        serializer_final.save()
+
+    def _construir_estados_para_maquina(self, cantidad):
+        pendientes = int(
+            (Decimal(cantidad) * self.fraccion_pendientes).quantize(
+                Decimal("1"), rounding=ROUND_HALF_UP
+            )
+        )
+        en_proceso = int(
+            (Decimal(cantidad) * self.fraccion_en_proceso).quantize(
+                Decimal("1"), rounding=ROUND_HALF_UP
+            )
+        )
+        while pendientes + en_proceso >= cantidad and (pendientes > 0 or en_proceso > 0):
+            if pendientes >= en_proceso and pendientes > 0:
+                pendientes -= 1
+            elif en_proceso > 0:
+                en_proceso -= 1
+        finalizadas = max(0, cantidad - pendientes - en_proceso)
+        return (
+            [OrdenTrabajo.Estatus.FINALIZADO] * finalizadas
+            + [OrdenTrabajo.Estatus.EN_PROCESO] * en_proceso
+            + [OrdenTrabajo.Estatus.PENDIENTE] * pendientes
+        )
+
+    def _resolver_fecha_orden(self, fecha_cursor, estado_objetivo):
+        if estado_objetivo == OrdenTrabajo.Estatus.PENDIENTE:
+            return max(fecha_cursor, self.today - timedelta(days=self.random.randint(0, 12)))
+        if estado_objetivo == OrdenTrabajo.Estatus.EN_PROCESO:
+            return max(fecha_cursor, self.today - timedelta(days=self.random.randint(4, 32)))
+        return fecha_cursor
+
+    def _crear_actividades_planificadas(self, orden, *, estado_objetivo, indice_base):
+        probabilidad = Decimal("0.90") if estado_objetivo != OrdenTrabajo.Estatus.FINALIZADO else Decimal("0.70")
+        if Decimal(str(self.random.random())) > probabilidad:
+            return []
+
+        cantidad = 2 if self.random.random() < 0.35 else 1
+        actividades = []
+        for offset in range(cantidad):
+            actividades.append(
+                self._crear_actividad(
+                    orden=orden,
+                    es_planificada=True,
+                    indice=indice_base + offset,
+                    descripcion_base="Planificacion de recursos y tareas previas",
                 )
-                serializer_final.is_valid(raise_exception=True)
-                serializer_final.save()
+            )
+        return actividades
+
+    def _crear_actividades_registradas(self, orden, *, estado_objetivo):
+        if estado_objetivo == OrdenTrabajo.Estatus.FINALIZADO:
+            cantidad = self.random.randint(self.actividades_min, self.actividades_max)
+        else:
+            maximo = max(1, min(self.actividades_max, max(self.actividades_min, 2)))
+            cantidad = self.random.randint(1, maximo)
+
+        return [
+            self._crear_actividad(
+                orden=orden,
+                es_planificada=False,
+                indice=actividad_index,
+                descripcion_base=f"Intervencion tecnica {actividad_index + 1}",
+            )
+            for actividad_index in range(cantidad)
+        ]
+
+    def _crear_plan_materiales(self, *, repuestos_pool, consumibles_pool, indice, estado_objetivo):
+        repuestos = []
+        consumibles = []
+
+        if repuestos_pool and self.random.random() < (0.76 if estado_objetivo != OrdenTrabajo.Estatus.PENDIENTE else 0.58):
+            repuestos = self._seleccionar_items_para_orden(
+                repuestos_pool,
+                indice,
+                minimo=1,
+                maximo=min(2, len(repuestos_pool)),
+            )
+
+        if consumibles_pool and self.random.random() < (0.82 if estado_objetivo != OrdenTrabajo.Estatus.PENDIENTE else 0.52):
+            for seed in self._seleccionar_items_para_orden(
+                consumibles_pool,
+                indice,
+                minimo=1,
+                maximo=min(2, len(consumibles_pool)),
+            ):
+                cantidad = Decimal(self.random.randint(1, 6)).quantize(Decimal("0.000001"))
+                consumibles.append(ConsumibleSeed(seed=seed, cantidad=cantidad))
+
+        return MaterialPlan(repuestos=repuestos, consumibles=consumibles)
+
+    @staticmethod
+    def _material_plan_tiene_detalles(material_plan):
+        return bool(material_plan.repuestos or material_plan.consumibles)
+
+    def _debe_crear_requerimiento(self, estado_objetivo):
+        if estado_objetivo == OrdenTrabajo.Estatus.FINALIZADO:
+            return self.random.random() < 0.80
+        if estado_objetivo == OrdenTrabajo.Estatus.EN_PROCESO:
+            return self.random.random() < 0.72
+        return self.random.random() < 0.62
+
+    def _marcar_orden_en_proceso(self, orden):
+        if orden.estatus == OrdenTrabajo.Estatus.EN_PROCESO:
+            return orden
+
+        serializer = OrdenTrabajoSerializer(
+            orden,
+            data={"estatus": OrdenTrabajo.Estatus.EN_PROCESO},
+            partial=True,
+        )
+        serializer.is_valid(raise_exception=True)
+        return serializer.save()
+
+    def _crear_materiales_planificados(self, *, actividad, tecnico, material_plan):
+        context = self._request_context(self.user_planificador)
+
+        for repuesto_seed in material_plan.repuestos:
+            unidad = self._obtener_unidad_tecnico_por_item(repuesto_seed.item, tecnico)
+            if not unidad:
+                continue
+            serializer = MovimientoRepuestoSerializer(
+                data={
+                    "actividad": actividad.id,
+                    "item_unidad": unidad.id,
+                    "tecnico": tecnico.id,
+                },
+                context=context,
+            )
+            serializer.is_valid(raise_exception=True)
+            serializer.save()
+
+        for consumible_seed in material_plan.consumibles:
+            serializer = MovimientoConsumibleSerializer(
+                data={
+                    "actividad": actividad.id,
+                    "item": consumible_seed.seed.item.id,
+                    "cantidad": str(consumible_seed.cantidad),
+                    "unidad_medida": consumible_seed.seed.item.unidad_medida_id,
+                    "tecnico": tecnico.id,
+                },
+                context=context,
+            )
+            serializer.is_valid(raise_exception=True)
+            serializer.save()
+
+    def _registrar_materiales_ejecucion(self, *, actividades, tecnico, material_plan):
+        unidades_utilizadas = set()
+
+        for repuesto_seed in material_plan.repuestos:
+            unidad = self._obtener_unidad_tecnico_por_item(
+                repuesto_seed.item,
+                tecnico,
+                exclude_ids=unidades_utilizadas,
+            )
+            if not unidad:
+                continue
+            actividad = self.random.choice(actividades)
+            serializer = MovimientoRepuestoSerializer(
+                data={
+                    "actividad": actividad.id,
+                    "item_unidad": unidad.id,
+                    "tecnico": tecnico.id,
+                }
+            )
+            serializer.is_valid(raise_exception=True)
+            movimiento = serializer.save()
+            unidades_utilizadas.add(movimiento.item_unidad_id)
+
+        for consumible_seed in material_plan.consumibles:
+            actividad = self.random.choice(actividades)
+            serializer = MovimientoConsumibleSerializer(
+                data={
+                    "actividad": actividad.id,
+                    "item": consumible_seed.seed.item.id,
+                    "cantidad": str(consumible_seed.cantidad),
+                    "unidad_medida": consumible_seed.seed.item.unidad_medida_id,
+                    "tecnico": tecnico.id,
+                }
+            )
+            serializer.is_valid(raise_exception=True)
+            serializer.save()
+
+    def _obtener_unidad_tecnico_por_item(self, item, tecnico, exclude_ids=None):
+        queryset = (
+            ItemUnidad.objects.filter(
+                item=item,
+                trabajador_actual=tecnico,
+            )
+            .exclude(estado=ItemUnidad.Estado.INOPERATIVO)
+            .order_by("id")
+        )
+        if exclude_ids:
+            queryset = queryset.exclude(id__in=list(exclude_ids))
+        return queryset.first()
 
     def _pool_por_maquina(self, seeds, inicio, minimo):
         if not seeds:
@@ -692,21 +938,30 @@ class Command(BaseCommand):
             resultado.append(seed)
         return resultado
 
-    def _crear_orden_requerimiento(self, *, orden, tecnico, detalle_materiales):
-        if not detalle_materiales:
+    def _crear_orden_requerimiento(self, *, orden, tecnico, material_plan):
+        if not self._material_plan_tiene_detalles(material_plan):
             return None
 
         items_payload = []
-        vistos = set()
-        for item, cantidad, proveedor in detalle_materiales:
-            if item.id in vistos:
-                continue
-            vistos.add(item.id)
+        for repuesto_seed in material_plan.repuestos:
             items_payload.append(
                 {
-                    "item": item.id,
-                    "cantidad": str(max(Decimal("1"), cantidad)),
-                    "proveedor": proveedor.id if proveedor else None,
+                    "item": repuesto_seed.item.id,
+                    "cantidad": "1",
+                    "proveedor": repuesto_seed.proveedor.id if repuesto_seed.proveedor else None,
+                }
+            )
+
+        for consumible_seed in material_plan.consumibles:
+            items_payload.append(
+                {
+                    "item": consumible_seed.seed.item.id,
+                    "cantidad": str(consumible_seed.cantidad),
+                    "proveedor": (
+                        consumible_seed.seed.proveedor.id
+                        if consumible_seed.seed.proveedor
+                        else None
+                    ),
                 }
             )
 
@@ -716,40 +971,139 @@ class Command(BaseCommand):
                 "tecnico_asignado": tecnico.id,
                 "observaciones": f"Requerimiento generado por {self.prefijo} para {orden.codigo_orden}.",
                 "items": items_payload,
-            }
+            },
+            context=self._request_context(self.user_planificador or self.user_emisor),
         )
         serializer.is_valid(raise_exception=True)
-        requerimiento = serializer.save()
+        return serializer.save()
 
-        if self.user_emisor:
-            requerimiento.emitido_por = self.user_emisor
+    def _aplicar_flujo_requerimiento(self, requerimiento, *, estado_objetivo):
+        if not requerimiento:
+            return False
 
-        estado = self.random.choice(
-            [
-                OrdenRequerimiento.Estado.POR_REVISAR,
-                OrdenRequerimiento.Estado.ENTREGADO,
-                OrdenRequerimiento.Estado.SIN_STOCK,
-            ]
+        if estado_objetivo == OrdenTrabajo.Estatus.FINALIZADO:
+            estado_destino = OrdenRequerimiento.Estado.ENTREGADO
+        elif estado_objetivo == OrdenTrabajo.Estatus.EN_PROCESO:
+            probabilidad = self.random.random()
+            if probabilidad < 0.72:
+                estado_destino = OrdenRequerimiento.Estado.ENTREGADO
+            elif probabilidad < 0.90:
+                estado_destino = OrdenRequerimiento.Estado.POR_REVISAR
+            else:
+                estado_destino = OrdenRequerimiento.Estado.SIN_STOCK
+        else:
+            probabilidad = self.random.random()
+            if probabilidad < 0.18:
+                estado_destino = OrdenRequerimiento.Estado.ENTREGADO
+            elif probabilidad < 0.74:
+                estado_destino = OrdenRequerimiento.Estado.POR_REVISAR
+            else:
+                estado_destino = OrdenRequerimiento.Estado.SIN_STOCK
+
+        if estado_destino == OrdenRequerimiento.Estado.SIN_STOCK:
+            requerimiento.estado = OrdenRequerimiento.Estado.SIN_STOCK
+            requerimiento.save(update_fields=["estado"])
+            self._registrar_requerimiento_sin_stock(requerimiento)
+            return False
+
+        if estado_destino == OrdenRequerimiento.Estado.POR_REVISAR:
+            if requerimiento.estado != OrdenRequerimiento.Estado.POR_REVISAR:
+                requerimiento.estado = OrdenRequerimiento.Estado.POR_REVISAR
+                requerimiento.save(update_fields=["estado"])
+            return False
+
+        self._entregar_requerimiento(requerimiento)
+
+        update_fields = ["estado"]
+        requerimiento.estado = OrdenRequerimiento.Estado.ENTREGADO
+        confirmar_recepcion = (
+            estado_objetivo == OrdenTrabajo.Estatus.FINALIZADO
+            or self.random.random() < 0.65
         )
-        requerimiento.estado = estado
-        if estado == OrdenRequerimiento.Estado.ENTREGADO and self.random.random() < 0.55:
+        if confirmar_recepcion:
             requerimiento.recepcion_confirmada_tecnico = True
             requerimiento.fecha_confirmacion_tecnico = timezone.now()
-            requerimiento.confirmado_por_tecnico = self.user_emisor
-        requerimiento.save(
-            update_fields=[
-                field
-                for field in [
-                    "emitido_por",
-                    "estado",
+            requerimiento.confirmado_por_tecnico = (
+                self._usuario_de_trabajador(requerimiento.tecnico_asignado)
+                or self.user_planificador
+                or self.user_emisor
+            )
+            update_fields.extend(
+                [
                     "recepcion_confirmada_tecnico",
                     "fecha_confirmacion_tecnico",
                     "confirmado_por_tecnico",
                 ]
-                if getattr(requerimiento, field, None) is not None or field in {"estado", "recepcion_confirmada_tecnico"}
-            ]
+            )
+        requerimiento.save(update_fields=update_fields)
+        return True
+
+    def _registrar_requerimiento_sin_stock(self, requerimiento):
+        for detalle in requerimiento.detalles.select_related("item", "proveedor"):
+            seed = self.seeds_by_item_id.get(detalle.item_id)
+            if not seed:
+                continue
+            self.requirement_purchase_candidates.append(seed)
+
+    def _entregar_requerimiento(self, requerimiento):
+        tecnico = requerimiento.tecnico_asignado
+        if not tecnico:
+            raise CommandError(
+                f"El requerimiento {requerimiento.codigo} no tiene tecnico asignado."
+            )
+
+        with transaction.atomic():
+            for detalle in requerimiento.detalles.select_related("item"):
+                seed = self.seeds_by_item_id.get(detalle.item_id)
+                if detalle.item.tipo_insumo == Item.TipoInsumo.REPUESTO:
+                    if seed:
+                        self._asegurar_stock_repuesto(seed)
+                    self._entregar_repuesto_a_tecnico(
+                        orden=requerimiento,
+                        detalle=detalle,
+                        tecnico=tecnico,
+                    )
+                else:
+                    if seed:
+                        self._asegurar_stock_consumible(seed, detalle.cantidad)
+                    self._asignar_consumible_a_tecnico(
+                        item=detalle.item,
+                        tecnico=tecnico,
+                        cantidad=detalle.cantidad,
+                    )
+                actualizar_stock_item(detalle.item)
+
+    def _entregar_repuesto_a_tecnico(self, *, orden, detalle, tecnico):
+        cantidad_decimal = Decimal(detalle.cantidad)
+        cantidad_entera = int(cantidad_decimal)
+        if Decimal(cantidad_entera) != cantidad_decimal:
+            raise CommandError(
+                f"El item {detalle.item.codigo} requiere una cantidad entera para la entrega por unidad."
+            )
+
+        historiales = list(
+            HistorialUbicacionItem.objects
+            .select_related("item_unidad")
+            .filter(
+                item_unidad__item=detalle.item,
+                almacen__isnull=False,
+                fecha_fin__isnull=True,
+            )
+            .exclude(item_unidad__estado=ItemUnidad.Estado.INOPERATIVO)
+            .order_by("fecha_inicio", "id")[:cantidad_entera]
         )
-        return requerimiento
+        if len(historiales) < cantidad_entera:
+            raise CommandError(
+                f"No hay suficientes unidades en almacen para entregar {detalle.item.codigo}."
+            )
+
+        for historial in historiales:
+            HistorialUbicacionItem.objects.create(
+                item_unidad=historial.item_unidad,
+                trabajador=tecnico,
+                orden_trabajo=orden.trabajo,
+                estado=historial.item_unidad.estado,
+            )
 
     def _generar_horas_trabajo(self):
         inicio_minutos = self.random.choice(range(6 * 60, 15 * 60, 15))
@@ -935,27 +1289,42 @@ class Command(BaseCommand):
             return
 
         for index in range(cantidad):
-            proveedores = self.random.sample(
-                self.proveedores,
-                min(len(self.proveedores), self.random.randint(1, min(3, len(self.proveedores)))),
+            seeds_priorizados = self._extraer_seeds_priorizados_para_compra()
+            seeds_disponibles = list(seeds_priorizados)
+            usados = {seed.item.id for seed in seeds_disponibles}
+
+            objetivo_items = max(
+                len(seeds_priorizados),
+                self.random.randint(1, min(3, len(self.proveedores))),
             )
-            items_payload = []
-            usados = set()
-            for proveedor in proveedores:
-                candidatos = [seed for seed in seeds if seed.proveedor.id == proveedor.id]
-                if not candidatos:
-                    continue
-                elegido = self.random.choice(candidatos)
+            while len(seeds_disponibles) < objetivo_items:
+                elegido = self.random.choice(seeds)
                 if elegido.item.id in usados:
                     continue
                 usados.add(elegido.item.id)
-                items_payload.append(
-                    {
-                        "item": elegido.item.id,
-                        "cantidad": str(Decimal(self.random.randint(1, 12))),
-                        "proveedor": proveedor.id,
-                    }
-                )
+                seeds_disponibles.append(elegido)
+
+            proveedores = []
+            proveedores_vistos = set()
+            for seed in seeds_disponibles:
+                if seed.proveedor.id in proveedores_vistos:
+                    continue
+                proveedores_vistos.add(seed.proveedor.id)
+                proveedores.append(seed.proveedor)
+
+            items_payload = []
+            for proveedor in proveedores:
+                candidatos = [seed for seed in seeds_disponibles if seed.proveedor.id == proveedor.id]
+                if not candidatos:
+                    continue
+                for elegido in candidatos:
+                    items_payload.append(
+                        {
+                            "item": elegido.item.id,
+                            "cantidad": str(self._cantidad_compra_demo(elegido, priorizado=elegido in seeds_priorizados)),
+                            "proveedor": proveedor.id,
+                        }
+                    )
 
             if not items_payload:
                 continue
@@ -998,6 +1367,29 @@ class Command(BaseCommand):
 
             orden_compra.save(update_fields=update_fields)
 
+    def _extraer_seeds_priorizados_para_compra(self):
+        if not self.requirement_purchase_candidates:
+            return []
+
+        seleccionados = []
+        vistos = set()
+        while self.requirement_purchase_candidates and len(seleccionados) < 3:
+            seed = self.requirement_purchase_candidates.pop(0)
+            if seed.item.id in vistos:
+                continue
+            vistos.add(seed.item.id)
+            seleccionados.append(seed)
+        return seleccionados
+
+    def _cantidad_compra_demo(self, seed, *, priorizado):
+        if seed.item.tipo_insumo == Item.TipoInsumo.CONSUMIBLE:
+            minimo = Decimal("36") if priorizado else Decimal("12")
+            maximo = Decimal("96") if priorizado else Decimal("48")
+        else:
+            minimo = Decimal("6") if priorizado else Decimal("1")
+            maximo = Decimal("18") if priorizado else Decimal("8")
+        return Decimal(self.random.randint(int(minimo), int(maximo)))
+
     def _mostrar_resumen(self):
         resumen = {
             "Clientes": Cliente.objects.count(),
@@ -1014,6 +1406,18 @@ class Command(BaseCommand):
             "Movimientos de consumible": MovimientoConsumible.objects.count(),
             "Ordenes de requerimiento": OrdenRequerimiento.objects.count(),
             "Ordenes de compra": OrdenCompra.objects.count(),
+            "OT pendientes": OrdenTrabajo.objects.filter(estatus=OrdenTrabajo.Estatus.PENDIENTE).count(),
+            "OT en proceso": OrdenTrabajo.objects.filter(estatus=OrdenTrabajo.Estatus.EN_PROCESO).count(),
+            "OT finalizadas": OrdenTrabajo.objects.filter(estatus=OrdenTrabajo.Estatus.FINALIZADO).count(),
+            "Requerimientos por revisar": OrdenRequerimiento.objects.filter(
+                estado=OrdenRequerimiento.Estado.POR_REVISAR
+            ).count(),
+            "Requerimientos entregados": OrdenRequerimiento.objects.filter(
+                estado=OrdenRequerimiento.Estado.ENTREGADO
+            ).count(),
+            "Requerimientos sin stock": OrdenRequerimiento.objects.filter(
+                estado=OrdenRequerimiento.Estado.SIN_STOCK
+            ).count(),
         }
 
         self.stdout.write(self.style.SUCCESS("Dataset masivo creado correctamente."))

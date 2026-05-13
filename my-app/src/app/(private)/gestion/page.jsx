@@ -2,6 +2,7 @@
 
 import ManagementMatrix from "@/components/management/ManagementMatrix";
 import ManagementMachineIndicators from "@/components/management/ManagementMachineIndicators";
+import ManagementMachineHorometerChart from "@/components/management/ManagementMachineHorometerChart";
 import ManagementItemHistoryTable from "@/components/management/ManagementItemHistoryTable";
 import ManagementProviderMatrix from "@/components/management/ManagementProviderMatrix";
 import ManagementReplacementBubbleChart from "@/components/management/ManagementReplacementBubbleChart";
@@ -13,6 +14,7 @@ export default function GestionPage() {
       <ManagementMatrix />
       <ManagementProviderMatrix />
       <ManagementMachineIndicators />
+      <ManagementMachineHorometerChart />
       <ManagementSurvivalCurve />
       <ManagementReplacementBubbleChart />
       <ManagementItemHistoryTable />

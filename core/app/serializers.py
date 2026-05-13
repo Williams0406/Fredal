@@ -454,6 +454,9 @@ class ItemSerializer(serializers.ModelSerializer):
 
 class MaquinariaSerializer(serializers.ModelSerializer):
     centro_costos = serializers.SerializerMethodField()
+    horometro_actual = serializers.SerializerMethodField()
+    horometro_fuente = serializers.SerializerMethodField()
+    fecha_ultimo_horometro = serializers.SerializerMethodField()
 
     class Meta:
         model = Maquinaria
@@ -461,11 +464,48 @@ class MaquinariaSerializer(serializers.ModelSerializer):
             "id",
             "codigo_maquina",
             "nombre",
+            "descripcion",
+            "observacion",
+            "gasto",
+            "horometro_manual",
+            "horometro_manual_actualizado_en",
+            "horometro_actual",
+            "horometro_fuente",
+            "fecha_ultimo_horometro",
+            "centro_costos",
+        ]
+        read_only_fields = [
+            "horometro_manual_actualizado_en",
+            "horometro_actual",
+            "horometro_fuente",
+            "fecha_ultimo_horometro",
             "centro_costos",
         ]
 
     def get_centro_costos(self, obj):
         return round(obj.calcular_centro_costos(), 2)
+
+    def get_horometro_actual(self, obj):
+        return obj.obtener_horometro_actual()
+
+    def get_horometro_fuente(self, obj):
+        return obj.obtener_fuente_horometro_actual()
+
+    def get_fecha_ultimo_horometro(self, obj):
+        return obj.obtener_fecha_ultimo_horometro()
+
+    def create(self, validated_data):
+        if validated_data.get("horometro_manual") is not None:
+            validated_data["horometro_manual_actualizado_en"] = timezone.now()
+        return super().create(validated_data)
+
+    def update(self, instance, validated_data):
+        if "horometro_manual" in validated_data:
+            nuevo_horometro_manual = validated_data.get("horometro_manual")
+            validated_data["horometro_manual_actualizado_en"] = (
+                timezone.now() if nuevo_horometro_manual is not None else None
+            )
+        return super().update(instance, validated_data)
 
 class CompraCreateItemSerializer(serializers.Serializer):
     item = serializers.PrimaryKeyRelatedField(queryset=Item.objects.all())
@@ -1146,6 +1186,8 @@ class MovimientoRepuestoSerializer(serializers.ModelSerializer):
         return obj.item_unidad.estado
     
     def get_tecnico_id(self, obj):
+        if obj.tecnico_id:
+            return obj.tecnico_id
         historial = (
             HistorialUbicacionItem.objects
             .filter(item_unidad=obj.item_unidad, trabajador__isnull=False)
@@ -1155,6 +1197,8 @@ class MovimientoRepuestoSerializer(serializers.ModelSerializer):
         return historial.trabajador_id if historial else None
 
     def get_tecnico_nombre(self, obj):
+        if obj.tecnico:
+            return f"{obj.tecnico.nombres} {obj.tecnico.apellidos}".strip()
         historial = (
             HistorialUbicacionItem.objects
             .select_related("trabajador")
@@ -1206,82 +1250,62 @@ class MovimientoRepuestoSerializer(serializers.ModelSerializer):
     def create(self, validated_data):
         actividad = validated_data["actividad"]
         unidad_nueva = validated_data["item_unidad"]
-        tecnico = validated_data.pop("tecnico", None)
+        tecnico = validated_data.get("tecnico")
         maquinaria = actividad.orden.maquinaria
         item = unidad_nueva.item
-        estado_original_unidad = unidad_nueva.estado
 
         with transaction.atomic():
 
             if actividad.es_planificada:
-                HistorialUbicacionItem.objects.create(
-                    item_unidad=unidad_nueva,
-                    orden_trabajo=actividad.orden,
-                    trabajador=tecnico,
-                    estado=estado_original_unidad,
+                # Las actividades planificadas solo reservan una referencia de trabajo;
+                # no deben mover stock ni generar historial real de ubicacion.
+                return super().create(validated_data)
+
+            unidades_planificadas = list(
+                MovimientoRepuesto.objects
+                .filter(
+                    actividad__orden=actividad.orden,
+                    actividad__es_planificada=True,
+                    item_unidad__item=item,
                 )
+                .order_by("fecha", "id")
+                .values_list("item_unidad_id", flat=True)
+            )
 
-                movimiento = super().create(validated_data)
-                actualizar_stock_item(item)
-                return movimiento
-            
-
-            if not actividad.es_planificada:
-                unidades_planificadas = list(
+            if unidades_planificadas:
+                unidades_registradas = set(
                     MovimientoRepuesto.objects
                     .filter(
                         actividad__orden=actividad.orden,
-                        actividad__es_planificada=True,
+                        actividad__es_planificada=False,
                         item_unidad__item=item,
                     )
                     .values_list("item_unidad_id", flat=True)
                 )
 
-                if unidades_planificadas:
-                    unidades_registradas = set(
-                        MovimientoRepuesto.objects
-                        .filter(
-                            actividad__orden=actividad.orden,
-                            actividad__es_planificada=False,
-                            item_unidad__item=item,
-                        )
-                        .values_list("item_unidad_id", flat=True)
+                unidades_planificadas_ordenadas = []
+                vistos = set()
+                for unidad_id in unidades_planificadas:
+                    if unidad_id in vistos:
+                        continue
+                    vistos.add(unidad_id)
+                    unidades_planificadas_ordenadas.append(unidad_id)
+
+                unidad_disponible_id = next(
+                    (
+                        unidad_id
+                        for unidad_id in unidades_planificadas_ordenadas
+                        if unidad_id not in unidades_registradas
+                    ),
+                    None,
+                )
+
+                if unidad_disponible_id:
+                    unidad_nueva = ItemUnidad.objects.select_related("item").get(
+                        id=unidad_disponible_id
                     )
-
-                    historial_ids = (
-                        HistorialUbicacionItem.objects
-                        .filter(
-                            orden_trabajo=actividad.orden,
-                            item_unidad_id__in=unidades_planificadas,
-                        )
-                        .order_by("fecha_inicio", "id")
-                        .values_list("item_unidad_id", flat=True)
-                    )
-
-                    unidades_planificadas_ordenadas = []
-                    vistos = set()
-                    for unidad_id in historial_ids:
-                        if unidad_id in vistos:
-                            continue
-                        vistos.add(unidad_id)
-                        unidades_planificadas_ordenadas.append(unidad_id)
-
-                    unidad_disponible_id = next(
-                        (
-                            unidad_id
-                            for unidad_id in unidades_planificadas_ordenadas
-                            if unidad_id not in unidades_registradas
-                        ),
-                        None,
-                    )
-
-                    if unidad_disponible_id:
-                        unidad_nueva = ItemUnidad.objects.select_related("item").get(
-                            id=unidad_disponible_id
-                        )
-                        validated_data["item_unidad"] = unidad_nueva
-                        item = unidad_nueva.item
-                        estado_original_unidad = unidad_nueva.estado
+                    validated_data["item_unidad"] = unidad_nueva
+                    item = unidad_nueva.item
 
             if not tecnico:
                 unidades_en_actividad = (
@@ -1332,17 +1356,19 @@ class MovimientoRepuestoSerializer(serializers.ModelSerializer):
                 unidad_nueva.estado = ItemUnidad.Estado.USADO
                 unidad_nueva.save(update_fields=["estado"])
 
-            destino = {"trabajador": tecnico} if tecnico else {"maquinaria": maquinaria}
+            # En actividades registradas el repuesto queda aplicado a la maquinaria
+            # de la OT, aunque el movimiento conserve el tecnico para trazabilidad.
             HistorialUbicacionItem.objects.create(
                 item_unidad=unidad_nueva,
                 orden_trabajo=actividad.orden,
                 estado=ItemUnidad.Estado.USADO,
-                **destino,
+                maquinaria=maquinaria,
             )
 
             # 📦 4️⃣ Registrar movimiento
             movimiento = super().create(validated_data)
             actualizar_stock_item(item)
+            OrdenTrabajoSerializer.sincronizar_horometros_relacionados(actividad.orden)
 
         return movimiento
 
@@ -1751,6 +1777,18 @@ class OrdenTrabajoSerializer(serializers.ModelSerializer):
         read_only_fields = ["codigo_orden"]
 
     @staticmethod
+    def _get_items_repuestos_registrados(orden):
+        return (
+            MovimientoRepuesto.objects
+            .filter(
+                actividad__orden=orden,
+                actividad__es_planificada=False,
+            )
+            .values_list("item_unidad__item_id", flat=True)
+            .distinct()
+        )
+
+    @staticmethod
     def _get_items_consumibles_registrados(orden):
         return (
             MovimientoConsumible.objects
@@ -1793,52 +1831,47 @@ class OrdenTrabajoSerializer(serializers.ModelSerializer):
         if orden.horometro is None or not orden.maquinaria_id:
             return
 
-        historiales_actuales = (
-            HistorialUbicacionItem.objects
-            .select_related("item_unidad__item")
-            .filter(
-                orden_trabajo=orden,
-                maquinaria=orden.maquinaria,
-                estado=ItemUnidad.Estado.USADO,
-            )
-            .order_by("fecha_inicio", "id")
-        )
+        item_ids = self._get_items_repuestos_registrados(orden)
 
-        historiales_previos_asignados = set()
-
-        for historial_actual in historiales_actuales:
+        for item_id in item_ids:
             historial_previo = (
                 HistorialUbicacionItem.objects
                 .filter(
+                    item_unidad__item_id=item_id,
+                    orden_trabajo__isnull=False,
                     maquinaria=orden.maquinaria,
+                    trabajador__isnull=True,
+                    almacen__isnull=True,
                     estado=ItemUnidad.Estado.USADO,
-                    fecha_fin__isnull=False,
                     horometro_inicio__isnull=False,
                     horometro_fin__isnull=True,
-                    item_unidad__item=historial_actual.item_unidad.item,
                 )
                 .exclude(
-                    Q(pk=historial_actual.pk)
-                    | Q(orden_trabajo=orden)
-                    | Q(pk__in=historiales_previos_asignados)
+                    Q(orden_trabajo=orden)
                 )
                 .filter(
-                    Q(fecha_inicio__lt=historial_actual.fecha_inicio)
+                    Q(orden_trabajo__fecha__lt=orden.fecha)
                     | Q(
-                        fecha_inicio=historial_actual.fecha_inicio,
-                        id__lt=historial_actual.id,
+                        orden_trabajo__fecha=orden.fecha,
+                        orden_trabajo_id__lt=orden.id,
                     )
                 )
-                .order_by("-fecha_inicio", "-id")
+                .order_by("-orden_trabajo__fecha", "-orden_trabajo_id", "-id")
                 .first()
             )
 
-            if not historial_previo:
+            if not historial_previo or not historial_previo.orden_trabajo_id:
                 continue
 
-            historial_previo.horometro_fin = orden.horometro
-            historial_previo.save(update_fields=["horometro_fin"])
-            historiales_previos_asignados.add(historial_previo.pk)
+            HistorialUbicacionItem.objects.filter(
+                item_unidad__item_id=item_id,
+                orden_trabajo_id=historial_previo.orden_trabajo_id,
+                maquinaria=orden.maquinaria,
+                trabajador__isnull=True,
+                almacen__isnull=True,
+                estado=ItemUnidad.Estado.USADO,
+                horometro_fin__isnull=True,
+            ).update(horometro_fin=orden.horometro)
 
     def _autocompletar_horometro_fin_consumibles_previos(self, orden):
         if orden.horometro is None or not orden.maquinaria_id:
@@ -1937,18 +1970,13 @@ class OrdenTrabajoSerializer(serializers.ModelSerializer):
 
         return data
 
-class MaquinariaDetalleSerializer(serializers.ModelSerializer):
+class MaquinariaDetalleSerializer(MaquinariaSerializer):
     ordenes = serializers.SerializerMethodField()
     repuestos = serializers.SerializerMethodField()
     consumibles = serializers.SerializerMethodField()
 
-    class Meta:
-        model = Maquinaria
-        fields = [
-            "id",
-            "codigo_maquina",
-            "nombre",
-            "gasto",
+    class Meta(MaquinariaSerializer.Meta):
+        fields = MaquinariaSerializer.Meta.fields + [
             "ordenes",
             "repuestos",
             "consumibles",

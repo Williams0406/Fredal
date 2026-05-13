@@ -1,6 +1,6 @@
 import csv
 import json
-from datetime import date
+from datetime import date, datetime
 from decimal import Decimal
 from io import BytesIO, StringIO
 
@@ -19,10 +19,13 @@ from .models import (
     CompraDetalle,
     Dimension,
     HistorialConsumible,
+    HistorialUbicacionItem,
     Item,
+    ItemUnidad,
     LoteConsumible,
     Maquinaria,
     MovimientoConsumible,
+    MovimientoRepuesto,
     OrdenRequerimiento,
     OrdenRequerimientoDetalle,
     OrdenTrabajo,
@@ -439,6 +442,92 @@ class ItemYCompraLegacyTests(APITestCase):
         self.assertEqual(item.unidades.count(), 2)
 
 
+class MaquinariaHorometroActualTests(APITestCase):
+    def setUp(self):
+        self.user = User.objects.create_user(
+            username="admin-maq-horometro",
+            password="secret123",
+        )
+        self.user.is_staff = True
+        self.user.save(update_fields=["is_staff"])
+        self.client.force_authenticate(user=self.user)
+
+        self.maquinaria = Maquinaria.objects.create(
+            codigo_maquina="MQ-HM-01",
+            nombre="Excavadora HM",
+            descripcion="Prueba",
+            observacion="",
+            gasto="0.00",
+        )
+
+    def _crear_orden(self, *, fecha, horometro, hora_inicio=None, hora_fin=None):
+        return OrdenTrabajo.objects.create(
+            maquinaria=self.maquinaria,
+            fecha=fecha,
+            horometro=horometro,
+            hora_inicio=hora_inicio,
+            hora_fin=hora_fin,
+            prioridad="REGULAR",
+            lugar=OrdenTrabajo.Lugar.TALLER,
+            observaciones="",
+        )
+
+    def test_lista_maquinaria_usa_horometro_manual_si_es_mas_reciente_que_la_ot(self):
+        self._crear_orden(
+            fecha=date(2026, 5, 10),
+            horometro=Decimal("120.00"),
+        )
+        self.maquinaria.horometro_manual = Decimal("135.50")
+        self.maquinaria.horometro_manual_actualizado_en = datetime(2026, 5, 11, 8, 0, 0)
+        self.maquinaria.save(update_fields=["horometro_manual", "horometro_manual_actualizado_en"])
+
+        response = self.client.get("/api/maquinarias/")
+
+        self.assertEqual(response.status_code, 200, response.data)
+        maquinaria = response.data[0]
+        self.assertEqual(Decimal(str(maquinaria["horometro_actual"])), Decimal("135.50"))
+        self.assertEqual(maquinaria["horometro_fuente"], "MANUAL")
+        self.assertEqual(str(maquinaria["fecha_ultimo_horometro"]), "2026-05-11")
+
+    def test_lista_maquinaria_usa_horometro_de_ot_si_la_ot_tiene_fecha_mas_reciente(self):
+        self.maquinaria.horometro_manual = Decimal("135.50")
+        self.maquinaria.horometro_manual_actualizado_en = datetime(2026, 5, 11, 8, 0, 0)
+        self.maquinaria.save(update_fields=["horometro_manual", "horometro_manual_actualizado_en"])
+        self._crear_orden(
+            fecha=date(2026, 5, 12),
+            horometro=Decimal("148.00"),
+        )
+
+        response = self.client.get("/api/maquinarias/")
+
+        self.assertEqual(response.status_code, 200, response.data)
+        maquinaria = response.data[0]
+        self.assertEqual(Decimal(str(maquinaria["horometro_actual"])), Decimal("148.00"))
+        self.assertEqual(maquinaria["horometro_fuente"], "ORDEN_TRABAJO")
+        self.assertEqual(str(maquinaria["fecha_ultimo_horometro"]), "2026-05-12")
+
+    def test_put_maquinaria_permite_editar_horometro_manual_y_actualiza_fecha_manual(self):
+        response = self.client.put(
+            f"/api/maquinarias/{self.maquinaria.id}/",
+            {
+                "codigo_maquina": self.maquinaria.codigo_maquina,
+                "nombre": self.maquinaria.nombre,
+                "descripcion": self.maquinaria.descripcion,
+                "observacion": self.maquinaria.observacion,
+                "gasto": "0.00",
+                "horometro_manual": "222.25",
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 200, response.data)
+        self.maquinaria.refresh_from_db()
+        self.assertEqual(self.maquinaria.horometro_manual, Decimal("222.25"))
+        self.assertIsNotNone(self.maquinaria.horometro_manual_actualizado_en)
+        self.assertEqual(Decimal(str(response.data["horometro_actual"])), Decimal("222.25"))
+        self.assertEqual(response.data["horometro_fuente"], "MANUAL")
+
+
 class OrdenTrabajoHistorialConsumibleHorometroTests(APITestCase):
     def setUp(self):
         self.user = User.objects.create_user(
@@ -747,6 +836,179 @@ class OrdenTrabajoHistorialConsumibleHorometroTests(APITestCase):
         self.assertEqual(historial_tecnico.cantidad, Decimal("5.000000"))
 
 
+class OrdenTrabajoHistorialRepuestoHorometroTests(APITestCase):
+    def setUp(self):
+        self.user = User.objects.create_user(
+            username="admin-ht-rep",
+            password="secret123",
+        )
+        self.user.is_staff = True
+        self.user.save(update_fields=["is_staff"])
+        self.client.force_authenticate(user=self.user)
+
+        self.maquinaria = Maquinaria.objects.create(
+            codigo_maquina="MQ-HT-REP-01",
+            nombre="Retroexcavadora",
+            descripcion="Prueba",
+            observacion="",
+            gasto="0.00",
+        )
+        self.trabajador = Trabajador.objects.create(
+            nombres="Jorge",
+            apellidos="Rivas",
+            dni="11223344",
+            puesto="Tecnico",
+        )
+        self.item = Item.objects.create(
+            codigo="REP-HT-001",
+            nombre="Filtro de aceite",
+            tipo_insumo=Item.TipoInsumo.REPUESTO,
+        )
+
+    def _crear_orden(self, fecha, horometro=None):
+        orden = OrdenTrabajo.objects.create(
+            maquinaria=self.maquinaria,
+            fecha=fecha,
+            horometro=horometro,
+            prioridad="REGULAR",
+            lugar=OrdenTrabajo.Lugar.TALLER,
+            observaciones="",
+        )
+        orden.tecnicos.add(self.trabajador)
+        return orden
+
+    def _crear_actividad_registrada(self, orden):
+        return ActividadTrabajo.objects.create(
+            orden=orden,
+            tipo_actividad=ActividadTrabajo.TipoActividad.MANTENIMIENTO,
+            tipo_mantenimiento=ActividadTrabajo.TipoMantenimiento.PREVENTIVO,
+            subtipo=ActividadTrabajo.SubTipo.PM1,
+            descripcion="Registro repuesto",
+            es_planificada=False,
+        )
+
+    def _crear_unidad_asignada_a_tecnico(self):
+        unidad = ItemUnidad.objects.create(
+            item=self.item,
+            estado=ItemUnidad.Estado.NUEVO,
+        )
+        HistorialUbicacionItem.objects.create(
+            item_unidad=unidad,
+            trabajador=self.trabajador,
+            estado=unidad.estado,
+        )
+        return unidad
+
+    def _actualizar_horometro(self, orden, horometro):
+        serializer = OrdenTrabajoSerializer(
+            instance=orden,
+            data={"horometro": str(horometro)},
+            partial=True,
+        )
+        self.assertTrue(serializer.is_valid(), serializer.errors)
+        serializer.save()
+
+    def test_movimiento_repuesto_registrado_autocompleta_horometro_fin_previo_si_la_ot_ya_tiene_horometro(self):
+        unidad_anterior = self._crear_unidad_asignada_a_tecnico()
+        unidad_actual = self._crear_unidad_asignada_a_tecnico()
+
+        orden_anterior = self._crear_orden(date(2026, 5, 5), horometro=Decimal("100.00"))
+        actividad_anterior = self._crear_actividad_registrada(orden_anterior)
+        response_anterior = self.client.post(
+            "/api/movimientos-repuesto/",
+            {
+                "actividad": actividad_anterior.id,
+                "item_unidad": unidad_anterior.id,
+                "tecnico": self.trabajador.id,
+            },
+            format="json",
+        )
+        self.assertEqual(response_anterior.status_code, 201, response_anterior.data)
+
+        historial_anterior = HistorialUbicacionItem.objects.get(
+            orden_trabajo=orden_anterior,
+            maquinaria=self.maquinaria,
+            item_unidad=unidad_anterior,
+        )
+        self.assertEqual(historial_anterior.horometro_inicio, Decimal("100.00"))
+        self.assertIsNone(historial_anterior.horometro_fin)
+
+        orden_actual = self._crear_orden(date(2026, 5, 6), horometro=Decimal("150.00"))
+        actividad_actual = self._crear_actividad_registrada(orden_actual)
+        response_actual = self.client.post(
+            "/api/movimientos-repuesto/",
+            {
+                "actividad": actividad_actual.id,
+                "item_unidad": unidad_actual.id,
+                "tecnico": self.trabajador.id,
+            },
+            format="json",
+        )
+        self.assertEqual(response_actual.status_code, 201, response_actual.data)
+
+        historial_anterior.refresh_from_db()
+        historial_actual = HistorialUbicacionItem.objects.get(
+            orden_trabajo=orden_actual,
+            maquinaria=self.maquinaria,
+            item_unidad=unidad_actual,
+        )
+
+        self.assertEqual(historial_anterior.horometro_fin, Decimal("150.00"))
+        self.assertEqual(historial_actual.horometro_inicio, Decimal("150.00"))
+
+    def test_actualizar_horometro_de_ot_posterior_completa_horometro_fin_previo_de_repuesto(self):
+        unidad_anterior = self._crear_unidad_asignada_a_tecnico()
+        unidad_actual = self._crear_unidad_asignada_a_tecnico()
+
+        orden_anterior = self._crear_orden(date(2026, 5, 10), horometro=Decimal("200.00"))
+        actividad_anterior = self._crear_actividad_registrada(orden_anterior)
+        response_anterior = self.client.post(
+            "/api/movimientos-repuesto/",
+            {
+                "actividad": actividad_anterior.id,
+                "item_unidad": unidad_anterior.id,
+                "tecnico": self.trabajador.id,
+            },
+            format="json",
+        )
+        self.assertEqual(response_anterior.status_code, 201, response_anterior.data)
+
+        orden_actual = self._crear_orden(date(2026, 5, 11))
+        actividad_actual = self._crear_actividad_registrada(orden_actual)
+        response_actual = self.client.post(
+            "/api/movimientos-repuesto/",
+            {
+                "actividad": actividad_actual.id,
+                "item_unidad": unidad_actual.id,
+                "tecnico": self.trabajador.id,
+            },
+            format="json",
+        )
+        self.assertEqual(response_actual.status_code, 201, response_actual.data)
+
+        historial_anterior = HistorialUbicacionItem.objects.get(
+            orden_trabajo=orden_anterior,
+            maquinaria=self.maquinaria,
+            item_unidad=unidad_anterior,
+        )
+        historial_actual = HistorialUbicacionItem.objects.get(
+            orden_trabajo=orden_actual,
+            maquinaria=self.maquinaria,
+            item_unidad=unidad_actual,
+        )
+
+        self.assertIsNone(historial_anterior.horometro_fin)
+        self.assertIsNone(historial_actual.horometro_inicio)
+
+        self._actualizar_horometro(orden_actual, Decimal("260.00"))
+
+        historial_anterior.refresh_from_db()
+        historial_actual.refresh_from_db()
+
+        self.assertEqual(historial_anterior.horometro_fin, Decimal("260.00"))
+        self.assertEqual(historial_actual.horometro_inicio, Decimal("260.00"))
+
+
 class MovimientoConsumiblePlanificadoTests(APITestCase):
     def setUp(self):
         self.user = User.objects.create_user(
@@ -859,6 +1121,145 @@ class MovimientoConsumiblePlanificadoTests(APITestCase):
         self.assertEqual(movimiento.tecnico_id, self.tecnico.id)
         self.assertEqual(response.data["tecnico"], self.tecnico.id)
         self.assertEqual(response.data["tecnico_nombre"], "Luis Ramos")
+
+
+class MovimientoRepuestoPlanificadoTests(APITestCase):
+    def setUp(self):
+        self.user = User.objects.create_user(
+            username="admin-plan-rep",
+            password="secret123",
+        )
+        self.user.is_staff = True
+        self.user.save(update_fields=["is_staff"])
+        self.client.force_authenticate(user=self.user)
+
+        self.maquinaria = Maquinaria.objects.create(
+            codigo_maquina="MQ-PLAN-REP-01",
+            nombre="Excavadora plan",
+            descripcion="Prueba",
+            observacion="",
+            gasto="0.00",
+        )
+        self.tecnico = Trabajador.objects.create(
+            nombres="Mario",
+            apellidos="Campos",
+            dni="88776655",
+            puesto="Tecnico",
+        )
+        self.almacen = Almacen.objects.create(nombre="Almacen Plan Repuesto")
+        self.orden = OrdenTrabajo.objects.create(
+            maquinaria=self.maquinaria,
+            fecha=date(2026, 5, 6),
+            prioridad="REGULAR",
+            lugar=OrdenTrabajo.Lugar.TALLER,
+            observaciones="",
+        )
+        self.orden.tecnicos.add(self.tecnico)
+        self.actividad_planificada = ActividadTrabajo.objects.create(
+            orden=self.orden,
+            tipo_actividad=ActividadTrabajo.TipoActividad.MANTENIMIENTO,
+            tipo_mantenimiento=ActividadTrabajo.TipoMantenimiento.PREVENTIVO,
+            subtipo=ActividadTrabajo.SubTipo.PM1,
+            descripcion="Planificacion repuestos",
+            es_planificada=True,
+        )
+        self.actividad_real = ActividadTrabajo.objects.create(
+            orden=self.orden,
+            tipo_actividad=ActividadTrabajo.TipoActividad.MANTENIMIENTO,
+            tipo_mantenimiento=ActividadTrabajo.TipoMantenimiento.PREVENTIVO,
+            subtipo=ActividadTrabajo.SubTipo.PM1,
+            descripcion="Ejecucion repuestos",
+            es_planificada=False,
+        )
+        self.item = Item.objects.create(
+            codigo="REP-PLAN-001",
+            nombre="Filtro planificado",
+            tipo_insumo=Item.TipoInsumo.REPUESTO,
+        )
+        self.unidad = ItemUnidad.objects.create(
+            item=self.item,
+            estado=ItemUnidad.Estado.NUEVO,
+        )
+        HistorialUbicacionItem.objects.create(
+            item_unidad=self.unidad,
+            trabajador=self.tecnico,
+            estado=self.unidad.estado,
+        )
+        self.unidad_alterna = ItemUnidad.objects.create(
+            item=self.item,
+            estado=ItemUnidad.Estado.NUEVO,
+        )
+        HistorialUbicacionItem.objects.create(
+            item_unidad=self.unidad_alterna,
+            trabajador=self.tecnico,
+            estado=self.unidad_alterna.estado,
+        )
+
+    def test_movimiento_repuesto_planificado_no_crea_historial(self):
+        total_historiales_antes = HistorialUbicacionItem.objects.count()
+
+        response = self.client.post(
+            "/api/movimientos-repuesto/",
+            {
+                "actividad": self.actividad_planificada.id,
+                "item_unidad": self.unidad.id,
+                "tecnico": self.tecnico.id,
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 201, response.data)
+        self.assertEqual(HistorialUbicacionItem.objects.count(), total_historiales_antes)
+        self.assertEqual(MovimientoRepuesto.objects.count(), 1)
+
+        movimiento = MovimientoRepuesto.objects.get()
+        self.assertEqual(movimiento.tecnico_id, self.tecnico.id)
+        self.assertEqual(response.data["tecnico"], self.tecnico.id)
+        self.assertEqual(response.data["tecnico_id"], self.tecnico.id)
+        self.assertEqual(response.data["tecnico_nombre"], "Mario Campos")
+
+    def test_movimiento_real_reutiliza_unidad_planificada_sin_historial_previsto(self):
+        plan_response = self.client.post(
+            "/api/movimientos-repuesto/",
+            {
+                "actividad": self.actividad_planificada.id,
+                "item_unidad": self.unidad.id,
+                "tecnico": self.tecnico.id,
+            },
+            format="json",
+        )
+        self.assertEqual(plan_response.status_code, 201, plan_response.data)
+
+        historial_count_antes = HistorialUbicacionItem.objects.count()
+
+        response = self.client.post(
+            "/api/movimientos-repuesto/",
+            {
+                "actividad": self.actividad_real.id,
+                "item_unidad": self.unidad_alterna.id,
+                "tecnico": self.tecnico.id,
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 201, response.data)
+
+        movimiento_real = MovimientoRepuesto.objects.get(actividad=self.actividad_real)
+        self.assertEqual(movimiento_real.item_unidad_id, self.unidad.id)
+        self.assertEqual(HistorialUbicacionItem.objects.count(), historial_count_antes + 1)
+
+        historial_real = HistorialUbicacionItem.objects.filter(
+            item_unidad=self.unidad,
+            orden_trabajo=self.orden,
+        ).order_by("-id").first()
+        self.assertIsNotNone(historial_real)
+        self.assertEqual(historial_real.maquinaria_id, self.maquinaria.id)
+        self.assertIsNone(historial_real.trabajador_id)
+        self.assertEqual(historial_real.estado, ItemUnidad.Estado.USADO)
+
+        self.unidad.refresh_from_db()
+        self.assertEqual(self.unidad.maquinaria_actual_id, self.maquinaria.id)
+        self.assertIsNone(self.unidad.trabajador_actual_id)
 
 
 class OrdenRequerimientoPermisosTests(APITestCase):
