@@ -14,6 +14,7 @@ const PUBLIC_ROUTES = [
   "/register",
   "/forgot-password",
 ];
+const PUBLIC_FILE = /\.[^/]+$/;
 
 // Dashboards por rol
 const ROLE_REDIRECT = {
@@ -37,6 +38,7 @@ export function middleware(request) {
   ========================= */
 
   if (
+    PUBLIC_FILE.test(pathname) ||
     pathname.startsWith("/_next") ||
     pathname.startsWith("/favicon.ico") ||
     pathname.startsWith("/api")
@@ -110,6 +112,6 @@ function redirectByRole(token, request) {
 
 export const config = {
   matcher: [
-    "/((?!_next/static|_next/image|favicon.ico).*)",
+    "/((?!api|_next/static|_next/image|favicon.ico|.*\\..*).*)",
   ],
 };

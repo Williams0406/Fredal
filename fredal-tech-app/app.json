@@ -23,7 +23,10 @@
         "backgroundImage": "./assets/android-icon-background.png",
         "monochromeImage": "./assets/android-icon-monochrome.png"
       },
-      "package": "com.fredal.techapp"
+      "package": "com.fredal.techapp",
+      "permissions": [
+        "android.permission.RECORD_AUDIO"
+      ]
     },
     "web": {
       "favicon": "./assets/favicon.png"
@@ -43,10 +46,16 @@
     "experiments": {
       "typedRoutes": true
     },
+    "runtimeVersion": {
+      "policy": "appVersion"
+    },
+    "updates": {
+      "url": "https://u.expo.dev/3d801987-bdf4-44fb-bc0e-e7ba48af5238"
+    },
     "extra": {
       "router": {},
       "eas": {
-        "projectId": "5f96fc08-8d68-431f-b4b5-bcd9b2268d94"
+        "projectId": "3d801987-bdf4-44fb-bc0e-e7ba48af5238"
       }
     }
   }

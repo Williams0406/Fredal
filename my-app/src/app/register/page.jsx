@@ -2,229 +2,159 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
+import { BadgeCheck, KeyRound, UserRound } from "lucide-react";
 import { registroAPI } from "@/lib/api";
+import {
+  AuthAlert,
+  AuthField,
+  AuthFooterLink,
+  AuthShell,
+  AuthSubmitButton,
+  PasswordField,
+} from "@/components/auth/AuthShell";
 
 export default function RegisterPage() {
   const router = useRouter();
-  
+
   const [form, setForm] = useState({
     username: "",
     password: "",
     codigo: "",
   });
-  
   const [confirmPassword, setConfirmPassword] = useState("");
   const [error, setError] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
 
-  const handleSubmit = async (e) => {
-    e.preventDefault();
+  const handleInputChange = (field, value) => {
+    setForm((current) => ({ ...current, [field]: value }));
+    if (error) setError("");
+  };
+
+  const handleSubmit = async (event) => {
+    event.preventDefault();
     setError("");
 
-    // Validaciones
     if (form.password !== confirmPassword) {
-      setError("Las contraseñas no coinciden");
+      setError("Las contrasenas no coinciden.");
       return;
     }
 
     if (form.password.length < 6) {
-      setError("La contraseña debe tener al menos 6 caracteres");
+      setError("La contrasena debe tener al menos 6 caracteres.");
       return;
     }
 
     if (!form.codigo.trim()) {
-      setError("El código de registro es obligatorio");
+      setError("El codigo de registro es obligatorio.");
       return;
     }
 
     setIsSubmitting(true);
 
     try {
-      await registroAPI.registerWithCode(form);
-      
-      // Mostrar mensaje de éxito más elegante
-      alert("✓ Usuario creado exitosamente. Ahora puedes iniciar sesión.");
-      router.push("/");
-      
+      await registroAPI.registerWithCode({
+        ...form,
+        codigo: form.codigo.trim().toUpperCase(),
+      });
+      router.push("/login?registered=1");
     } catch (err) {
-      const errorMsg = err.response?.data?.detail || 
-                       err.response?.data?.error || 
-                       "Error al crear el usuario. Verifica el código de registro.";
-      setError(errorMsg);
+      const responseData = err?.response?.data;
+      const detail =
+        responseData?.detail ||
+        responseData?.error ||
+        (typeof responseData === "string" ? responseData : null);
+
+      if (detail) {
+        setError(detail);
+      } else {
+        setError("No se pudo crear la cuenta. Verifica el codigo de registro.");
+      }
     } finally {
       setIsSubmitting(false);
     }
   };
 
-  const handleInputChange = (field, value) => {
-    setForm({ ...form, [field]: value });
-    if (error) setError(""); // Limpiar error al escribir
-  };
-
   return (
-    <div className="min-h-screen flex items-center justify-center bg-gray-50 px-4 sm:px-6 lg:px-8">
-      <div className="w-full max-w-md">
-        
-        {/* Header de marca */}
-        <div className="text-center mb-8">
-          <div className="inline-block bg-[#1e3a8a] text-white px-6 py-3 rounded-lg mb-4">
-            <h1 className="text-2xl font-semibold tracking-tight">
-              FREDAL
-            </h1>
-          </div>
-          <p className="text-base text-gray-600 font-medium">
-            Registro de nuevo usuario
-          </p>
-          <p className="text-sm text-gray-500 mt-2">
-            Usa tu código de registro para crear una cuenta
-          </p>
-        </div>
+    <AuthShell
+      eyebrow="Alta de usuarios"
+      title="Activa accesos nuevos sin salir del ecosistema Fredal."
+      description="Registra usuarios con codigo autorizado y manten la experiencia de ingreso alineada con la misma plataforma de trabajo."
+      formTitle="Crear cuenta"
+      formDescription="Completa tus datos, valida el codigo de registro y deja listo tu acceso al sistema."
+      footer={<AuthFooterLink question="Ya tienes una cuenta?" href="/login" action="Iniciar sesion" />}
+    >
+      <div className="space-y-5">
+        {error ? <AuthAlert>{error}</AuthAlert> : null}
 
-        {/* Formulario de registro */}
-        <div className="bg-white rounded-xl shadow-sm border border-gray-200 px-8 py-10">
-          <h2 className="text-xl font-semibold text-[#1e3a8a] mb-6">
-            Crear cuenta
-          </h2>
+        <form onSubmit={handleSubmit} className="space-y-5">
+          <AuthField
+            id="codigo"
+            label="Codigo de registro"
+            icon={BadgeCheck}
+            value={form.codigo}
+            onChange={(event) => handleInputChange("codigo", event.target.value)}
+            placeholder="XXXX-XXXX-XXXX"
+            autoCapitalize="characters"
+            autoComplete="off"
+            required
+            disabled={isSubmitting}
+            className="font-mono uppercase tracking-[0.2em]"
+            helper="Codigo entregado por el administrador para habilitar una cuenta nueva."
+          />
 
-          {error && (
-            <div className="mb-6 p-4 bg-red-50 border border-red-200 rounded-lg">
-              <p className="text-sm text-red-700">{error}</p>
-            </div>
-          )}
+          <AuthField
+            id="username"
+            label="Nombre de usuario"
+            icon={UserRound}
+            value={form.username}
+            onChange={(event) => handleInputChange("username", event.target.value)}
+            placeholder="usuario123"
+            autoComplete="username"
+            required
+            disabled={isSubmitting}
+          />
 
-          <form onSubmit={handleSubmit} className="space-y-5">
-            
-            {/* Código de registro */}
-            <div>
-              <label 
-                htmlFor="codigo" 
-                className="block text-sm font-medium text-gray-700 mb-2"
-              >
-                Código de registro
-              </label>
-              <input
-                id="codigo"
-                type="text"
-                value={form.codigo}
-                onChange={(e) => handleInputChange("codigo", e.target.value)}
-                required
-                className="w-full px-4 py-3 border border-gray-300 rounded-lg text-sm
-                         focus:outline-none focus:ring-2 focus:ring-[#1e3a8a] focus:border-transparent
-                         transition-all duration-200 placeholder:text-gray-400
-                         uppercase tracking-wider font-mono"
-                placeholder="XXXX-XXXX-XXXX"
-                disabled={isSubmitting}
-              />
-              <p className="mt-2 text-xs text-gray-500">
-                Código proporcionado por el administrador
+          <PasswordField
+            id="password"
+            label="Contrasena"
+            value={form.password}
+            onChange={(event) => handleInputChange("password", event.target.value)}
+            placeholder="Minimo 6 caracteres"
+            autoComplete="new-password"
+            required
+            disabled={isSubmitting}
+            helper="Usa una contrasena segura para tu acceso operativo."
+          />
+
+          <PasswordField
+            id="confirmPassword"
+            label="Confirmar contrasena"
+            value={confirmPassword}
+            onChange={(event) => {
+              setConfirmPassword(event.target.value);
+              if (error) setError("");
+            }}
+            placeholder="Repite tu contrasena"
+            autoComplete="new-password"
+            required
+            disabled={isSubmitting}
+          />
+
+          <div className="rounded-2xl border border-slate-200 bg-[#F7F9FC] px-4 py-3 text-sm leading-6 text-[#5F6C80]">
+            <div className="flex items-start gap-3">
+              <KeyRound className="mt-0.5 h-4.5 w-4.5 shrink-0 text-[#173569]" strokeWidth={2.1} />
+              <p>
+                El codigo de registro define tu acceso inicial. Luego podras ingresar desde el
+                login principal del workspace.
               </p>
             </div>
-
-            {/* Usuario */}
-            <div>
-              <label 
-                htmlFor="username" 
-                className="block text-sm font-medium text-gray-700 mb-2"
-              >
-                Nombre de usuario
-              </label>
-              <input
-                id="username"
-                type="text"
-                value={form.username}
-                onChange={(e) => handleInputChange("username", e.target.value)}
-                required
-                className="w-full px-4 py-3 border border-gray-300 rounded-lg text-sm
-                         focus:outline-none focus:ring-2 focus:ring-[#1e3a8a] focus:border-transparent
-                         transition-all duration-200 placeholder:text-gray-400"
-                placeholder="usuario123"
-                disabled={isSubmitting}
-              />
-            </div>
-
-            {/* Contraseña */}
-            <div>
-              <label 
-                htmlFor="password" 
-                className="block text-sm font-medium text-gray-700 mb-2"
-              >
-                Contraseña
-              </label>
-              <input
-                id="password"
-                type="password"
-                value={form.password}
-                onChange={(e) => handleInputChange("password", e.target.value)}
-                required
-                minLength={6}
-                className="w-full px-4 py-3 border border-gray-300 rounded-lg text-sm
-                         focus:outline-none focus:ring-2 focus:ring-[#1e3a8a] focus:border-transparent
-                         transition-all duration-200 placeholder:text-gray-400"
-                placeholder="Mínimo 6 caracteres"
-                disabled={isSubmitting}
-              />
-            </div>
-
-            {/* Confirmar contraseña */}
-            <div>
-              <label 
-                htmlFor="confirmPassword" 
-                className="block text-sm font-medium text-gray-700 mb-2"
-              >
-                Confirmar contraseña
-              </label>
-              <input
-                id="confirmPassword"
-                type="password"
-                value={confirmPassword}
-                onChange={(e) => {
-                  setConfirmPassword(e.target.value);
-                  if (error) setError("");
-                }}
-                required
-                className="w-full px-4 py-3 border border-gray-300 rounded-lg text-sm
-                         focus:outline-none focus:ring-2 focus:ring-[#1e3a8a] focus:border-transparent
-                         transition-all duration-200 placeholder:text-gray-400"
-                placeholder="Repite tu contraseña"
-                disabled={isSubmitting}
-              />
-            </div>
-
-            {/* Botón de submit */}
-            <button
-              type="submit"
-              disabled={isSubmitting}
-              className="w-full bg-[#1e3a8a] text-white py-3 px-4 rounded-lg text-sm font-medium
-                       hover:bg-[#1e3a8a]/90 focus:outline-none focus:ring-2 focus:ring-[#1e3a8a] 
-                       focus:ring-offset-2 transition-all duration-200
-                       disabled:opacity-50 disabled:cursor-not-allowed mt-6"
-            >
-              {isSubmitting ? "Creando cuenta..." : "Crear cuenta"}
-            </button>
-          </form>
-
-          {/* Link a login */}
-          <div className="mt-6 pt-6 border-t border-gray-200 text-center">
-            <p className="text-sm text-gray-600">
-              ¿Ya tienes una cuenta?{" "}
-              <a 
-                href="/" 
-                className="text-[#1e3a8a] font-medium hover:text-[#1e3a8a]/80 
-                         transition-colors duration-200"
-              >
-                Iniciar sesión
-              </a>
-            </p>
           </div>
-        </div>
 
-        {/* Footer informativo */}
-        <div className="mt-8 text-center">
-          <p className="text-xs text-gray-500">
-            El código de registro es proporcionado por el administrador del sistema
-          </p>
-        </div>
+          <AuthSubmitButton type="submit" disabled={isSubmitting}>
+            {isSubmitting ? "Creando cuenta..." : "Crear acceso"}
+          </AuthSubmitButton>
+        </form>
       </div>
-    </div>
+    </AuthShell>
   );
 }
