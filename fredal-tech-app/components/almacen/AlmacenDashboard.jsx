@@ -100,6 +100,14 @@ const formatDate = (value) => {
   return date.toLocaleDateString('es-PE');
 };
 
+const formatOrderUnit = (item) => {
+  if (!item?.unidad_medida_nombre && !item?.unidad_medida_simbolo) return '';
+  if (item.unidad_medida_nombre && item.unidad_medida_simbolo) {
+    return `${item.unidad_medida_nombre} (${item.unidad_medida_simbolo})`;
+  }
+  return item.unidad_medida_nombre || item.unidad_medida_simbolo || '';
+};
+
 const getItemsSummary = (items = []) =>
   items
     .map((item) => `${item.item_codigo} - ${formatNumber(item.cantidad)}`)
@@ -148,7 +156,8 @@ export default function AlmacenDashboard() {
   });
 
   const changeOrderState = useMutation({
-    mutationFn: ({ id, estado }) => ordenRequerimientoAPI.cambiarEstado(id, estado),
+    mutationFn: ({ id, estado, detalleId = null }) =>
+      ordenRequerimientoAPI.cambiarEstado(id, estado, detalleId),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['ordenes-requerimiento-mobile'] });
       queryClient.invalidateQueries({ queryKey: ['almacen-mobile-items'] });
@@ -327,6 +336,36 @@ export default function AlmacenDashboard() {
     );
   };
 
+  const handleMarkOrderItemSinStock = (orden, item) => {
+    Alert.alert(
+      'Marcar item sin stock',
+      `Se registrara ${item.item_codigo} como sin stock dentro de ${orden.codigo}.`,
+      [
+        { text: 'Cancelar', style: 'cancel' },
+        {
+          text: 'Confirmar',
+          onPress: () =>
+            changeOrderState.mutate(
+              {
+                id: orden.id,
+                estado: 'SIN_STOCK',
+                detalleId: item.id,
+              },
+              {
+                onError: (err) => {
+                  Alert.alert(
+                    'No se pudo actualizar',
+                    err?.response?.data?.detail ||
+                      'No se pudo marcar el item como sin stock.'
+                  );
+                },
+              }
+            ),
+        },
+      ]
+    );
+  };
+
   const handleConfirmPurchaseReceipt = (orden) => {
     Alert.alert(
       'Confirmar recepcion',
@@ -471,7 +510,6 @@ export default function AlmacenDashboard() {
                   changeOrderState.isPending &&
                   changeOrderState.variables?.id === orden.id;
                 const canMarkDelivered = Boolean(orden.puede_marcar_entregado);
-                const canMarkSinStock = Boolean(orden.puede_marcar_sin_stock);
 
                 return (
                   <View key={orden.id} style={styles.orderCard}>
@@ -508,6 +546,15 @@ export default function AlmacenDashboard() {
                       </View>
                     ) : null}
 
+                    {orden.tiene_items_sin_stock && orden.estado !== 'ENTREGADO' ? (
+                      <View style={[styles.infoPill, styles.warningPill]}>
+                        <Ionicons name='alert-circle-outline' size={14} color={colors.red} />
+                        <Text style={[styles.infoPillText, styles.warningText]}>
+                          Este requerimiento tiene items marcados sin stock.
+                        </Text>
+                      </View>
+                    ) : null}
+
                     {orden.observaciones ? (
                       <View style={styles.noteCard}>
                         <Text style={styles.noteText}>{orden.observaciones}</Text>
@@ -523,48 +570,57 @@ export default function AlmacenDashboard() {
                               {item.item_codigo} - {item.item_nombre}
                             </Text>
                             <Text style={styles.orderItemMeta}>
-                              {formatNumber(item.cantidad)} -{' '}
+                              {formatNumber(item.cantidad)}
+                              {formatOrderUnit(item) ? ` ${formatOrderUnit(item)}` : ''} -{' '}
                               {ITEM_TYPE_LABELS[item.item_tipo_insumo] || item.item_tipo_insumo}
                             </Text>
+                            {item.sin_stock ? (
+                              <View style={styles.orderItemPill}>
+                                <Ionicons name='close-circle-outline' size={12} color={colors.red} />
+                                <Text style={styles.orderItemPillText}>Sin stock</Text>
+                              </View>
+                            ) : null}
+                            {item.puede_marcar_sin_stock ? (
+                              <Pressable
+                                style={[
+                                  styles.inlineDangerAction,
+                                  isWorking && changeOrderState.variables?.detalleId === item.id
+                                    ? styles.buttonDisabled
+                                    : null,
+                                ]}
+                                onPress={() => handleMarkOrderItemSinStock(orden, item)}
+                                disabled={isWorking}
+                              >
+                                {isWorking && changeOrderState.variables?.detalleId === item.id ? (
+                                  <ActivityIndicator size='small' color={colors.red} />
+                                ) : (
+                                  <Ionicons name='close-circle-outline' size={14} color={colors.red} />
+                                )}
+                                <Text style={styles.inlineDangerActionText}>Marcar sin stock</Text>
+                              </Pressable>
+                            ) : null}
                           </View>
                         </View>
                       ))}
                     </View>
 
-                    {canMarkDelivered || canMarkSinStock ? (
+                    {canMarkDelivered ? (
                       <View style={styles.actionsRow}>
-                        {canMarkSinStock ? (
-                          <Pressable
-                            style={[styles.secondaryAction, isWorking ? styles.buttonDisabled : null]}
-                            onPress={() => handleChangeOrderState(orden, 'SIN_STOCK')}
-                            disabled={isWorking}
-                          >
-                            {isWorking ? (
-                              <ActivityIndicator size='small' color={colors.red} />
-                            ) : (
-                              <Ionicons name='close-circle-outline' size={16} color={colors.red} />
-                            )}
-                            <Text style={styles.secondaryActionText}>Sin stock</Text>
-                          </Pressable>
-                        ) : null}
-
-                        {canMarkDelivered ? (
-                          <Pressable
-                            style={[
-                              styles.primaryAction,
-                              isWorking ? styles.buttonDisabled : null,
-                            ]}
-                            onPress={() => handleChangeOrderState(orden, 'ENTREGADO')}
-                            disabled={isWorking}
-                          >
-                            {isWorking ? (
-                              <ActivityIndicator size='small' color={colors.white} />
-                            ) : (
-                              <Ionicons name='checkmark-done-outline' size={16} color={colors.white} />
-                            )}
-                            <Text style={styles.primaryActionText}>Marcar entregado</Text>
-                          </Pressable>
-                        ) : null}
+                        <Pressable
+                          style={[
+                            styles.primaryAction,
+                            isWorking ? styles.buttonDisabled : null,
+                          ]}
+                          onPress={() => handleChangeOrderState(orden, 'ENTREGADO')}
+                          disabled={isWorking}
+                        >
+                          {isWorking && !changeOrderState.variables?.detalleId ? (
+                            <ActivityIndicator size='small' color={colors.white} />
+                          ) : (
+                            <Ionicons name='checkmark-done-outline' size={16} color={colors.white} />
+                          )}
+                          <Text style={styles.primaryActionText}>Marcar entregado</Text>
+                        </Pressable>
                       </View>
                     ) : null}
 
@@ -1228,6 +1284,12 @@ const styles = StyleSheet.create({
   successText: {
     color: colors.green,
   },
+  warningPill: {
+    backgroundColor: colors.redSoft,
+  },
+  warningText: {
+    color: colors.red,
+  },
   noteCard: {
     marginTop: 12,
     borderRadius: radius.md,
@@ -1271,6 +1333,40 @@ const styles = StyleSheet.create({
     marginTop: 3,
     fontSize: 12,
     color: colors.textMuted,
+  },
+  orderItemPill: {
+    alignSelf: 'flex-start',
+    marginTop: 8,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    borderRadius: radius.pill,
+    backgroundColor: colors.redSoft,
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+  },
+  orderItemPillText: {
+    fontSize: 11,
+    fontWeight: '800',
+    color: colors.red,
+  },
+  inlineDangerAction: {
+    alignSelf: 'flex-start',
+    marginTop: 8,
+    minHeight: 34,
+    borderRadius: radius.pill,
+    borderWidth: 1,
+    borderColor: '#F0C3BB',
+    backgroundColor: colors.white,
+    paddingHorizontal: 12,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
+  inlineDangerActionText: {
+    fontSize: 11,
+    fontWeight: '800',
+    color: colors.red,
   },
   actionsRow: {
     marginTop: 14,
@@ -1329,6 +1425,9 @@ const styles = StyleSheet.create({
     fontSize: 12,
     lineHeight: 18,
     color: colors.textSoft,
+  },
+  buttonDisabled: {
+    opacity: 0.6,
   },
   itemCard: {
     borderRadius: radius.lg,

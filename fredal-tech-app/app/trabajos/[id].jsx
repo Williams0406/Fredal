@@ -81,6 +81,14 @@ const formatRequirementQty = (value) => {
   });
 };
 
+const formatRequirementUnit = (item) => {
+  if (!item?.unidad_medida_nombre && !item?.unidad_medida_simbolo) return '';
+  if (item.unidad_medida_nombre && item.unidad_medida_simbolo) {
+    return `${item.unidad_medida_nombre} (${item.unidad_medida_simbolo})`;
+  }
+  return item.unidad_medida_nombre || item.unidad_medida_simbolo || '';
+};
+
 function InfoRow({ icon, label, value }) {
   if (!value) return null;
 
@@ -136,8 +144,10 @@ function RequirementStatusBadge({ status }) {
 function RequirementCard({
   orden,
   onChangeEstado,
+  onMarkItemSinStock,
   onConfirmarRecepcion,
   isChanging,
+  changingDetailId,
   isConfirming,
 }) {
   return (
@@ -173,6 +183,15 @@ function RequirementCard({
         </View>
       ) : null}
 
+      {orden.tiene_items_sin_stock && orden.estado !== 'ENTREGADO' ? (
+        <View style={[styles.infoPill, styles.warningPill]}>
+          <Ionicons name='alert-circle-outline' size={14} color={colors.red} />
+          <Text style={[styles.infoPillText, styles.warningText]}>
+            Este requerimiento tiene items marcados sin stock.
+          </Text>
+        </View>
+      ) : null}
+
       {orden.observaciones ? (
         <View style={styles.requirementNoteCard}>
           <Text style={styles.requirementNoteText}>{orden.observaciones}</Text>
@@ -189,50 +208,54 @@ function RequirementCard({
               </Text>
               <Text style={styles.requirementItemMeta}>
                 {formatRequirementQty(item.cantidad)}
+                {formatRequirementUnit(item) ? ` ${formatRequirementUnit(item)}` : ''}
                 {item.proveedor_nombre ? ` • ${item.proveedor_nombre}` : ''}
               </Text>
+              {item.sin_stock ? (
+                <View style={styles.requirementItemPill}>
+                  <Ionicons name='close-circle-outline' size={12} color={colors.red} />
+                  <Text style={styles.requirementItemPillText}>Sin stock</Text>
+                </View>
+              ) : null}
+              {item.puede_marcar_sin_stock ? (
+                <Pressable
+                  style={[
+                    styles.requirementItemAction,
+                    isChanging && changingDetailId === item.id ? styles.buttonDisabled : null,
+                  ]}
+                  onPress={() => onMarkItemSinStock(orden, item)}
+                  disabled={isChanging}
+                >
+                  {isChanging && changingDetailId === item.id ? (
+                    <ActivityIndicator size='small' color={colors.red} />
+                  ) : (
+                    <Ionicons name='close-circle-outline' size={14} color={colors.red} />
+                  )}
+                  <Text style={styles.requirementItemActionText}>Marcar sin stock</Text>
+                </Pressable>
+              ) : null}
             </View>
           </View>
         ))}
       </View>
 
-      {orden.puede_marcar_entregado || orden.puede_marcar_sin_stock ? (
+      {orden.puede_marcar_entregado ? (
         <View style={styles.requirementActions}>
-          {orden.puede_marcar_sin_stock ? (
-            <Pressable
-              style={[
-                styles.requirementSecondaryAction,
-                isChanging ? styles.buttonDisabled : null,
-              ]}
-              onPress={() => onChangeEstado(orden, 'SIN_STOCK')}
-              disabled={isChanging}
-            >
-              {isChanging ? (
-                <ActivityIndicator size='small' color={colors.red} />
-              ) : (
-                <Ionicons name='close-circle-outline' size={16} color={colors.red} />
-              )}
-              <Text style={styles.requirementSecondaryActionText}>Marcar sin stock</Text>
-            </Pressable>
-          ) : null}
-
-          {orden.puede_marcar_entregado ? (
-            <Pressable
-              style={[
-                styles.requirementPrimaryAction,
-                isChanging ? styles.buttonDisabled : null,
-              ]}
-              onPress={() => onChangeEstado(orden, 'ENTREGADO')}
-              disabled={isChanging}
-            >
-              {isChanging ? (
-                <ActivityIndicator size='small' color={colors.white} />
-              ) : (
-                <Ionicons name='checkmark-done-outline' size={16} color={colors.white} />
-              )}
-              <Text style={styles.requirementPrimaryActionText}>Marcar entregado</Text>
-            </Pressable>
-          ) : null}
+          <Pressable
+            style={[
+              styles.requirementPrimaryAction,
+              isChanging ? styles.buttonDisabled : null,
+            ]}
+            onPress={() => onChangeEstado(orden, 'ENTREGADO')}
+            disabled={isChanging}
+          >
+            {isChanging && !changingDetailId ? (
+              <ActivityIndicator size='small' color={colors.white} />
+            ) : (
+              <Ionicons name='checkmark-done-outline' size={16} color={colors.white} />
+            )}
+            <Text style={styles.requirementPrimaryActionText}>Marcar entregado</Text>
+          </Pressable>
         </View>
       ) : null}
 
@@ -430,8 +453,8 @@ export default function TrabajoDetalleScreen() {
   const patchTrabajoMut = usePatchTrabajo();
 
   const changeRequirementStateMut = useMutation({
-    mutationFn: ({ id: requirementId, estado }) =>
-      ordenRequerimientoAPI.cambiarEstado(requirementId, estado),
+    mutationFn: ({ id: requirementId, estado, detalleId = null }) =>
+      ordenRequerimientoAPI.cambiarEstado(requirementId, estado, detalleId),
     onSuccess: () => {
       queryClient.invalidateQueries({
         queryKey: ['ordenes-requerimiento-mobile', trabajoId],
@@ -509,6 +532,36 @@ export default function TrabajoDetalleScreen() {
                     'No se pudo actualizar',
                     err?.response?.data?.detail ||
                       `No se pudo ${actionLabel} desde el movil.`
+                  );
+                },
+              }
+            ),
+        },
+      ]
+    );
+  };
+
+  const handleMarkRequirementItemSinStock = (orden, item) => {
+    Alert.alert(
+      'Marcar item sin stock',
+      `Se registrara ${item.item_codigo} como sin stock dentro de ${orden.codigo}.`,
+      [
+        { text: 'Cancelar', style: 'cancel' },
+        {
+          text: 'Confirmar',
+          onPress: () =>
+            changeRequirementStateMut.mutate(
+              {
+                id: orden.id,
+                estado: 'SIN_STOCK',
+                detalleId: item.id,
+              },
+              {
+                onError: (err) => {
+                  Alert.alert(
+                    'No se pudo actualizar',
+                    err?.response?.data?.detail ||
+                      'No se pudo marcar el item como sin stock.'
                   );
                 },
               }
@@ -695,11 +748,13 @@ export default function TrabajoDetalleScreen() {
               key={orden.id}
               orden={orden}
               onChangeEstado={handleChangeRequirementState}
+              onMarkItemSinStock={handleMarkRequirementItemSinStock}
               onConfirmarRecepcion={handleConfirmRequirementReceipt}
               isChanging={
                 changeRequirementStateMut.isPending &&
                 changeRequirementStateMut.variables?.id === orden.id
               }
+              changingDetailId={changeRequirementStateMut.variables?.detalleId || null}
               isConfirming={
                 confirmRequirementReceiptMut.isPending &&
                 confirmRequirementReceiptMut.variables === orden.id
@@ -1294,6 +1349,40 @@ const styles = StyleSheet.create({
     fontSize: 12,
     color: colors.textMuted,
   },
+  requirementItemPill: {
+    alignSelf: 'flex-start',
+    marginTop: 8,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    borderRadius: radius.pill,
+    backgroundColor: colors.redSoft,
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+  },
+  requirementItemPillText: {
+    fontSize: 11,
+    fontWeight: '800',
+    color: colors.red,
+  },
+  requirementItemAction: {
+    alignSelf: 'flex-start',
+    marginTop: 8,
+    minHeight: 34,
+    borderRadius: radius.pill,
+    borderWidth: 1,
+    borderColor: '#F0C3BB',
+    backgroundColor: colors.white,
+    paddingHorizontal: 12,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
+  requirementItemActionText: {
+    fontSize: 11,
+    fontWeight: '800',
+    color: colors.red,
+  },
   requirementActions: {
     marginTop: 14,
     flexDirection: 'row',
@@ -1348,6 +1437,37 @@ const styles = StyleSheet.create({
     fontSize: 13,
     fontWeight: '800',
     color: colors.white,
+  },
+  infoPill: {
+    marginTop: 12,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    borderRadius: radius.pill,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    backgroundColor: colors.navySoft,
+    alignSelf: 'flex-start',
+  },
+  infoPillText: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: colors.navy,
+  },
+  successPill: {
+    backgroundColor: colors.greenSoft,
+  },
+  successText: {
+    color: colors.green,
+  },
+  warningPill: {
+    backgroundColor: colors.redSoft,
+  },
+  warningText: {
+    color: colors.red,
+  },
+  buttonDisabled: {
+    opacity: 0.6,
   },
   emptyCard: {
     alignItems: 'center',

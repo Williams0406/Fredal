@@ -27,6 +27,7 @@ const buildEmptyRow = () => ({
   key: createRowKey(),
   item: null,
   cantidad: '1',
+  unidad_medida: null,
   proveedor: null,
 });
 
@@ -38,6 +39,16 @@ const parseOptions = (value) => {
 
 const normalizeCantidad = (value) =>
   value.replace(',', '.').replace(/[^0-9.]/g, '').replace(/^(\d*\.?\d*).*$/, '$1');
+
+const getItemUnidadLabel = (item) => {
+  const unidadNombre = item?.unidad_medida_detalle?.nombre || item?.unidad_medida_nombre || '';
+  const unidadSimbolo = item?.unidad_medida_detalle?.simbolo || item?.unidad_medida_simbolo || '';
+
+  if (unidadNombre && unidadSimbolo) {
+    return `${unidadNombre} (${unidadSimbolo})`;
+  }
+  return unidadNombre || unidadSimbolo || 'Sin unidad configurada';
+};
 
 const normalizeRole = (role) =>
   String(role?.name || role?.nombre || role || '').toLowerCase().trim();
@@ -202,6 +213,21 @@ export default function OrdenRequerimientoSheet({
     );
   };
 
+  const handleItemChange = (rowKey, itemId) => {
+    const selectedItem = (itemsQuery.data || []).find((item) => item.id === itemId);
+    setRows((prev) =>
+      prev.map((row) =>
+        row.key === rowKey
+          ? {
+              ...row,
+              item: itemId,
+              unidad_medida: selectedItem?.unidad_medida || null,
+            }
+          : row
+      )
+    );
+  };
+
   const addRow = () => setRows((prev) => [...prev, buildEmptyRow()]);
 
   const removeRow = (rowKey) => {
@@ -230,6 +256,7 @@ export default function OrdenRequerimientoSheet({
       .map((row) => ({
         item: Number(row.item),
         cantidad: Number(row.cantidad),
+        unidad_medida: row.unidad_medida ? Number(row.unidad_medida) : null,
         proveedor: row.proveedor ? Number(row.proveedor) : null,
       }))
       .filter((row) => row.item && row.cantidad > 0);
@@ -374,7 +401,7 @@ export default function OrdenRequerimientoSheet({
                   label='Item'
                   value={row.item}
                   options={itemOptions}
-                  onChange={(value) => updateRow(row.key, 'item', value)}
+                  onChange={(value) => handleItemChange(row.key, value)}
                   placeholder='Selecciona un item'
                 />
 
@@ -388,6 +415,20 @@ export default function OrdenRequerimientoSheet({
                     keyboardType='decimal-pad'
                     style={styles.input}
                   />
+                </View>
+
+                <View style={styles.fieldBlock}>
+                  <Text style={styles.fieldLabel}>Unidad</Text>
+                  <View style={[styles.input, styles.readonlyInput]}>
+                    <Text
+                      style={[
+                        styles.readonlyInputText,
+                        !selectedItem ? styles.readonlyInputPlaceholder : null,
+                      ]}
+                    >
+                      {selectedItem ? getItemUnidadLabel(selectedItem) : 'Selecciona un item'}
+                    </Text>
+                  </View>
                 </View>
 
                 <AppSelect
@@ -407,6 +448,10 @@ export default function OrdenRequerimientoSheet({
                     <View style={styles.summaryCell}>
                       <Text style={styles.summaryLabel}>Nombre</Text>
                       <Text style={styles.summaryValue}>{selectedItem.nombre || '-'}</Text>
+                    </View>
+                    <View style={styles.summaryCell}>
+                      <Text style={styles.summaryLabel}>Unidad</Text>
+                      <Text style={styles.summaryValue}>{getItemUnidadLabel(selectedItem)}</Text>
                     </View>
                   </View>
                 ) : null}
@@ -543,6 +588,18 @@ const styles = StyleSheet.create({
     fontSize: 15,
     color: colors.text,
     ...shadows.soft,
+  },
+  readonlyInput: {
+    justifyContent: 'center',
+  },
+  readonlyInputText: {
+    fontSize: 15,
+    fontWeight: '700',
+    color: colors.text,
+  },
+  readonlyInputPlaceholder: {
+    color: colors.textSoft,
+    fontWeight: '600',
   },
   summaryCard: {
     borderRadius: radius.md,

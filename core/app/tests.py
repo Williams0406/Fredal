@@ -7,6 +7,7 @@ from io import BytesIO, StringIO
 from django.contrib.auth.models import Group, User
 from django.conf import settings
 from django.core.files.uploadedfile import SimpleUploadedFile
+from django.db.models import Sum
 from django.utils import timezone
 from openpyxl import Workbook, load_workbook
 from rest_framework.test import APITestCase
@@ -26,11 +27,13 @@ from .models import (
     Maquinaria,
     MovimientoConsumible,
     MovimientoRepuesto,
+    EncabezadoDocumentoEstandarizacion,
     OrdenRequerimiento,
     OrdenRequerimientoDetalle,
     OrdenTrabajo,
     PerfilUsuario,
     Proveedor,
+    TareaPorEstandarizar,
     Trabajador,
     UbicacionCliente,
     UnidadMedida,
@@ -44,6 +47,36 @@ class TimezoneConfigurationTests(APITestCase):
         self.assertEqual(settings.TIME_ZONE, "America/Lima")
         self.assertFalse(settings.USE_TZ)
         self.assertIs(OrdenTrabajo._meta.get_field("fecha").default, current_local_date)
+
+
+class EstandarizacionModelsTests(APITestCase):
+    def test_encabezado_documento_autocompleta_codigo_area_y_revision(self):
+        user = User.objects.create_user(username="estandar-user", password="secret123")
+        trabajador = Trabajador.objects.create(
+            nombres="Lucia",
+            apellidos="Ramos",
+            dni="55667788",
+            puesto="Supervisora",
+        )
+        PerfilUsuario.objects.create(user=user, trabajador=trabajador)
+
+        tarea = TareaPorEstandarizar.objects.create(
+            codigo="TES-001",
+            nombre_tarea="Cambio de filtro principal",
+            nivel_criticidad=TareaPorEstandarizar.NivelCriticidad.ALTO,
+            desarrollado=True,
+            area="Taller",
+        )
+
+        encabezado = EncabezadoDocumentoEstandarizacion.objects.create(
+            tarea_por_estandarizar=tarea,
+            creado_por=user,
+            fecha=date(2026, 5, 20),
+        )
+
+        self.assertTrue(encabezado.codigo.startswith("DE-2026-"))
+        self.assertEqual(encabezado.area, "Taller")
+        self.assertEqual(encabezado.revision_id, trabajador.id)
 
 
 class CatalogoSyncViewTests(APITestCase):
@@ -1314,6 +1347,13 @@ class OrdenRequerimientoPermisosTests(APITestCase):
             dimension=self.dimension,
             unidad_medida=self.unidad,
         )
+        self.item_extra = Item.objects.create(
+            codigo="CONS-REQ-002",
+            nombre="Refrigerante",
+            tipo_insumo=Item.TipoInsumo.CONSUMIBLE,
+            dimension=self.dimension,
+            unidad_medida=self.unidad,
+        )
         self.almacen = Almacen.objects.create(nombre="Almacen Requerimientos")
         self.proveedor = Proveedor.objects.create(
             nombre="Proveedor Req",
@@ -1329,6 +1369,14 @@ class OrdenRequerimientoPermisosTests(APITestCase):
             moneda=Compra.Moneda.PEN,
             valor_unitario="20.00",
         )
+        self.compra_detalle_extra = CompraDetalle.objects.create(
+            compra=self.compra,
+            item=self.item_extra,
+            cantidad=10,
+            unidad_medida=self.unidad,
+            moneda=Compra.Moneda.PEN,
+            valor_unitario="15.00",
+        )
         self.lote = LoteConsumible.objects.create(
             compra_detalle=self.compra_detalle,
             item=self.item,
@@ -1337,9 +1385,24 @@ class OrdenRequerimientoPermisosTests(APITestCase):
             unidad_medida=self.unidad,
             almacen=self.almacen,
         )
+        self.lote_extra = LoteConsumible.objects.create(
+            compra_detalle=self.compra_detalle_extra,
+            item=self.item_extra,
+            cantidad_inicial=Decimal("10.000000"),
+            cantidad_disponible=Decimal("10.000000"),
+            unidad_medida=self.unidad,
+            almacen=self.almacen,
+        )
         HistorialConsumible.objects.create(
             lote=self.lote,
             item=self.item,
+            cantidad=Decimal("10.000000"),
+            unidad_medida=self.unidad,
+            almacen=self.almacen,
+        )
+        HistorialConsumible.objects.create(
+            lote=self.lote_extra,
+            item=self.item_extra,
             cantidad=Decimal("10.000000"),
             unidad_medida=self.unidad,
             almacen=self.almacen,
@@ -1372,6 +1435,7 @@ class OrdenRequerimientoPermisosTests(APITestCase):
             orden_requerimiento=orden,
             item=self.item,
             cantidad=Decimal("2.000000"),
+            unidad_medida=self.unidad,
             proveedor=self.proveedor,
         )
         return orden
@@ -1399,6 +1463,12 @@ class OrdenRequerimientoPermisosTests(APITestCase):
         self.assertEqual(response.status_code, 201, response.data)
         self.assertEqual(response.data["tecnico_asignado"], self.tecnico.id)
         self.assertEqual(OrdenRequerimiento.objects.count(), 1)
+        self.assertEqual(response.data["items"][0]["unidad_medida"], self.unidad.id)
+        self.assertEqual(response.data["items"][0]["unidad_medida_simbolo"], self.unidad.simbolo)
+        self.assertEqual(
+            OrdenRequerimientoDetalle.objects.get().unidad_medida_id,
+            self.unidad.id,
+        )
 
     def test_jefe_tecnicos_puede_listar_items_para_emitir_requerimientos(self):
         self.client.force_authenticate(user=self.jefe_tecnicos_user)
@@ -1462,13 +1532,83 @@ class OrdenRequerimientoPermisosTests(APITestCase):
 
         response = self.client.post(
             f"/api/ordenes-requerimiento/{orden.id}/cambiar_estado/",
-            {"estado": OrdenRequerimiento.Estado.SIN_STOCK},
+            {
+                "estado": OrdenRequerimiento.Estado.SIN_STOCK,
+                "detalle_id": orden.detalles.first().id,
+            },
             format="json",
         )
 
         self.assertEqual(response.status_code, 403, response.data)
         orden.refresh_from_db()
         self.assertEqual(orden.estado, OrdenRequerimiento.Estado.POR_REVISAR)
+
+    def test_almacen_puede_marcar_un_detalle_sin_stock(self):
+        orden = self._crear_requerimiento(tecnico_asignado=self.tecnico)
+        detalle = orden.detalles.first()
+        self.client.force_authenticate(user=self.almacen_user)
+
+        response = self.client.post(
+            f"/api/ordenes-requerimiento/{orden.id}/cambiar_estado/",
+            {
+                "estado": OrdenRequerimiento.Estado.SIN_STOCK,
+                "detalle_id": detalle.id,
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 200, response.data)
+        orden.refresh_from_db()
+        detalle.refresh_from_db()
+        self.assertEqual(orden.estado, OrdenRequerimiento.Estado.SIN_STOCK)
+        self.assertTrue(detalle.sin_stock)
+
+    def test_entrega_solo_asigna_items_disponibles(self):
+        orden = OrdenRequerimiento.objects.create(
+            trabajo=self.orden_trabajo,
+            tecnico_asignado=self.tecnico,
+            observaciones="Entrega parcial",
+            emitido_por=self.jefe_tecnicos_user,
+        )
+        detalle_sin_stock = OrdenRequerimientoDetalle.objects.create(
+            orden_requerimiento=orden,
+            item=self.item,
+            cantidad=Decimal("2.000000"),
+            unidad_medida=self.unidad,
+            proveedor=self.proveedor,
+            sin_stock=True,
+        )
+        OrdenRequerimientoDetalle.objects.create(
+            orden_requerimiento=orden,
+            item=self.item_extra,
+            cantidad=Decimal("1.000000"),
+            unidad_medida=self.unidad,
+            proveedor=self.proveedor,
+        )
+
+        self.client.force_authenticate(user=self.almacen_user)
+
+        response = self.client.post(
+            f"/api/ordenes-requerimiento/{orden.id}/cambiar_estado/",
+            {"estado": OrdenRequerimiento.Estado.ENTREGADO},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 200, response.data)
+        orden.refresh_from_db()
+        detalle_sin_stock.refresh_from_db()
+        self.assertEqual(orden.estado, OrdenRequerimiento.Estado.ENTREGADO)
+        self.assertTrue(detalle_sin_stock.sin_stock)
+
+        total_asignado_tecnico = (
+            HistorialConsumible.objects.filter(
+                trabajador=self.tecnico,
+                orden_trabajo=self.orden_trabajo,
+            )
+            .aggregate(total=Sum("cantidad"))
+            .get("total")
+        )
+        self.assertEqual(total_asignado_tecnico, Decimal("1.000000"))
 
 
 class ActividadPlanificadaPermisosTests(APITestCase):

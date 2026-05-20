@@ -637,6 +637,321 @@ class TecnicoAsignado(models.Model):
 
 
 # =========================
+# ESTANDARIZACION Y SEGURIDAD
+# =========================
+
+class TareaPorEstandarizar(TimeStampedModel):
+
+    class NivelCriticidad(models.TextChoices):
+        ALTO = "ALTO", "Alto"
+        MEDIO = "MEDIO", "Medio"
+        BAJO = "BAJO", "Bajo"
+
+    codigo = models.CharField(max_length=50, unique=True)
+    nombre_tarea = models.CharField(max_length=255)
+    nivel_criticidad = models.CharField(
+        max_length=10,
+        choices=NivelCriticidad.choices,
+        default=NivelCriticidad.MEDIO,
+    )
+    desarrollado = models.BooleanField(default=False)
+    area = models.CharField(max_length=100)
+    item = models.ForeignKey(
+        Item,
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name="tareas_por_estandarizar",
+    )
+
+    class Meta:
+        ordering = ["codigo", "id"]
+
+    def __str__(self):
+        return f"{self.codigo} - {self.nombre_tarea}"
+
+
+class EncabezadoDocumentoEstandarizacion(TimeStampedModel):
+    codigo = models.CharField(max_length=50, unique=True, editable=False)
+    area = models.CharField(max_length=100)
+    revision = models.ForeignKey(
+        Trabajador,
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name="documentos_estandarizacion_revisados",
+    )
+    fecha = models.DateField(default=current_local_date)
+    tarea_por_estandarizar = models.ForeignKey(
+        TareaPorEstandarizar,
+        on_delete=models.PROTECT,
+        related_name="documentos_estandarizacion",
+    )
+    creado_por = models.ForeignKey(
+        User,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="documentos_estandarizacion_creados",
+    )
+
+    class Meta:
+        ordering = ["-created_at", "-id"]
+
+    def save(self, *args, **kwargs):
+        if self.tarea_por_estandarizar_id:
+            self.area = self.tarea_por_estandarizar.area
+
+        if not self.revision_id and self.creado_por_id:
+            try:
+                self.revision = self.creado_por.perfil.trabajador
+            except (AttributeError, PerfilUsuario.DoesNotExist):
+                self.revision = None
+
+        if not self.codigo:
+            year = timezone.now().year
+            last = (
+                EncabezadoDocumentoEstandarizacion.objects
+                .filter(codigo__startswith=f"DE-{year}")
+                .aggregate(max_code=Max("codigo"))
+                ["max_code"]
+            )
+            seq = int(last.split("-")[-1]) + 1 if last else 1
+            self.codigo = f"DE-{year}-{seq:05d}"
+
+        super().save(*args, **kwargs)
+
+    def __str__(self):
+        return self.codigo
+
+
+class DetalleDocumentoEstandarizado(TimeStampedModel):
+    encabezado_documento = models.ForeignKey(
+        EncabezadoDocumentoEstandarizacion,
+        on_delete=models.CASCADE,
+        related_name="detalles",
+    )
+    numero = models.PositiveIntegerField()
+    recurso = models.CharField(max_length=255)
+    actividad = models.CharField(max_length=255)
+    detalle_actividad = models.TextField(blank=True, default="")
+    responsable = models.CharField(max_length=255, blank=True, default="")
+    nota_importante = models.TextField(blank=True, default="")
+    consideraciones = models.TextField(blank=True, default="")
+
+    class Meta:
+        ordering = ["encabezado_documento_id", "numero", "id"]
+        unique_together = ("encabezado_documento", "numero")
+
+    def __str__(self):
+        return f"{self.encabezado_documento.codigo} - {self.numero}"
+
+
+class SoporteVisualDocumentoEstandarizado(TimeStampedModel):
+    detalle_documento = models.ForeignKey(
+        DetalleDocumentoEstandarizado,
+        on_delete=models.CASCADE,
+        related_name="soportes_visuales",
+    )
+    imagen = models.ImageField(upload_to="estandarizacion/soportes/%Y/%m/")
+
+    class Meta:
+        ordering = ["id"]
+
+    def __str__(self):
+        return f"Soporte {self.detalle_documento_id}"
+
+
+class ChecklistTaller(TimeStampedModel):
+
+    class Estado(models.TextChoices):
+        MAL = "MAL", "Mal"
+        REGULAR = "REGULAR", "Regular"
+        BUENO = "BUENO", "Bueno"
+
+    vb = models.BooleanField(default=False)
+    trabajos_a_realizar = models.TextField()
+    estado = models.CharField(
+        max_length=10,
+        choices=Estado.choices,
+        default=Estado.REGULAR,
+    )
+    observacion = models.TextField(blank=True, default="")
+    sistema = models.CharField(max_length=150)
+
+    class Meta:
+        ordering = ["id"]
+
+    def __str__(self):
+        return f"Checklist taller #{self.pk or 'nuevo'}"
+
+
+class ReporteOrden(TimeStampedModel):
+    epp = models.TextField(blank=True, default="")
+    herramientas = models.TextField(blank=True, default="")
+    pregunta_1 = models.BooleanField(default=False)
+    pregunta_2 = models.BooleanField(default=False)
+    pregunta_3 = models.BooleanField(default=False)
+    pregunta_4 = models.BooleanField(default=False)
+    pregunta_5 = models.BooleanField(default=False)
+    pregunta_6 = models.BooleanField(default=False)
+    descripcion_tarea = models.TextField(blank=True, default="")
+
+    class Meta:
+        ordering = ["-created_at", "-id"]
+
+    def __str__(self):
+        return f"Reporte de orden #{self.pk or 'nuevo'}"
+
+
+class IPERC(TimeStampedModel):
+    motivo = models.CharField(max_length=255)
+    descripcion_peligro = models.TextField()
+    consecuencia_peligro = models.TextField()
+    evaluacion_iperc = models.TextField()
+    evaluacion_riesgo_residual = models.TextField()
+
+    class Meta:
+        ordering = ["-created_at", "-id"]
+
+    def __str__(self):
+        return self.motivo
+
+
+class GestionCambio(TimeStampedModel):
+
+    class Estado(models.TextChoices):
+        SUGERIDO = "SUGERIDO", "Sugerido"
+        APROBADO = "APROBADO", "Aprobado"
+        EN_PROCESO = "EN_PROCESO", "En proceso"
+        TERMINADO = "TERMINADO", "Terminado"
+
+    implementacion = models.TextField()
+    estado = models.CharField(
+        max_length=15,
+        choices=Estado.choices,
+        default=Estado.SUGERIDO,
+    )
+    observacion = models.TextField(blank=True, default="")
+    iperc = models.ForeignKey(
+        IPERC,
+        on_delete=models.PROTECT,
+        related_name="gestiones_cambio",
+    )
+
+    class Meta:
+        ordering = ["-created_at", "-id"]
+
+    def __str__(self):
+        return f"{self.get_estado_display()} - {self.iperc.motivo}"
+
+
+class DetalleSupervisor(TimeStampedModel):
+
+    class Tipo(models.TextChoices):
+        AUTORIZA = "AUTORIZA", "Autoriza"
+        VERIFICA = "VERIFICA", "Verifica"
+
+    hora = models.TimeField()
+    apellidos = models.CharField(max_length=100)
+    nombres = models.CharField(max_length=100)
+    dni = models.CharField(max_length=20)
+    tipo = models.CharField(
+        max_length=10,
+        choices=Tipo.choices,
+    )
+    observaciones = models.TextField(blank=True, default="")
+    firma = models.ImageField(
+        upload_to="supervisores/firmas/%Y/%m/",
+        null=True,
+        blank=True,
+    )
+    reporte_orden = models.ForeignKey(
+        ReporteOrden,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="detalles_supervisor",
+    )
+    reporte_iperc = models.ForeignKey(
+        "ReporteIPERC",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="detalles_supervisor",
+    )
+
+    class Meta:
+        ordering = ["-created_at", "-id"]
+
+    def __str__(self):
+        return f"{self.apellidos}, {self.nombres} - {self.get_tipo_display()}"
+
+
+class ReporteIPERC(TimeStampedModel):
+    orden_trabajo = models.ForeignKey(
+        OrdenTrabajo,
+        on_delete=models.PROTECT,
+        related_name="reportes_iperc",
+    )
+    trabajador = models.ForeignKey(
+        Trabajador,
+        on_delete=models.PROTECT,
+        related_name="reportes_iperc",
+    )
+    iperc = models.ForeignKey(
+        IPERC,
+        on_delete=models.PROTECT,
+        related_name="reportes",
+    )
+    secuencia = models.PositiveIntegerField(default=1)
+    supervisor = models.ForeignKey(
+        DetalleSupervisor,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="reportes_iperc_supervisados",
+    )
+
+    class Meta:
+        ordering = ["orden_trabajo_id", "secuencia", "id"]
+        unique_together = ("orden_trabajo", "trabajador", "iperc", "secuencia")
+
+    def __str__(self):
+        return f"{self.orden_trabajo.codigo_orden} - Secuencia {self.secuencia}"
+
+
+class SecuenciaControlRiesgo(TimeStampedModel):
+    actividad = models.TextField()
+    reporte_iperc = models.ForeignKey(
+        ReporteIPERC,
+        on_delete=models.CASCADE,
+        related_name="secuencias_control_riesgo",
+    )
+
+    class Meta:
+        ordering = ["id"]
+
+    def __str__(self):
+        return f"Secuencia riesgo #{self.pk or 'nuevo'}"
+
+
+class MedidaCorrectiva(TimeStampedModel):
+    detalle = models.TextField()
+    reporte_iperc = models.ForeignKey(
+        ReporteIPERC,
+        on_delete=models.CASCADE,
+        related_name="medidas_correctivas",
+    )
+
+    class Meta:
+        ordering = ["id"]
+
+    def __str__(self):
+        return f"Medida correctiva #{self.pk or 'nuevo'}"
+
+
+# =========================
 # ACTIVIDADES
 # =========================
 
@@ -1068,6 +1383,12 @@ class OrdenRequerimientoDetalle(models.Model):
     )
     item = models.ForeignKey(Item, on_delete=models.PROTECT)
     cantidad = models.DecimalField(max_digits=16, decimal_places=6)
+    unidad_medida = models.ForeignKey(
+        UnidadMedida,
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+    )
     proveedor = models.ForeignKey(
         Proveedor,
         on_delete=models.PROTECT,
@@ -1075,6 +1396,7 @@ class OrdenRequerimientoDetalle(models.Model):
         blank=True,
         related_name="ordenes_requerimiento_detalle",
     )
+    sin_stock = models.BooleanField(default=False)
 
     class Meta:
         ordering = ["id"]
@@ -1082,6 +1404,13 @@ class OrdenRequerimientoDetalle(models.Model):
     def clean(self):
         if self.cantidad <= 0:
             raise ValidationError("La cantidad debe ser mayor a cero")
+        if (
+            self.unidad_medida_id
+            and self.item_id
+            and self.item.dimension_id
+            and self.unidad_medida.dimension_id != self.item.dimension_id
+        ):
+            raise ValidationError("La unidad de medida no coincide con la dimension del item.")
 
     def __str__(self):
         return f"{self.orden_requerimiento.codigo} - {self.item.codigo}"

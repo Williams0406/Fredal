@@ -6,11 +6,29 @@ import { itemAPI, ordenRequerimientoAPI, proveedorAPI, trabajadorAPI, userAPI } 
 const emptyRow = {
   item: "",
   cantidad: "1",
+  unidad_medida: "",
   proveedor: "",
 };
 
 const normalizeRole = (role) =>
   String(role?.name || role?.nombre || role || "").toLowerCase().trim();
+
+const parseCollection = (value) => {
+  if (Array.isArray(value)) return value;
+  if (Array.isArray(value?.results)) return value.results;
+  return [];
+};
+
+const getItemUnidadLabel = (item) => {
+  const unidadNombre = item?.unidad_medida_detalle?.nombre || item?.unidad_medida_nombre || "";
+  const unidadSimbolo = item?.unidad_medida_detalle?.simbolo || item?.unidad_medida_simbolo || "";
+
+  if (unidadNombre && unidadSimbolo) {
+    return `${unidadNombre} (${unidadSimbolo})`;
+  }
+
+  return unidadNombre || unidadSimbolo || "Sin unidad configurada";
+};
 
 export default function OrdenRequerimientoFormModal({
   trabajoId,
@@ -35,10 +53,10 @@ export default function OrdenRequerimientoFormModal({
 
     Promise.all([itemAPI.list(), proveedorAPI.list(), trabajadorAPI.list(), userAPI.list()])
       .then(([itemsRes, proveedoresRes, trabajadoresRes, usersRes]) => {
-        setItems(itemsRes.data || []);
-        setProveedores(proveedoresRes.data || []);
-        setTrabajadores(trabajadoresRes.data || []);
-        setUsers(usersRes.data || []);
+        setItems(parseCollection(itemsRes.data));
+        setProveedores(parseCollection(proveedoresRes.data));
+        setTrabajadores(parseCollection(trabajadoresRes.data));
+        setUsers(parseCollection(usersRes.data));
       })
       .catch((err) => {
         console.error("Error cargando datos del requerimiento:", err);
@@ -63,6 +81,21 @@ export default function OrdenRequerimientoFormModal({
     setRows((prev) =>
       prev.map((row, rowIndex) =>
         rowIndex === index ? { ...row, [field]: value } : row
+      )
+    );
+  };
+
+  const handleItemChange = (index, itemId) => {
+    const selectedItem = items.find((item) => String(item.id) === String(itemId));
+    setRows((prev) =>
+      prev.map((row, rowIndex) =>
+        rowIndex === index
+          ? {
+              ...row,
+              item: itemId,
+              unidad_medida: selectedItem?.unidad_medida ? String(selectedItem.unidad_medida) : "",
+            }
+          : row
       )
     );
   };
@@ -100,6 +133,7 @@ export default function OrdenRequerimientoFormModal({
       .map((row) => ({
         item: Number(row.item),
         cantidad: Number(row.cantidad),
+        unidad_medida: row.unidad_medida ? Number(row.unidad_medida) : null,
         proveedor: row.proveedor ? Number(row.proveedor) : null,
       }))
       .filter((row) => row.item && row.cantidad > 0);
@@ -233,7 +267,7 @@ export default function OrdenRequerimientoFormModal({
                           <label className="block text-xs font-semibold text-gray-600 mb-1">Item</label>
                           <select
                             value={row.item}
-                            onChange={(event) => updateRow(index, "item", event.target.value)}
+                            onChange={(event) => handleItemChange(index, event.target.value)}
                             className="w-full rounded-lg border border-gray-300 px-3 py-2.5 text-sm"
                           >
                             <option value="">Selecciona un item</option>
@@ -257,7 +291,18 @@ export default function OrdenRequerimientoFormModal({
                           />
                         </div>
 
-                        <div className="md:col-span-5">
+                        <div className="md:col-span-2">
+                          <label className="block text-xs font-semibold text-gray-600 mb-1">Unidad</label>
+                          <input
+                            type="text"
+                            disabled
+                            value={selectedItem ? getItemUnidadLabel(selectedItem) : ""}
+                            placeholder="Selecciona un item"
+                            className="w-full rounded-lg border border-gray-300 bg-gray-100 px-3 py-2.5 text-sm text-gray-700"
+                          />
+                        </div>
+
+                        <div className="md:col-span-3">
                           <label className="block text-xs font-semibold text-gray-600 mb-1">Proveedor</label>
                           <select
                             value={row.proveedor}
@@ -275,7 +320,7 @@ export default function OrdenRequerimientoFormModal({
                       </div>
 
                       {selectedItem && (
-                        <div className="mt-3 grid grid-cols-1 md:grid-cols-2 gap-3 text-xs text-gray-600">
+                        <div className="mt-3 grid grid-cols-1 md:grid-cols-3 gap-3 text-xs text-gray-600">
                           <div className="rounded-lg bg-white border border-gray-200 px-3 py-2">
                             <span className="block text-gray-500">Código</span>
                             <span className="font-semibold text-gray-800">{selectedItem.codigo}</span>
@@ -283,6 +328,10 @@ export default function OrdenRequerimientoFormModal({
                           <div className="rounded-lg bg-white border border-gray-200 px-3 py-2">
                             <span className="block text-gray-500">Nombre</span>
                             <span className="font-semibold text-gray-800">{selectedItem.nombre}</span>
+                          </div>
+                          <div className="rounded-lg bg-white border border-gray-200 px-3 py-2">
+                            <span className="block text-gray-500">Unidad</span>
+                            <span className="font-semibold text-gray-800">{getItemUnidadLabel(selectedItem)}</span>
                           </div>
                         </div>
                       )}

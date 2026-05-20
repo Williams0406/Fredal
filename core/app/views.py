@@ -2149,7 +2149,7 @@ class OrdenRequerimientoViewSet(viewsets.ModelViewSet):
             "emitido_por",
             "confirmado_por_tecnico",
         )
-        .prefetch_related("detalles__item", "detalles__proveedor")
+        .prefetch_related("detalles__item", "detalles__proveedor", "detalles__unidad_medida")
         .all()
     )
     serializer_class = OrdenRequerimientoSerializer
@@ -2210,6 +2210,20 @@ class OrdenRequerimientoViewSet(viewsets.ModelViewSet):
             )
 
         return super().partial_update(request, *args, **kwargs)
+
+    def _actualizar_estado_por_detalles(self, orden):
+        if orden.estado == OrdenRequerimiento.Estado.ENTREGADO:
+            return
+
+        tiene_items_sin_stock = orden.detalles.filter(sin_stock=True).exists()
+        nuevo_estado = (
+            OrdenRequerimiento.Estado.SIN_STOCK
+            if tiene_items_sin_stock
+            else OrdenRequerimiento.Estado.POR_REVISAR
+        )
+        if orden.estado != nuevo_estado:
+            orden.estado = nuevo_estado
+            orden.save(update_fields=["estado"])
 
     def _entregar_repuestos(self, orden, detalle, tecnico):
         cantidad_decimal = Decimal(detalle.cantidad)
@@ -2306,6 +2320,7 @@ class OrdenRequerimientoViewSet(viewsets.ModelViewSet):
     def cambiar_estado(self, request, pk=None):
         orden = self.get_object()
         nuevo_estado = request.data.get("estado")
+        detalle_id = request.data.get("detalle_id")
         trabajador = self._get_trabajador_request()
         es_storage = is_storage_user(request.user)
         es_tecnico_asignado = bool(
@@ -2344,9 +2359,34 @@ class OrdenRequerimientoViewSet(viewsets.ModelViewSet):
             )
 
         with transaction.atomic():
+            if nuevo_estado == OrdenRequerimiento.Estado.SIN_STOCK:
+                detalles = orden.detalles.select_related("item", "proveedor", "unidad_medida")
+                if detalle_id is not None:
+                    try:
+                        detalle = detalles.get(pk=detalle_id)
+                    except OrdenRequerimientoDetalle.DoesNotExist:
+                        return Response(
+                            {"detail": "El item seleccionado no pertenece a esta orden."},
+                            status=status.HTTP_400_BAD_REQUEST,
+                        )
+
+                    if not detalle.sin_stock:
+                        detalle.sin_stock = True
+                        detalle.save(update_fields=["sin_stock"])
+                else:
+                    detalles.filter(sin_stock=False).update(sin_stock=True)
+
+                self._actualizar_estado_por_detalles(orden)
+                orden.refresh_from_db()
+                return Response(self.get_serializer(orden).data)
+
             if nuevo_estado == OrdenRequerimiento.Estado.ENTREGADO:
                 tecnico = orden.tecnico_asignado
-                for detalle in orden.detalles.select_related("item", "proveedor"):
+                for detalle in (
+                    orden.detalles
+                    .select_related("item", "proveedor", "unidad_medida")
+                    .filter(sin_stock=False)
+                ):
                     if detalle.item.tipo_insumo in Item.tipos_con_unidades():
                         self._entregar_repuestos(orden, detalle, tecnico)
                     else:

@@ -316,9 +316,9 @@ export default function TrabajoDetalleModal({ open, trabajoId, onClose, onUpdate
     }
   };
 
-  const handleSinStockRequerimiento = async (orden) => {
+  const handleSinStockRequerimientoItem = async (orden, item) => {
     try {
-      await ordenRequerimientoAPI.cambiarEstado(orden.id, "SIN_STOCK");
+      await ordenRequerimientoAPI.cambiarEstado(orden.id, "SIN_STOCK", item.id);
       await loadOrdenesRequerimiento();
     } catch (error) {
       console.error("Error marcando requerimiento sin stock:", error);
@@ -624,7 +624,7 @@ export default function TrabajoDetalleModal({ open, trabajoId, onClose, onUpdate
                   loading={loadingRequerimientos}
                   tecnicos={tecnicosFiltrados}
                   onAssignTecnico={handleAssignTecnicoRequerimiento}
-                  onMarkSinStock={handleSinStockRequerimiento}
+                  onMarkSinStockItem={handleSinStockRequerimientoItem}
                   onDeliver={handleEntregarRequerimiento}
                   onConfirmarTecnico={handleConfirmarRequerimiento}
                   emptyMessage="No hay requerimientos creados para esta orden."

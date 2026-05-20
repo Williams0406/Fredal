@@ -163,8 +163,11 @@ export const ordenRequerimientoAPI = {
   list: (params) => api.get('/api/ordenes-requerimiento/', { params }),
   create: (data) => api.post('/api/ordenes-requerimiento/', data),
   patch: (id, data) => api.patch(`/api/ordenes-requerimiento/${id}/`, data),
-  cambiarEstado: (id, estado) =>
-    api.post(`/api/ordenes-requerimiento/${id}/cambiar_estado/`, { estado }),
+  cambiarEstado: (id, estado, detalleId = null) =>
+    api.post(`/api/ordenes-requerimiento/${id}/cambiar_estado/`, {
+      estado,
+      ...(detalleId ? { detalle_id: detalleId } : {}),
+    }),
   confirmarRecepcion: (id) =>
     api.post(`/api/ordenes-requerimiento/${id}/confirmar_recepcion/`),
 };

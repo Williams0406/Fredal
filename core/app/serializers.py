@@ -951,11 +951,86 @@ class OrdenCompraSerializer(serializers.ModelSerializer):
 class OrdenRequerimientoDetalleSerializer(serializers.ModelSerializer):
     item_codigo = serializers.CharField(source="item.codigo", read_only=True)
     item_nombre = serializers.CharField(source="item.nombre", read_only=True)
+    item_tipo_insumo = serializers.CharField(source="item.tipo_insumo", read_only=True)
     proveedor_nombre = serializers.CharField(source="proveedor.nombre", read_only=True, default=None)
+    unidad_medida = serializers.PrimaryKeyRelatedField(
+        queryset=UnidadMedida.objects.all(),
+        required=False,
+        allow_null=True,
+    )
+    unidad_medida_nombre = serializers.SerializerMethodField()
+    unidad_medida_simbolo = serializers.SerializerMethodField()
+    puede_marcar_sin_stock = serializers.SerializerMethodField()
 
     class Meta:
         model = OrdenRequerimientoDetalle
-        fields = ["id", "item", "item_codigo", "item_nombre", "cantidad", "proveedor", "proveedor_nombre"]
+        fields = [
+            "id",
+            "item",
+            "item_codigo",
+            "item_nombre",
+            "item_tipo_insumo",
+            "cantidad",
+            "unidad_medida",
+            "unidad_medida_nombre",
+            "unidad_medida_simbolo",
+            "proveedor",
+            "proveedor_nombre",
+            "sin_stock",
+            "puede_marcar_sin_stock",
+        ]
+        read_only_fields = [
+            "item_codigo",
+            "item_nombre",
+            "item_tipo_insumo",
+            "unidad_medida_nombre",
+            "unidad_medida_simbolo",
+            "sin_stock",
+            "puede_marcar_sin_stock",
+            "proveedor_nombre",
+        ]
+
+    @staticmethod
+    def _resolver_unidad(obj):
+        return obj.unidad_medida or obj.item.unidad_medida
+
+    def get_unidad_medida_nombre(self, obj):
+        unidad = self._resolver_unidad(obj)
+        return unidad.nombre if unidad else None
+
+    def get_unidad_medida_simbolo(self, obj):
+        unidad = self._resolver_unidad(obj)
+        return unidad.simbolo if unidad else None
+
+    def get_puede_marcar_sin_stock(self, obj):
+        request = self.context.get("request")
+        user = getattr(request, "user", None)
+        if not user or not user.is_authenticated:
+            return False
+        if obj.orden_requerimiento.estado == OrdenRequerimiento.Estado.ENTREGADO:
+            return False
+        return is_storage_user(user) and not obj.sin_stock
+
+    def validate(self, attrs):
+        item = attrs.get("item", getattr(self.instance, "item", None))
+        unidad_medida = attrs.get("unidad_medida", getattr(self.instance, "unidad_medida", None))
+
+        if not item:
+            raise ValidationError({"item": "Debes seleccionar un item."})
+
+        unidad_requerimiento = unidad_medida or item.unidad_medida
+        if not unidad_requerimiento:
+            raise ValidationError({
+                "unidad_medida": "El item no tiene una unidad de medida configurada."
+            })
+
+        if item.unidad_medida_id and unidad_requerimiento.id != item.unidad_medida_id:
+            raise ValidationError({
+                "unidad_medida": "La unidad debe coincidir con la unidad configurada en el item."
+            })
+
+        attrs["unidad_medida"] = unidad_requerimiento
+        return attrs
 
 
 class OrdenRequerimientoSerializer(serializers.ModelSerializer):
@@ -963,6 +1038,7 @@ class OrdenRequerimientoSerializer(serializers.ModelSerializer):
     trabajo_codigo = serializers.CharField(source="trabajo.codigo_orden", read_only=True)
     tecnico_asignado_nombre = serializers.SerializerMethodField()
     pendiente_confirmacion_tecnico = serializers.SerializerMethodField()
+    tiene_items_sin_stock = serializers.SerializerMethodField()
     puede_cambiar_estado = serializers.SerializerMethodField()
     puede_marcar_entregado = serializers.SerializerMethodField()
     puede_marcar_sin_stock = serializers.SerializerMethodField()
@@ -986,6 +1062,7 @@ class OrdenRequerimientoSerializer(serializers.ModelSerializer):
             "emitido_por",
             "items",
             "pendiente_confirmacion_tecnico",
+            "tiene_items_sin_stock",
             "puede_cambiar_estado",
             "puede_marcar_entregado",
             "puede_marcar_sin_stock",
@@ -1001,6 +1078,7 @@ class OrdenRequerimientoSerializer(serializers.ModelSerializer):
             "trabajo_codigo",
             "tecnico_asignado_nombre",
             "pendiente_confirmacion_tecnico",
+            "tiene_items_sin_stock",
             "puede_cambiar_estado",
             "puede_marcar_entregado",
             "puede_marcar_sin_stock",
@@ -1015,6 +1093,12 @@ class OrdenRequerimientoSerializer(serializers.ModelSerializer):
 
     def get_pendiente_confirmacion_tecnico(self, obj):
         return obj.estado == OrdenRequerimiento.Estado.ENTREGADO and not obj.recepcion_confirmada_tecnico
+
+    def get_tiene_items_sin_stock(self, obj):
+        detalles = getattr(obj, "detalles", None)
+        if detalles is None:
+            return False
+        return any(detalle.sin_stock for detalle in detalles.all())
 
     def get_puede_cambiar_estado(self, obj):
         request = self.context.get("request")
@@ -1049,7 +1133,9 @@ class OrdenRequerimientoSerializer(serializers.ModelSerializer):
         user = getattr(request, "user", None)
         if not user or not user.is_authenticated:
             return False
-        return is_storage_user(user) and obj.estado != OrdenRequerimiento.Estado.ENTREGADO
+        if obj.estado == OrdenRequerimiento.Estado.ENTREGADO:
+            return False
+        return is_storage_user(user) and any(not detalle.sin_stock for detalle in obj.detalles.all())
 
     def get_puede_confirmar_tecnico(self, obj):
         request = self.context.get("request")

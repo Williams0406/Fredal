@@ -117,9 +117,9 @@ export default function AlmacenPage() {
     }
   };
 
-  const handleMarkSinStock = async (orden) => {
+  const handleMarkSinStockItem = async (orden, item) => {
     try {
-      await ordenRequerimientoAPI.cambiarEstado(orden.id, "SIN_STOCK");
+      await ordenRequerimientoAPI.cambiarEstado(orden.id, "SIN_STOCK", item.id);
       setRefresh((value) => !value);
     } catch (error) {
       console.error("Error marcando sin stock:", error);
@@ -252,7 +252,7 @@ export default function AlmacenPage() {
           loading={loadingOrders}
           tecnicos={tecnicos}
           onAssignTecnico={handleAssignTecnico}
-          onMarkSinStock={handleMarkSinStock}
+          onMarkSinStockItem={handleMarkSinStockItem}
           onDeliver={handleDeliver}
         />
       )}
