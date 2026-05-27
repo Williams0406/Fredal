@@ -4,7 +4,7 @@ from rest_framework import serializers
 from django.contrib.contenttypes.models import ContentType
 from decimal import Decimal, ROUND_HALF_UP
 from django.db import transaction
-from django.db.models import Q, Sum
+from django.db.models import Max, Q, Sum
 from django.utils import timezone
 from rest_framework.exceptions import ValidationError
 
@@ -25,6 +25,11 @@ from .models import (
     MovimientoRepuesto,
     MovimientoConsumible,
     OrdenTrabajo,
+    ReporteOrden,
+    ReporteIPERC,
+    IPERC,
+    GestionCambio,
+    DetalleSupervisor,
     CodigoRegistro,
     HistorialUbicacionItem,
     HistorialConsumible,
@@ -33,13 +38,28 @@ from .models import (
     Proveedor,
     Cliente,
     UbicacionCliente,
+    EncabezadoDocumentoEstandarizacion,
+    DetalleDocumentoEstandarizado,
+    ConexionDetalleDocumento,
+    SoporteVisualDocumentoEstandarizado,
     Dimension,
     UnidadMedida,
     UnidadRelacion,
     ItemGrupo,
     ItemGrupoDetalle,
     LoteConsumible,
+    SecuenciaControlRiesgo,
+    MedidaCorrectiva,
+    TareaPorEstandarizar,
     TipoCambioDiario,
+    ActividadChecklist,
+    Checklist,
+    ChecklistActividad,
+    ChecklistEjecucion,
+    ChecklistRespuesta,
+    Sistema,
+    Evento,
+    Asistencia,
 )
 from .permissions import (
     can_manage_planned_activities,
@@ -2002,6 +2022,17 @@ class OrdenTrabajoSerializer(serializers.ModelSerializer):
                 almacen__isnull=True,
                 horometro_fin__isnull=True,
             ).update(horometro_fin=orden.horometro)
+
+    def create(self, validated_data):
+        tecnicos = validated_data.pop("tecnicos", None)
+        instance = super().create(validated_data)
+
+        if tecnicos is not None:
+            instance.tecnicos.set(tecnicos)
+
+        ReporteOrden.ensure_for_orden_trabajo(instance)
+        self.sincronizar_horometros_relacionados(instance)
+        return instance
     
     def update(self, instance, validated_data):
         tecnicos = validated_data.pop("tecnicos", None)
@@ -2014,6 +2045,7 @@ class OrdenTrabajoSerializer(serializers.ModelSerializer):
         if tecnicos is not None:
             instance.tecnicos.set(tecnicos)
 
+        ReporteOrden.ensure_for_orden_trabajo(instance)
         self.sincronizar_horometros_relacionados(instance)
 
         # 🔹 2️⃣ Detectar transición a FINALIZADO
@@ -2521,6 +2553,976 @@ class UbicacionClienteSerializer(serializers.ModelSerializer):
     class Meta:
         model = UbicacionCliente
         fields = ["id", "cliente", "cliente_nombre", "nombre", "direccion"]
+
+
+class TareaPorEstandarizarSerializer(serializers.ModelSerializer):
+    nivel_criticidad_label = serializers.CharField(
+        source="get_nivel_criticidad_display",
+        read_only=True,
+    )
+    desarrollado_label = serializers.SerializerMethodField()
+    item_codigo = serializers.CharField(source="item.codigo", read_only=True)
+    item_nombre = serializers.CharField(source="item.nombre", read_only=True)
+
+    class Meta:
+        model = TareaPorEstandarizar
+        fields = [
+            "id",
+            "codigo",
+            "nombre_tarea",
+            "nivel_criticidad",
+            "nivel_criticidad_label",
+            "desarrollado",
+            "desarrollado_label",
+            "area",
+            "item",
+            "item_codigo",
+            "item_nombre",
+            "created_at",
+            "updated_at",
+        ]
+
+    def get_desarrollado_label(self, obj):
+        return "Si" if obj.desarrollado else "No"
+
+    def validate_codigo(self, value):
+        return str(value or "").strip().upper()
+
+    def validate_nombre_tarea(self, value):
+        return str(value or "").strip()
+
+    def validate_area(self, value):
+        return str(value or "").strip()
+
+
+class SistemaSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Sistema
+        fields = [
+            "id",
+            "nombre",
+            "descripcion",
+            "created_at",
+            "updated_at",
+        ]
+
+    def validate_nombre(self, value):
+        return str(value or "").strip()
+
+    def validate_descripcion(self, value):
+        return str(value or "").strip()
+
+
+class ActividadChecklistSerializer(serializers.ModelSerializer):
+    tipo_respuesta_label = serializers.CharField(
+        source="get_tipo_respuesta_display",
+        read_only=True,
+    )
+    item_codigo = serializers.CharField(source="item.codigo", read_only=True)
+    item_nombre = serializers.CharField(source="item.nombre", read_only=True)
+
+    class Meta:
+        model = ActividadChecklist
+        fields = [
+            "id",
+            "descripcion",
+            "tipo_respuesta",
+            "tipo_respuesta_label",
+            "obligatorio",
+            "requiere_observacion",
+            "requiere_evidencia",
+            "item",
+            "item_codigo",
+            "item_nombre",
+            "activo",
+            "created_at",
+            "updated_at",
+        ]
+
+    def validate_descripcion(self, value):
+        return str(value or "").strip()
+
+
+class ChecklistActividadSerializer(serializers.ModelSerializer):
+    actividad_detalle = ActividadChecklistSerializer(source="actividad", read_only=True)
+    sistema_detalle = SistemaSerializer(source="sistema", read_only=True)
+
+    class Meta:
+        model = ChecklistActividad
+        fields = [
+            "id",
+            "checklist",
+            "actividad",
+            "actividad_detalle",
+            "sistema",
+            "sistema_detalle",
+            "orden",
+            "obligatorio",
+            "created_at",
+            "updated_at",
+        ]
+
+
+class ChecklistActividadWriteSerializer(serializers.Serializer):
+    actividad = serializers.PrimaryKeyRelatedField(
+        queryset=ActividadChecklist.objects.all(),
+        required=False,
+        allow_null=True,
+    )
+    actividad_data = ActividadChecklistSerializer(required=False)
+    sistema = serializers.PrimaryKeyRelatedField(
+        queryset=Sistema.objects.all(),
+        required=False,
+        allow_null=True,
+    )
+    sistema_data = SistemaSerializer(required=False)
+    orden = serializers.IntegerField(min_value=1)
+    obligatorio = serializers.BooleanField(default=True)
+
+    def validate(self, attrs):
+        actividad = attrs.get("actividad")
+        actividad_data = attrs.get("actividad_data")
+        sistema = attrs.get("sistema")
+        sistema_data = attrs.get("sistema_data")
+
+        if not actividad and not actividad_data:
+            raise serializers.ValidationError(
+                {"actividad": "Selecciona una actividad existente o registra una nueva actividad checklist."}
+            )
+
+        if actividad and actividad_data:
+            raise serializers.ValidationError(
+                {"actividad_data": "Debes usar actividad existente o nueva actividad, no ambas."}
+            )
+
+        if sistema and sistema_data:
+            raise serializers.ValidationError(
+                {"sistema_data": "Debes usar sistema existente o nuevo sistema, no ambos."}
+            )
+
+        return attrs
+
+
+class ChecklistSerializer(serializers.ModelSerializer):
+    estado_label = serializers.CharField(source="get_estado_display", read_only=True)
+    creado_por_username = serializers.CharField(source="creado_por.username", read_only=True)
+    actividades = ChecklistActividadSerializer(
+        source="actividades_checklist",
+        many=True,
+        read_only=True,
+    )
+    actividades_payload = ChecklistActividadWriteSerializer(
+        many=True,
+        write_only=True,
+        required=False,
+    )
+    actividades_count = serializers.SerializerMethodField()
+
+    class Meta:
+        model = Checklist
+        fields = [
+            "id",
+            "motivo",
+            "fecha",
+            "estado",
+            "estado_label",
+            "creado_por",
+            "creado_por_username",
+            "actividades",
+            "actividades_payload",
+            "actividades_count",
+            "created_at",
+            "updated_at",
+        ]
+        read_only_fields = ["creado_por"]
+
+    def get_actividades_count(self, obj):
+        if hasattr(obj, "actividades_checklist"):
+            return obj.actividades_checklist.count()
+        return 0
+
+    def validate_motivo(self, value):
+        return str(value or "").strip()
+
+    def validate(self, attrs):
+        actividades_payload = attrs.get("actividades_payload")
+        if actividades_payload:
+            ordenes = [item["orden"] for item in actividades_payload]
+            if len(ordenes) != len(set(ordenes)):
+                raise serializers.ValidationError(
+                    {"actividades_payload": "No se puede repetir el mismo orden dentro del checklist."}
+                )
+
+        return attrs
+
+    def _resolve_actividad(self, payload):
+        actividad = payload.get("actividad")
+        if actividad:
+            return actividad
+
+        actividad_data = payload.get("actividad_data") or {}
+        return ActividadChecklist.objects.create(**actividad_data)
+
+    def _resolve_sistema(self, payload):
+        sistema = payload.get("sistema")
+        if sistema:
+            return sistema
+
+        sistema_data = payload.get("sistema_data")
+        if not sistema_data:
+            return None
+
+        return Sistema.objects.create(**sistema_data)
+
+    def _create_relaciones(self, checklist, actividades_payload):
+        relaciones = []
+        for payload in actividades_payload:
+            actividad = self._resolve_actividad(payload)
+            sistema = self._resolve_sistema(payload)
+            relaciones.append(
+                ChecklistActividad(
+                    checklist=checklist,
+                    actividad=actividad,
+                    sistema=sistema,
+                    orden=payload["orden"],
+                    obligatorio=payload.get("obligatorio", True),
+                )
+            )
+
+        ChecklistActividad.objects.bulk_create(relaciones)
+
+    def create(self, validated_data):
+        actividades_payload = validated_data.pop("actividades_payload", [])
+        request = self.context.get("request")
+        if request and request.user and request.user.is_authenticated:
+            validated_data["creado_por"] = request.user
+
+        with transaction.atomic():
+            checklist = Checklist.objects.create(**validated_data)
+            self._create_relaciones(checklist, actividades_payload)
+
+        return checklist
+
+    def update(self, instance, validated_data):
+        actividades_payload = validated_data.pop("actividades_payload", None)
+
+        for attr, value in validated_data.items():
+            setattr(instance, attr, value)
+
+        with transaction.atomic():
+            instance.save()
+            if actividades_payload is not None:
+                instance.actividades_checklist.all().delete()
+                self._create_relaciones(instance, actividades_payload)
+
+        return instance
+
+
+class ChecklistEjecucionSerializer(serializers.ModelSerializer):
+    codigo = serializers.CharField(read_only=True)
+    checklist_motivo = serializers.CharField(source="checklist.motivo", read_only=True)
+    checklist_estado = serializers.CharField(source="checklist.estado", read_only=True)
+    realizado_por_username = serializers.CharField(source="realizado_por.username", read_only=True)
+    estado_label = serializers.CharField(source="get_estado_display", read_only=True)
+    maquinaria_nombre = serializers.SerializerMethodField()
+    lugar_nombre = serializers.CharField(source="lugar.nombre", read_only=True)
+    respuestas_count = serializers.SerializerMethodField()
+
+    class Meta:
+        model = ChecklistEjecucion
+        fields = [
+            "id",
+            "codigo",
+            "checklist",
+            "checklist_motivo",
+            "checklist_estado",
+            "fecha",
+            "fecha_inicio",
+            "fecha_fin",
+            "hora_inicio",
+            "hora_fin",
+            "horometro",
+            "maquinaria",
+            "maquinaria_nombre",
+            "lugar",
+            "lugar_nombre",
+            "motivo",
+            "realizado_por",
+            "realizado_por_username",
+            "estado",
+            "estado_label",
+            "respuestas_count",
+            "created_at",
+            "updated_at",
+        ]
+        read_only_fields = ["realizado_por", "codigo"]
+
+    def get_respuestas_count(self, obj):
+        if hasattr(obj, "respuestas"):
+            return obj.respuestas.count()
+        return 0
+
+    def get_maquinaria_nombre(self, obj):
+        if not obj.maquinaria_id:
+            return ""
+        codigo = getattr(obj.maquinaria, "codigo_maquina", "")
+        nombre = getattr(obj.maquinaria, "nombre", "")
+        return " - ".join(part for part in [codigo, nombre] if part)
+
+    def validate_motivo(self, value):
+        return str(value or "").strip()
+
+    def validate(self, attrs):
+        fecha_inicio = attrs.get("fecha_inicio")
+        fecha_fin = attrs.get("fecha_fin")
+        hora_inicio = attrs.get("hora_inicio")
+        hora_fin = attrs.get("hora_fin")
+
+        if self.instance:
+            fecha_inicio = fecha_inicio if "fecha_inicio" in attrs else self.instance.fecha_inicio
+            fecha_fin = fecha_fin if "fecha_fin" in attrs else self.instance.fecha_fin
+            hora_inicio = hora_inicio if "hora_inicio" in attrs else self.instance.hora_inicio
+            hora_fin = hora_fin if "hora_fin" in attrs else self.instance.hora_fin
+
+        if fecha_inicio and fecha_fin and fecha_fin < fecha_inicio:
+            raise serializers.ValidationError(
+                {"fecha_fin": "La fecha final no puede ser menor que la fecha inicial."}
+            )
+
+        if (
+            fecha_inicio
+            and fecha_fin
+            and fecha_inicio == fecha_fin
+            and hora_inicio
+            and hora_fin
+            and hora_fin < hora_inicio
+        ):
+            raise serializers.ValidationError(
+                {"hora_fin": "La hora final no puede ser menor que la hora inicial."}
+            )
+
+        return attrs
+
+    def create(self, validated_data):
+        request = self.context.get("request")
+        if request and request.user and request.user.is_authenticated:
+            validated_data["realizado_por"] = request.user
+        if validated_data.get("fecha_inicio") and not validated_data.get("fecha"):
+            validated_data["fecha"] = validated_data["fecha_inicio"]
+        return super().create(validated_data)
+
+    def update(self, instance, validated_data):
+        if "fecha_inicio" in validated_data and validated_data.get("fecha_inicio"):
+            validated_data["fecha"] = validated_data["fecha_inicio"]
+        return super().update(instance, validated_data)
+
+
+class ChecklistRespuestaSerializer(serializers.ModelSerializer):
+    checklist_actividad_detalle = ChecklistActividadSerializer(
+        source="checklist_actividad",
+        read_only=True,
+    )
+
+    class Meta:
+        model = ChecklistRespuesta
+        fields = [
+            "id",
+            "ejecucion",
+            "checklist_actividad",
+            "checklist_actividad_detalle",
+            "vb",
+            "valor_texto",
+            "valor_numero",
+            "valor_booleano",
+            "valor_opcion",
+            "observacion",
+            "created_at",
+            "updated_at",
+        ]
+
+    def validate_valor_texto(self, value):
+        return str(value or "").strip()
+
+    def validate_valor_opcion(self, value):
+        return str(value or "").strip()
+
+    def validate_observacion(self, value):
+        return str(value or "").strip()
+
+
+class EventoSerializer(serializers.ModelSerializer):
+    estandarizacion_codigo = serializers.CharField(
+        source="estandarizacion.codigo",
+        read_only=True,
+    )
+    estandarizacion_nombre = serializers.CharField(
+        source="estandarizacion.nombre_tarea",
+        read_only=True,
+    )
+
+    class Meta:
+        model = Evento
+        fields = [
+            "id",
+            "nombre",
+            "clasificacion",
+            "fecha",
+            "estandarizacion",
+            "estandarizacion_codigo",
+            "estandarizacion_nombre",
+            "created_at",
+            "updated_at",
+        ]
+
+
+class AsistenciaSerializer(serializers.ModelSerializer):
+    trabajador_nombre = serializers.SerializerMethodField()
+    evento_nombre = serializers.CharField(source="evento.nombre", read_only=True)
+
+    class Meta:
+        model = Asistencia
+        fields = [
+            "id",
+            "trabajador",
+            "trabajador_nombre",
+            "asistencia",
+            "evento",
+            "evento_nombre",
+            "created_at",
+            "updated_at",
+        ]
+
+    def get_trabajador_nombre(self, obj):
+        return f"{obj.trabajador.nombres} {obj.trabajador.apellidos}".strip()
+
+
+class ReporteOrdenSerializer(serializers.ModelSerializer):
+    detalles_supervisor = serializers.SerializerMethodField()
+    estado_label = serializers.CharField(source="get_estado_display", read_only=True)
+    orden_trabajo_codigo = serializers.CharField(
+        source="orden_trabajo.codigo_orden",
+        read_only=True,
+    )
+    orden_trabajo_display = serializers.SerializerMethodField()
+
+    class Meta:
+        model = ReporteOrden
+        fields = [
+            "id",
+            "codigo",
+            "fecha",
+            "orden_trabajo",
+            "orden_trabajo_codigo",
+            "orden_trabajo_display",
+            "estado",
+            "estado_label",
+            "detalles_supervisor",
+            "epp",
+            "herramientas",
+            "pregunta_1",
+            "pregunta_2",
+            "pregunta_3",
+            "pregunta_4",
+            "pregunta_5",
+            "pregunta_6",
+            "descripcion_tarea",
+            "created_at",
+            "updated_at",
+        ]
+        read_only_fields = ["codigo"]
+
+    def get_orden_trabajo_display(self, obj):
+        if not obj.orden_trabajo_id:
+            return "Sin orden asociada"
+        maquinaria = getattr(obj.orden_trabajo, "maquinaria", None)
+        maquinaria_label = (
+            f"{maquinaria.codigo_maquina} - {maquinaria.nombre}"
+            if maquinaria
+            else f"OT {obj.orden_trabajo.codigo_orden}"
+        )
+        return f"{obj.orden_trabajo.codigo_orden} | {maquinaria_label}"
+
+    def get_detalles_supervisor(self, obj):
+        detalles = obj.detalles_supervisor.all().order_by("id")
+        return DetalleSupervisorSerializer(
+            detalles,
+            many=True,
+            context=self.context,
+        ).data
+
+    def validate(self, attrs):
+        orden_trabajo = attrs.get(
+            "orden_trabajo",
+            getattr(self.instance, "orden_trabajo", None),
+        )
+
+        if not orden_trabajo:
+            raise serializers.ValidationError(
+                {"orden_trabajo": "La orden de trabajo es obligatoria para el reporte."}
+            )
+
+        return attrs
+
+    def validate_orden_trabajo(self, value):
+        if value.lugar != OrdenTrabajo.Lugar.CAMPO:
+            raise serializers.ValidationError(
+                "Solo se pueden registrar reportes para ordenes de trabajo en Campo."
+            )
+
+        queryset = ReporteOrden.objects.filter(orden_trabajo=value)
+        if self.instance:
+            queryset = queryset.exclude(pk=self.instance.pk)
+        if queryset.exists():
+            raise serializers.ValidationError(
+                "Ya existe un reporte asociado a esta orden de trabajo."
+            )
+        return value
+
+    def validate_codigo(self, value):
+        return str(value or "").strip().upper()
+
+    def create(self, validated_data):
+        if validated_data.get("orden_trabajo") and not validated_data.get("fecha"):
+            validated_data["fecha"] = validated_data["orden_trabajo"].fecha
+        return super().create(validated_data)
+
+
+class ReporteIPERCSerializer(serializers.ModelSerializer):
+    class SecuenciaControlRiesgoSerializer(serializers.ModelSerializer):
+        class Meta:
+            model = SecuenciaControlRiesgo
+            fields = ["id", "actividad", "reporte_iperc"]
+
+    class GestionCambioSerializer(serializers.ModelSerializer):
+        estado_label = serializers.CharField(source="get_estado_display", read_only=True)
+
+        class Meta:
+            model = GestionCambio
+            fields = [
+                "id",
+                "implementacion",
+                "estado",
+                "estado_label",
+                "observacion",
+                "iperc",
+            ]
+
+    class IPERCSerializer(serializers.ModelSerializer):
+        EVALUACION_VALID_VALUES = {"", "ALTO", "MEDIO", "BAJO"}
+        gestiones_cambio = serializers.SerializerMethodField()
+
+        class Meta:
+            model = IPERC
+            fields = [
+                "id",
+                "reporte_iperc",
+                "descripcion_peligro",
+                "consecuencia_peligro",
+                "evaluacion_iperc",
+                "evaluacion_riesgo_residual",
+                "gestiones_cambio",
+            ]
+
+        def get_gestiones_cambio(self, obj):
+            queryset = obj.gestiones_cambio.all().order_by("id")
+            return ReporteIPERCSerializer.GestionCambioSerializer(
+                queryset,
+                many=True,
+                context=self.context,
+            ).data
+
+        def _validate_evaluacion(self, value, field_label):
+            normalized = str(value or "").strip().upper()
+            if normalized not in self.EVALUACION_VALID_VALUES:
+                raise serializers.ValidationError(
+                    f"{field_label} solo permite los valores ALTO, MEDIO o BAJO."
+                )
+            return normalized
+
+        def validate_evaluacion_iperc(self, value):
+            return self._validate_evaluacion(value, "La evaluacion IPERC")
+
+        def validate_evaluacion_riesgo_residual(self, value):
+            return self._validate_evaluacion(
+                value,
+                "La evaluacion de riesgo residual",
+            )
+
+    class MedidaCorrectivaSerializer(serializers.ModelSerializer):
+        supervisor_nombre = serializers.SerializerMethodField()
+
+        class Meta:
+            model = MedidaCorrectiva
+            fields = [
+                "id",
+                "detalle",
+                "reporte_iperc",
+                "supervisor",
+                "supervisor_nombre",
+            ]
+
+        def get_supervisor_nombre(self, obj):
+            if not obj.supervisor_id:
+                return ""
+            return f"{obj.supervisor.nombres} {obj.supervisor.apellidos}".strip()
+
+    orden_trabajo_codigo = serializers.CharField(
+        source="orden_trabajo.codigo_orden",
+        read_only=True,
+    )
+    orden_trabajo_display = serializers.SerializerMethodField()
+    motivo_label = serializers.CharField(source="get_motivo_display", read_only=True)
+    ipercs_count = serializers.SerializerMethodField()
+    supervisor_pendiente = serializers.SerializerMethodField()
+    ipercs = serializers.SerializerMethodField()
+    secuencias_control_riesgo = serializers.SerializerMethodField()
+    medidas_correctivas = serializers.SerializerMethodField()
+
+    class Meta:
+        model = ReporteIPERC
+        fields = [
+            "id",
+            "codigo",
+            "fecha",
+            "orden_trabajo",
+            "orden_trabajo_codigo",
+            "orden_trabajo_display",
+            "tarea",
+            "motivo",
+            "motivo_label",
+            "ipercs_count",
+            "supervisor_pendiente",
+            "ipercs",
+            "secuencias_control_riesgo",
+            "medidas_correctivas",
+            "created_at",
+            "updated_at",
+        ]
+        read_only_fields = ["codigo"]
+
+    def get_orden_trabajo_display(self, obj):
+        if not obj.orden_trabajo_id:
+            return "Sin orden asociada"
+        maquinaria = getattr(obj.orden_trabajo, "maquinaria", None)
+        maquinaria_label = (
+            f"{maquinaria.codigo_maquina} - {maquinaria.nombre}"
+            if maquinaria
+            else f"OT {obj.orden_trabajo.codigo_orden}"
+        )
+        return f"{obj.orden_trabajo.codigo_orden} | {maquinaria_label}"
+
+    def get_ipercs_count(self, obj):
+        if hasattr(obj, "ipercs"):
+            return obj.ipercs.count()
+        return 0
+
+    def get_supervisor_pendiente(self, obj):
+        supervisor = obj.detalles_supervisor.filter(tipo="").order_by("id").first()
+        if not supervisor and obj.orden_trabajo_id:
+            reporte_orden = obj.orden_trabajo.reportes_orden.order_by("id").first()
+            if reporte_orden:
+                supervisor = reporte_orden.detalles_supervisor.filter(tipo="").order_by("id").first()
+        if not supervisor:
+            return None
+        return DetalleSupervisorSerializer(supervisor, context=self.context).data
+
+    def get_ipercs(self, obj):
+        queryset = obj.ipercs.prefetch_related("gestiones_cambio").all().order_by("id")
+        return ReporteIPERCSerializer.IPERCSerializer(
+            queryset,
+            many=True,
+            context=self.context,
+        ).data
+
+    def get_secuencias_control_riesgo(self, obj):
+        queryset = obj.secuencias_control_riesgo.all().order_by("id")
+        return ReporteIPERCSerializer.SecuenciaControlRiesgoSerializer(
+            queryset,
+            many=True,
+            context=self.context,
+        ).data
+
+    def get_medidas_correctivas(self, obj):
+        queryset = obj.medidas_correctivas.select_related("supervisor").all().order_by("id")
+        return ReporteIPERCSerializer.MedidaCorrectivaSerializer(
+            queryset,
+            many=True,
+            context=self.context,
+        ).data
+
+    def validate(self, attrs):
+        orden_trabajo = attrs.get(
+            "orden_trabajo",
+            getattr(self.instance, "orden_trabajo", None),
+        )
+        tarea = attrs.get(
+            "tarea",
+            getattr(self.instance, "tarea", ""),
+        )
+
+        if not orden_trabajo and not str(tarea or "").strip():
+            raise serializers.ValidationError(
+                {"tarea": "La tarea es obligatoria cuando el reporte IPERC no tiene una orden de trabajo asociada."}
+            )
+
+        return attrs
+
+    def validate_orden_trabajo(self, value):
+        if value is None:
+            return value
+        if value.lugar != OrdenTrabajo.Lugar.CAMPO:
+            raise serializers.ValidationError(
+                "Solo se pueden registrar reportes IPERC para ordenes de trabajo en Campo."
+            )
+        return value
+
+    def validate_tarea(self, value):
+        return str(value or "").strip()
+
+    def create(self, validated_data):
+        if validated_data.get("orden_trabajo") and not validated_data.get("fecha"):
+            validated_data["fecha"] = validated_data["orden_trabajo"].fecha
+        return super().create(validated_data)
+
+
+class DetalleSupervisorSerializer(serializers.ModelSerializer):
+    tipo_label = serializers.CharField(source="get_tipo_display", read_only=True)
+    firma_url = serializers.SerializerMethodField()
+
+    class Meta:
+        model = DetalleSupervisor
+        fields = [
+            "id",
+            "hora",
+            "apellidos",
+            "nombres",
+            "dni",
+            "tipo",
+            "tipo_label",
+            "observaciones",
+            "firma",
+            "firma_url",
+            "reporte_orden",
+            "reporte_iperc",
+        ]
+
+    def get_firma_url(self, obj):
+        request = self.context.get("request")
+        if not obj.firma:
+            return None
+        if request is None:
+            return obj.firma.url
+        return request.build_absolute_uri(obj.firma.url)
+
+
+class SoporteVisualDocumentoEstandarizadoSerializer(serializers.ModelSerializer):
+    imagen_url = serializers.SerializerMethodField()
+
+    class Meta:
+        model = SoporteVisualDocumentoEstandarizado
+        fields = ["id", "imagen", "imagen_url"]
+
+    def get_imagen_url(self, obj):
+        request = self.context.get("request")
+        if not obj.imagen:
+            return None
+        if request is None:
+            return obj.imagen.url
+        return request.build_absolute_uri(obj.imagen.url)
+
+
+class ConexionDetalleDocumentoSerializer(serializers.ModelSerializer):
+    tipo_label = serializers.CharField(source="get_tipo_display", read_only=True)
+    origen_actividad = serializers.CharField(source="origen.actividad", read_only=True)
+    destino_actividad = serializers.CharField(source="destino.actividad", read_only=True)
+
+    class Meta:
+        model = ConexionDetalleDocumento
+        fields = [
+            "id",
+            "documento",
+            "origen",
+            "origen_actividad",
+            "destino",
+            "destino_actividad",
+            "condicion",
+            "tipo",
+            "tipo_label",
+        ]
+
+    def validate(self, attrs):
+        documento = attrs.get(
+            "documento",
+            getattr(self.instance, "documento", None),
+        )
+        origen = attrs.get(
+            "origen",
+            getattr(self.instance, "origen", None),
+        )
+        destino = attrs.get(
+            "destino",
+            getattr(self.instance, "destino", None),
+        )
+
+        if origen and destino and origen.id == destino.id:
+            raise serializers.ValidationError(
+                {"destino": "El nodo destino no puede ser el mismo que el nodo origen."}
+            )
+
+        if documento and origen and origen.encabezado_documento_id != documento.id:
+            raise serializers.ValidationError(
+                {"origen": "El nodo origen no pertenece al documento indicado."}
+            )
+
+        if documento and destino and destino.encabezado_documento_id != documento.id:
+            raise serializers.ValidationError(
+                {"destino": "El nodo destino no pertenece al documento indicado."}
+            )
+
+        return attrs
+
+
+class EncabezadoDocumentoEstandarizacionSerializer(serializers.ModelSerializer):
+    revision_nombre = serializers.SerializerMethodField()
+    tarea_codigo = serializers.CharField(
+        source="tarea_por_estandarizar.codigo",
+        read_only=True,
+    )
+    tarea_nombre = serializers.CharField(
+        source="tarea_por_estandarizar.nombre_tarea",
+        read_only=True,
+    )
+
+    class Meta:
+        model = EncabezadoDocumentoEstandarizacion
+        fields = [
+            "id",
+            "area",
+            "codigo",
+            "revision",
+            "revision_nombre",
+            "fecha",
+            "tarea_por_estandarizar",
+            "tarea_codigo",
+            "tarea_nombre",
+        ]
+        read_only_fields = ["area", "codigo", "revision"]
+
+    def get_revision_nombre(self, obj):
+        if not obj.revision_id:
+            return ""
+        return f"{obj.revision.nombres} {obj.revision.apellidos}".strip()
+
+    def validate_tarea_por_estandarizar(self, value):
+        queryset = EncabezadoDocumentoEstandarizacion.objects.filter(
+            tarea_por_estandarizar=value
+        )
+        if self.instance:
+            queryset = queryset.exclude(pk=self.instance.pk)
+        if queryset.exists():
+            raise serializers.ValidationError(
+                "Ya existe un documento de estandarizacion para esta tarea."
+            )
+        return value
+
+    def create(self, validated_data):
+        request = self.context.get("request")
+        tarea = validated_data["tarea_por_estandarizar"]
+        validated_data["codigo"] = tarea.codigo
+
+        if request and request.user and request.user.is_authenticated:
+            validated_data["creado_por"] = request.user
+
+        return super().create(validated_data)
+
+    def update(self, instance, validated_data):
+        validated_data.pop("codigo", None)
+        validated_data.pop("area", None)
+        validated_data.pop("revision", None)
+        return super().update(instance, validated_data)
+
+
+class DetalleDocumentoEstandarizadoSerializer(serializers.ModelSerializer):
+    soportes_visuales = SoporteVisualDocumentoEstandarizadoSerializer(
+        many=True,
+        read_only=True,
+    )
+    soportes_visuales_count = serializers.SerializerMethodField()
+    tipo_nodo_label = serializers.CharField(source="get_tipo_nodo_display", read_only=True)
+    conexiones_salida = ConexionDetalleDocumentoSerializer(many=True, read_only=True)
+    nuevas_imagenes = serializers.ListField(
+        child=serializers.ImageField(),
+        write_only=True,
+        required=False,
+    )
+
+    class Meta:
+        model = DetalleDocumentoEstandarizado
+        fields = [
+            "id",
+            "encabezado_documento",
+            "numero",
+            "recurso",
+            "actividad",
+            "detalle_actividad",
+            "tipo_nodo",
+            "tipo_nodo_label",
+            "posicion_x",
+            "posicion_y",
+            "soportes_visuales",
+            "soportes_visuales_count",
+            "conexiones_salida",
+            "nuevas_imagenes",
+            "responsable",
+            "nota_importante",
+            "consideraciones",
+        ]
+        extra_kwargs = {
+            "numero": {"required": False},
+        }
+
+    def get_soportes_visuales_count(self, obj):
+        return obj.soportes_visuales.count()
+
+    def validate_numero(self, value):
+        if value <= 0:
+            raise serializers.ValidationError("El numero debe ser mayor a cero.")
+        return value
+
+    def create(self, validated_data):
+        imagenes = validated_data.pop("nuevas_imagenes", [])
+        if not validated_data.get("numero"):
+            encabezado = validated_data["encabezado_documento"]
+            ultimo = (
+                DetalleDocumentoEstandarizado.objects
+                .filter(encabezado_documento=encabezado)
+                .aggregate(max_numero=Max("numero"))
+                .get("max_numero")
+                or 0
+            )
+            validated_data["numero"] = ultimo + 1
+
+        detalle = super().create(validated_data)
+
+        for imagen in imagenes:
+            SoporteVisualDocumentoEstandarizado.objects.create(
+                detalle_documento=detalle,
+                imagen=imagen,
+            )
+
+        return detalle
+
+    def update(self, instance, validated_data):
+        imagenes = validated_data.pop("nuevas_imagenes", [])
+        detalle = super().update(instance, validated_data)
+
+        for imagen in imagenes:
+            SoporteVisualDocumentoEstandarizado.objects.create(
+                detalle_documento=detalle,
+                imagen=imagen,
+            )
+
+        return detalle
 
 
 class DimensionSerializer(serializers.ModelSerializer):

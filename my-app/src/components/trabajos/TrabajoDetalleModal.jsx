@@ -65,6 +65,7 @@ export default function TrabajoDetalleModal({ open, trabajoId, onClose, onUpdate
   const [unidadesPorActividad, setUnidadesPorActividad] = useState({});
   const [ordenesRequerimiento, setOrdenesRequerimiento] = useState([]);
   const [loadingRequerimientos, setLoadingRequerimientos] = useState(false);
+  const [generatingResumen, setGeneratingResumen] = useState(false);
 
   /* =========================
      FLAGS DE ESTADO
@@ -103,6 +104,26 @@ export default function TrabajoDetalleModal({ open, trabajoId, onClose, onUpdate
 
   const getToday = () => getTodayDateInputValue();
   const getCurrentTime = () => new Date().toTimeString().slice(0, 5);
+  const getOptionLabel = (options, value) =>
+    options.find((option) => option.value === value)?.label || value || "";
+  const getTecnicoNombre = (tecnicoId) => {
+    const tecnico = tecnicos.find((item) => Number(item.id) === Number(tecnicoId));
+    if (!tecnico) return "";
+    return [tecnico.nombres, tecnico.apellidos].filter(Boolean).join(" ").trim();
+  };
+  const getMaquinariaResumenLabel = () => {
+    const maquinaria = maquinarias.find((item) => Number(item.id) === Number(form?.maquinaria));
+    if (!maquinaria) {
+      return trabajo?.maquinaria_nombre || "Sin maquinaria";
+    }
+    return [maquinaria.codigo_maquina, maquinaria.nombre].filter(Boolean).join(" - ");
+  };
+  const getTecnicosResumenLabel = () => {
+    const nombres = (form?.tecnicos || [])
+      .map((tecnicoId) => getTecnicoNombre(tecnicoId))
+      .filter(Boolean);
+    return nombres.length ? nombres.join(", ") : "Sin tecnicos asignados";
+  };
 
   const loadOrdenesRequerimiento = async () => {
     if (!trabajoId) return;
@@ -357,6 +378,55 @@ export default function TrabajoDetalleModal({ open, trabajoId, onClose, onUpdate
     setShowFinalizarModal(false);
 
     onClose();
+  };
+
+  const handleDownloadResumen = async () => {
+    if (!trabajo || !form || generatingResumen) return;
+
+    setGeneratingResumen(true);
+    try {
+      const actividadesResumen = await Promise.all(
+        actividadesRegistradas.map(async (actividad) => {
+          const repuestos = Array.isArray(actividad.repuestos)
+            ? actividad.repuestos
+            : (await movimientoRepuestoAPI.list({ actividad: actividad.id })).data || [];
+          const consumibles = Array.isArray(actividad.consumibles)
+            ? actividad.consumibles
+            : (await movimientoConsumibleAPI.list({ actividad: actividad.id })).data || [];
+
+          return {
+            ...actividad,
+            repuestos,
+            consumibles,
+          };
+        })
+      );
+
+      const { generateTrabajoResumenPdf } = await import("@/lib/trabajoResumenPdf");
+
+      await generateTrabajoResumenPdf({
+        trabajo: {
+          ...trabajo,
+          fecha: form.fecha || trabajo.fecha,
+          horometro: form.horometro || trabajo.horometro,
+          hora_inicio: form.hora_inicio || trabajo.hora_inicio,
+          hora_fin: form.hora_fin || trabajo.hora_fin,
+          prioridad_label: getOptionLabel(PRIORIDADES, form.prioridad),
+          lugar_label: getOptionLabel(LUGARES, form.lugar),
+          estado_equipo_label: getOptionLabel(ESTADOS_EQUIPO, form.estado_equipo),
+          ubicacion_detalle: form.ubicacion_detalle || trabajo.ubicacion_detalle,
+          observaciones: form.observaciones || trabajo.observaciones,
+        },
+        maquinariaLabel: getMaquinariaResumenLabel(),
+        tecnicosLabel: getTecnicosResumenLabel(),
+        actividades: actividadesResumen,
+      });
+    } catch (error) {
+      console.error("Error generando resumen PDF:", error);
+      alert("No se pudo generar el resumen en PDF.");
+    } finally {
+      setGeneratingResumen(false);
+    }
   };
 
   const hayModalHijoAbierto =
@@ -793,6 +863,27 @@ export default function TrabajoDetalleModal({ open, trabajoId, onClose, onUpdate
         {/* FOOTER STICKY CON ACCIONES */}
         <div className="sticky bottom-0 bg-gray-50 border-t border-gray-200 px-6 py-4 rounded-b-xl flex-shrink-0">
           <div className="flex justify-end gap-3">
+            {esFinalizado && (
+              <button
+                className="px-5 py-2.5 text-sm font-medium text-white bg-[#173569]
+                         rounded-lg hover:bg-[#0f2346] focus:outline-none
+                         focus:ring-2 focus:ring-[#173569] focus:ring-offset-2
+                         transition-all duration-200 disabled:opacity-60 flex items-center gap-2"
+                onClick={handleDownloadResumen}
+                disabled={generatingResumen}
+              >
+                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    strokeWidth={2}
+                    d="M12 3v12m0 0l4-4m-4 4l-4-4m-3 8h14"
+                  />
+                </svg>
+                {generatingResumen ? "Generando..." : "Resumen"}
+              </button>
+            )}
+
             {esPendiente && (
               <button
                 className="px-5 py-2.5 text-sm font-medium text-white bg-[#84cc16]

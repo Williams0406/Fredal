@@ -15,6 +15,7 @@ import {
   LogOut,
   Package,
   Ruler,
+  ShieldAlert,
   ShoppingCart,
   Tractor,
   Truck,
@@ -233,6 +234,10 @@ export default function Sidebar({ collapsed, onToggle, onMobileClose }) {
 
 function getIconForPath(path) {
   if (path === "/dashboard") return LayoutDashboard;
+  if (path.includes("asistencia")) return Users;
+  if (path.includes("checklist")) return ClipboardList;
+  if (path.includes("iperc")) return ShieldAlert;
+  if (path.includes("proceso")) return ClipboardList;
   if (path.includes("trabajo")) return ClipboardList;
   if (path.includes("compra")) return ShoppingCart;
   if (path.includes("proveedor")) return Truck;

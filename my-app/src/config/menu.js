@@ -67,6 +67,31 @@ export const MENU_ITEMS = [
     path: "/gestion",
     roles: ["admin", "Jefe de Tecnicos", "Jefe de Almaceneros", "ManageCompras"],
   },
+  {
+    label: "Procesos",
+    path: "/procesos",
+    roles: ["admin", "Jefe de Tecnicos", "Jefe de Almaceneros", "ManageCompras", "Jefe de Mantenimiento"],
+  },
+  {
+    label: "Reporte",
+    path: "/reportes",
+    roles: ["admin", "Jefe de Tecnicos", "Jefe de Almaceneros", "Jefe de Mantenimiento", "Tecnico"],
+  },
+  {
+    label: "IPERC",
+    path: "/iperc",
+    roles: ["admin", "Jefe de Tecnicos", "Jefe de Almaceneros", "Jefe de Mantenimiento", "Tecnico"],
+  },
+  {
+    label: "Checklist",
+    path: "/checklist",
+    roles: ["admin", "Jefe de Tecnicos", "Jefe de Almaceneros", "Jefe de Mantenimiento", "ManageCompras"],
+  },
+  {
+    label: "Asistencia",
+    path: "/asistencia",
+    roles: ["admin", "Jefe de Tecnicos", "Jefe de Almaceneros", "Jefe de Mantenimiento", "ManageCompras"],
+  },
 
   {
     label: "Trabajadores",

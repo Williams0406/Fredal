@@ -281,6 +281,71 @@ class CatalogoPermission(BasePermission):
 
         return request.method in SAFE_METHODS
 
+
+class EstandarizacionPermission(BasePermission):
+    """
+    Procesos de estandarizacion:
+    - Admin / Jefe de Tecnicos / Jefe de Almaceneros / Jefe de Mantenimiento / ManageCompras -> CRUD
+    - Otros autenticados -> solo lectura
+    """
+
+    def has_permission(self, request, view):
+        user = request.user
+
+        if not user or not user.is_authenticated:
+            return False
+
+        if user.is_staff:
+            return True
+
+        if user_in_any_group(
+            user,
+            [
+                "Jefe de Tecnicos",
+                "Jefe de Almaceneros",
+                "Jefe de Mantenimiento",
+                "ManageCompras",
+            ],
+        ):
+            return True
+
+        return request.method in SAFE_METHODS
+
+
+class ReporteOrdenPermission(BasePermission):
+    """
+    Reportes de trabajo:
+    - Admin / Jefe de Tecnicos / Jefe de Almaceneros / Jefe de Mantenimiento -> CRUD
+    - Tecnico -> ver y actualizar
+    - Otros autenticados -> solo lectura
+    """
+
+    def has_permission(self, request, view):
+        user = request.user
+
+        if not user or not user.is_authenticated:
+            return False
+
+        if user.is_staff:
+            return True
+
+        if user_in_any_group(
+            user,
+            [
+                "Jefe de Tecnicos",
+                "Jefe de Almaceneros",
+                "Jefe de Mantenimiento",
+            ],
+        ):
+            return True
+
+        if user_in_group(user, "Tecnico"):
+            if getattr(view, "action", "") == "crear_iperc":
+                return True
+            return request.method in ["GET", "HEAD", "OPTIONS", "PUT", "PATCH"]
+
+        return request.method in SAFE_METHODS
+
 class ProveedorPermission(BasePermission):
     """
     Proveedores:

@@ -6,12 +6,12 @@ from rest_framework.exceptions import PermissionDenied, ValidationError
 from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework.decorators import action
-from rest_framework.parsers import FormParser, MultiPartParser
+from rest_framework.parsers import FormParser, JSONParser, MultiPartParser
 from rest_framework import status
 from django.utils import timezone
 from datetime import timedelta
 from .permissions import IsAdmin
-from django.db.models import Avg, Count, Prefetch, Sum
+from django.db.models import Avg, Count, Max, Prefetch, Sum
 from decimal import Decimal
 from itertools import chain
 from datetime import datetime, time
@@ -29,6 +29,11 @@ from .models import (
     OrdenRequerimientoDetalle,
     Trabajador,
     OrdenTrabajo,
+    ReporteOrden,
+    ReporteIPERC,
+    IPERC,
+    GestionCambio,
+    DetalleSupervisor,
     ActividadTrabajo,
     ActividadTrabajoEvidencia,
     MovimientoRepuesto,
@@ -43,12 +48,26 @@ from .models import (
     Almacen,
     Cliente,
     UbicacionCliente,
+    EncabezadoDocumentoEstandarizacion,
+    DetalleDocumentoEstandarizado,
+    ConexionDetalleDocumento,
+    SecuenciaControlRiesgo,
+    MedidaCorrectiva,
     Dimension,
     UnidadMedida,
     UnidadRelacion,
     ItemGrupo,
     LoteConsumible,
+    TareaPorEstandarizar,
     TipoCambioDiario,
+    ActividadChecklist,
+    Checklist,
+    ChecklistActividad,
+    ChecklistEjecucion,
+    ChecklistRespuesta,
+    Sistema,
+    Evento,
+    Asistencia,
 )
 from .serializers import (
     UserSerializer,
@@ -81,11 +100,27 @@ from .serializers import (
     AlmacenSerializer,
     ClienteSerializer,
     UbicacionClienteSerializer,
+    ConexionDetalleDocumentoSerializer,
+    EncabezadoDocumentoEstandarizacionSerializer,
+    DetalleDocumentoEstandarizadoSerializer,
+    DetalleSupervisorSerializer,
+    ReporteOrdenSerializer,
+    ReporteIPERCSerializer,
+    ReporteIPERCSerializer as _ReporteIPERCSerializer,
+    TareaPorEstandarizarSerializer,
     DimensionSerializer,
     UnidadMedidaSerializer,
     UnidadRelacionSerializer,
     ItemGrupoSerializer,
     TipoCambioDiarioSerializer,
+    SistemaSerializer,
+    ActividadChecklistSerializer,
+    ChecklistSerializer,
+    ChecklistActividadSerializer,
+    ChecklistEjecucionSerializer,
+    ChecklistRespuestaSerializer,
+    EventoSerializer,
+    AsistenciaSerializer,
     convertir_cantidad_a_unidad_item,
     obtener_tecnico_responsable_planificado,
 )
@@ -93,6 +128,8 @@ from .permissions import (
     IsAdmin,
     ItemPermission,
     CatalogoPermission,
+    EstandarizacionPermission,
+    ReporteOrdenPermission,
     TrabajoPermission,
     CompraPermission,
     OrdenCompraPermission,
@@ -2713,6 +2750,396 @@ class UbicacionClienteViewSet(viewsets.ModelViewSet):
     queryset = UbicacionCliente.objects.select_related("cliente").all().order_by("cliente__nombre", "nombre")
     serializer_class = UbicacionClienteSerializer
     permission_classes = [CatalogoPermission]
+
+
+class SistemaViewSet(viewsets.ModelViewSet):
+    queryset = Sistema.objects.all().order_by("nombre", "id")
+    serializer_class = SistemaSerializer
+    permission_classes = [EstandarizacionPermission]
+
+
+class ActividadChecklistViewSet(viewsets.ModelViewSet):
+    queryset = (
+        ActividadChecklist.objects
+        .select_related("item")
+        .all()
+        .order_by("id")
+    )
+    serializer_class = ActividadChecklistSerializer
+    permission_classes = [EstandarizacionPermission]
+    filter_backends = [DjangoFilterBackend]
+    filterset_fields = ["tipo_respuesta", "activo", "item"]
+
+
+class ChecklistViewSet(viewsets.ModelViewSet):
+    queryset = (
+        Checklist.objects
+        .select_related("creado_por")
+        .prefetch_related(
+            "actividades_checklist",
+            "actividades_checklist__actividad",
+            "actividades_checklist__actividad__item",
+            "actividades_checklist__sistema",
+        )
+        .all()
+        .order_by("-fecha", "-created_at", "-id")
+    )
+    serializer_class = ChecklistSerializer
+    permission_classes = [EstandarizacionPermission]
+    filter_backends = [DjangoFilterBackend]
+    filterset_fields = ["estado"]
+
+
+class ChecklistActividadViewSet(viewsets.ModelViewSet):
+    queryset = (
+        ChecklistActividad.objects
+        .select_related("checklist", "actividad", "actividad__item", "sistema")
+        .all()
+        .order_by("checklist_id", "orden", "id")
+    )
+    serializer_class = ChecklistActividadSerializer
+    permission_classes = [EstandarizacionPermission]
+    filter_backends = [DjangoFilterBackend]
+    filterset_fields = ["checklist", "actividad", "sistema"]
+
+
+class ChecklistEjecucionViewSet(viewsets.ModelViewSet):
+    queryset = (
+        ChecklistEjecucion.objects
+        .select_related("checklist", "realizado_por", "maquinaria", "lugar")
+        .prefetch_related("respuestas")
+        .all()
+        .order_by("-fecha", "-created_at", "-id")
+    )
+    serializer_class = ChecklistEjecucionSerializer
+    permission_classes = [EstandarizacionPermission]
+    filter_backends = [DjangoFilterBackend]
+    filterset_fields = ["checklist", "estado", "realizado_por"]
+
+
+class ChecklistRespuestaViewSet(viewsets.ModelViewSet):
+    queryset = (
+        ChecklistRespuesta.objects
+        .select_related(
+            "ejecucion",
+            "checklist_actividad",
+            "checklist_actividad__actividad",
+            "checklist_actividad__actividad__item",
+            "checklist_actividad__sistema",
+        )
+        .all()
+        .order_by("ejecucion_id", "checklist_actividad_id", "id")
+    )
+    serializer_class = ChecklistRespuestaSerializer
+    permission_classes = [EstandarizacionPermission]
+    filter_backends = [DjangoFilterBackend]
+    filterset_fields = ["ejecucion", "checklist_actividad"]
+
+
+class EventoViewSet(viewsets.ModelViewSet):
+    queryset = (
+        Evento.objects
+        .select_related("estandarizacion")
+        .all()
+        .order_by("-fecha", "nombre", "id")
+    )
+    serializer_class = EventoSerializer
+    permission_classes = [EstandarizacionPermission]
+    filter_backends = [DjangoFilterBackend]
+    filterset_fields = ["estandarizacion"]
+
+
+class AsistenciaViewSet(viewsets.ModelViewSet):
+    queryset = (
+        Asistencia.objects
+        .select_related("trabajador", "evento")
+        .all()
+        .order_by("evento_id", "trabajador_id")
+    )
+    serializer_class = AsistenciaSerializer
+    permission_classes = [EstandarizacionPermission]
+    filter_backends = [DjangoFilterBackend]
+    filterset_fields = ["evento", "trabajador", "asistencia"]
+
+
+class TareaPorEstandarizarViewSet(viewsets.ModelViewSet):
+    queryset = (
+        TareaPorEstandarizar.objects
+        .select_related("item")
+        .all()
+        .order_by("codigo", "id")
+    )
+    serializer_class = TareaPorEstandarizarSerializer
+    permission_classes = [EstandarizacionPermission]
+
+
+class ReporteOrdenViewSet(viewsets.ModelViewSet):
+    queryset = (
+        ReporteOrden.objects
+        .select_related("orden_trabajo", "orden_trabajo__maquinaria")
+        .prefetch_related("detalles_supervisor")
+        .all()
+        .order_by("-fecha", "-id")
+    )
+    serializer_class = ReporteOrdenSerializer
+    permission_classes = [ReporteOrdenPermission]
+    filter_backends = [DjangoFilterBackend]
+    filterset_fields = ["estado", "orden_trabajo"]
+
+    @action(detail=True, methods=["post"])
+    def crear_iperc(self, request, pk=None):
+        reporte = self.get_object()
+
+        if not reporte.orden_trabajo_id:
+            raise ValidationError({"orden_trabajo": "El reporte no tiene una orden de trabajo asociada."})
+
+        reporte_iperc = ReporteIPERC.objects.create(
+            orden_trabajo=reporte.orden_trabajo,
+            fecha=reporte.fecha or reporte.orden_trabajo.fecha,
+            motivo=ReporteIPERC.Motivo.ACTIVIDAD_NUEVA,
+        )
+
+        serializer = ReporteIPERCSerializer(
+            reporte_iperc,
+            context=self.get_serializer_context(),
+        )
+        return Response(serializer.data, status=status.HTTP_201_CREATED)
+
+
+class ReporteIPERCViewSet(viewsets.ModelViewSet):
+    queryset = (
+        ReporteIPERC.objects
+        .select_related(
+            "orden_trabajo",
+            "orden_trabajo__maquinaria",
+        )
+        .prefetch_related(
+            "detalles_supervisor",
+            "ipercs",
+            "ipercs__gestiones_cambio",
+            "secuencias_control_riesgo",
+            "medidas_correctivas",
+            "medidas_correctivas__supervisor",
+        )
+        .all()
+        .order_by("-fecha", "-id")
+    )
+    serializer_class = ReporteIPERCSerializer
+    permission_classes = [ReporteOrdenPermission]
+    filter_backends = [DjangoFilterBackend]
+    filterset_fields = ["orden_trabajo", "motivo"]
+
+
+class IPERCViewSet(viewsets.ModelViewSet):
+    queryset = (
+        IPERC.objects
+        .select_related("reporte_iperc")
+        .prefetch_related("gestiones_cambio")
+        .all()
+        .order_by("reporte_iperc_id", "id")
+    )
+    serializer_class = _ReporteIPERCSerializer.IPERCSerializer
+    permission_classes = [ReporteOrdenPermission]
+    filter_backends = [DjangoFilterBackend]
+    filterset_fields = ["reporte_iperc"]
+
+
+class GestionCambioViewSet(viewsets.ModelViewSet):
+    queryset = (
+        GestionCambio.objects
+        .select_related("iperc", "iperc__reporte_iperc")
+        .all()
+        .order_by("iperc_id", "id")
+    )
+    serializer_class = _ReporteIPERCSerializer.GestionCambioSerializer
+    permission_classes = [ReporteOrdenPermission]
+    filter_backends = [DjangoFilterBackend]
+    filterset_fields = ["iperc"]
+
+
+class SecuenciaControlRiesgoViewSet(viewsets.ModelViewSet):
+    queryset = (
+        SecuenciaControlRiesgo.objects
+        .select_related("reporte_iperc")
+        .all()
+        .order_by("reporte_iperc_id", "id")
+    )
+    serializer_class = _ReporteIPERCSerializer.SecuenciaControlRiesgoSerializer
+    permission_classes = [ReporteOrdenPermission]
+    filter_backends = [DjangoFilterBackend]
+    filterset_fields = ["reporte_iperc"]
+
+
+class MedidaCorrectivaViewSet(viewsets.ModelViewSet):
+    queryset = (
+        MedidaCorrectiva.objects
+        .select_related("reporte_iperc", "supervisor")
+        .all()
+        .order_by("reporte_iperc_id", "id")
+    )
+    serializer_class = _ReporteIPERCSerializer.MedidaCorrectivaSerializer
+    permission_classes = [ReporteOrdenPermission]
+    filter_backends = [DjangoFilterBackend]
+    filterset_fields = ["reporte_iperc", "supervisor"]
+
+
+class DetalleSupervisorViewSet(viewsets.ModelViewSet):
+    queryset = (
+        DetalleSupervisor.objects
+        .select_related("reporte_orden", "reporte_iperc")
+        .all()
+        .order_by("id")
+    )
+    serializer_class = DetalleSupervisorSerializer
+    permission_classes = [ReporteOrdenPermission]
+    filter_backends = [DjangoFilterBackend]
+    filterset_fields = ["reporte_orden", "reporte_iperc", "tipo"]
+    parser_classes = [JSONParser, FormParser, MultiPartParser]
+
+    def perform_create(self, serializer):
+        instance = serializer.save()
+        if instance.reporte_orden_id:
+            instance.reporte_orden.ensure_supervisor_slots()
+
+    def perform_update(self, serializer):
+        instance = serializer.save()
+        if instance.reporte_orden_id:
+            instance.reporte_orden.ensure_supervisor_slots()
+
+
+class EncabezadoDocumentoEstandarizacionViewSet(viewsets.ModelViewSet):
+    queryset = (
+        EncabezadoDocumentoEstandarizacion.objects
+        .select_related("revision", "tarea_por_estandarizar", "creado_por")
+        .all()
+        .order_by("-created_at", "-id")
+    )
+    serializer_class = EncabezadoDocumentoEstandarizacionSerializer
+    permission_classes = [EstandarizacionPermission]
+    filter_backends = [DjangoFilterBackend]
+    filterset_fields = ["tarea_por_estandarizar"]
+
+
+class DetalleDocumentoEstandarizadoViewSet(viewsets.ModelViewSet):
+    queryset = (
+        DetalleDocumentoEstandarizado.objects
+        .select_related("encabezado_documento", "encabezado_documento__tarea_por_estandarizar")
+        .prefetch_related("soportes_visuales", "conexiones_salida", "conexiones_entrada")
+        .all()
+        .order_by("encabezado_documento_id", "numero", "id")
+    )
+    serializer_class = DetalleDocumentoEstandarizadoSerializer
+    permission_classes = [EstandarizacionPermission]
+    filter_backends = [DjangoFilterBackend]
+    filterset_fields = ["encabezado_documento"]
+    parser_classes = [JSONParser, FormParser, MultiPartParser]
+
+    @staticmethod
+    def _renumerar_documento(encabezado):
+        detalles = list(
+            DetalleDocumentoEstandarizado.objects
+            .filter(encabezado_documento=encabezado)
+            .order_by("numero", "id")
+        )
+        cambios = []
+        for index, detalle in enumerate(detalles, start=1):
+            expected_y = float((index - 1) * 180)
+            if detalle.numero != index or detalle.posicion_y != expected_y:
+                detalle.numero = index
+                detalle.posicion_y = expected_y
+                cambios.append(detalle)
+
+        if cambios:
+            DetalleDocumentoEstandarizado.objects.bulk_update(
+                cambios,
+                ["numero", "posicion_y"],
+            )
+
+    def perform_destroy(self, instance):
+        encabezado = instance.encabezado_documento
+        super().perform_destroy(instance)
+        self._renumerar_documento(encabezado)
+
+    @action(detail=False, methods=["post"])
+    def crear_desde_flujo(self, request):
+        encabezado_id = request.data.get("encabezado_documento")
+        actividad = str(request.data.get("actividad") or "").strip()
+        tipo_nodo = request.data.get("tipo_nodo") or DetalleDocumentoEstandarizado.TipoNodo.ACTIVIDAD
+
+        if not encabezado_id:
+            raise ValidationError({"encabezado_documento": "Debes indicar el encabezado del documento."})
+
+        if not actividad:
+            raise ValidationError({"actividad": "La actividad es obligatoria para crear un bloque."})
+
+        try:
+            encabezado = EncabezadoDocumentoEstandarizacion.objects.get(pk=encabezado_id)
+        except EncabezadoDocumentoEstandarizacion.DoesNotExist:
+            raise ValidationError({"encabezado_documento": "El encabezado indicado no existe."})
+
+        ultimo_detalle = (
+            DetalleDocumentoEstandarizado.objects
+            .filter(encabezado_documento=encabezado)
+            .order_by("-numero", "-id")
+            .first()
+        )
+        siguiente_numero = (ultimo_detalle.numero if ultimo_detalle else 0) + 1
+        posicion_y = request.data.get("posicion_y")
+        posicion_x = request.data.get("posicion_x")
+
+        serializer = self.get_serializer(
+            data={
+                "encabezado_documento": encabezado.id,
+                "numero": siguiente_numero,
+                "actividad": actividad,
+                "tipo_nodo": tipo_nodo,
+                "recurso": "",
+                "detalle_actividad": "",
+                "responsable": "",
+                "nota_importante": "",
+                "consideraciones": "",
+                "posicion_x": 0 if posicion_x in [None, ""] else posicion_x,
+                "posicion_y": (
+                    (ultimo_detalle.posicion_y + 180) if ultimo_detalle and posicion_y in [None, ""]
+                    else (0 if posicion_y in [None, ""] else posicion_y)
+                ),
+            }
+        )
+        serializer.is_valid(raise_exception=True)
+        detalle = serializer.save()
+
+        conectar_desde_anterior = request.data.get("conectar_desde_anterior", True)
+        if conectar_desde_anterior and ultimo_detalle:
+            ConexionDetalleDocumento.objects.get_or_create(
+                documento=encabezado,
+                origen=ultimo_detalle,
+                destino=detalle,
+                defaults={
+                    "tipo": ConexionDetalleDocumento.TipoConexion.NORMAL,
+                    "condicion": "",
+                },
+            )
+
+        output = self.get_serializer(detalle)
+        return Response(output.data, status=status.HTTP_201_CREATED)
+
+
+class ConexionDetalleDocumentoViewSet(viewsets.ModelViewSet):
+    queryset = (
+        ConexionDetalleDocumento.objects
+        .select_related(
+            "documento",
+            "origen",
+            "destino",
+            "documento__tarea_por_estandarizar",
+        )
+        .all()
+        .order_by("documento_id", "id")
+    )
+    serializer_class = ConexionDetalleDocumentoSerializer
+    permission_classes = [EstandarizacionPermission]
+    filter_backends = [DjangoFilterBackend]
+    filterset_fields = ["documento", "origen", "destino"]
 
 
 class DimensionViewSet(viewsets.ModelViewSet):

@@ -18,9 +18,15 @@ from .models import (
     Cliente,
     Compra,
     CompraDetalle,
+    DetalleDocumentoEstandarizado,
+    DetalleSupervisor,
+    MedidaCorrectiva,
+    ConexionDetalleDocumento,
     Dimension,
+    GestionCambio,
     HistorialConsumible,
     HistorialUbicacionItem,
+    IPERC,
     Item,
     ItemUnidad,
     LoteConsumible,
@@ -33,6 +39,15 @@ from .models import (
     OrdenTrabajo,
     PerfilUsuario,
     Proveedor,
+    ReporteOrden,
+    ReporteIPERC,
+    SecuenciaControlRiesgo,
+    Sistema,
+    ActividadChecklist,
+    Checklist,
+    ChecklistActividad,
+    ChecklistEjecucion,
+    ChecklistRespuesta,
     TareaPorEstandarizar,
     Trabajador,
     UbicacionCliente,
@@ -77,6 +92,785 @@ class EstandarizacionModelsTests(APITestCase):
         self.assertTrue(encabezado.codigo.startswith("DE-2026-"))
         self.assertEqual(encabezado.area, "Taller")
         self.assertEqual(encabezado.revision_id, trabajador.id)
+
+
+class TareaPorEstandarizarViewSetTests(APITestCase):
+    def setUp(self):
+        self.user = User.objects.create_user(
+            username="jefe-procesos",
+            password="secret123",
+        )
+        group, _ = Group.objects.get_or_create(name="Jefe de Tecnicos")
+        self.user.groups.add(group)
+        self.client.force_authenticate(user=self.user)
+
+        self.dimension = Dimension.objects.create(
+            codigo="UNI",
+            nombre="Unidad",
+            descripcion="Conteo de items",
+            activo=True,
+        )
+        self.unidad = UnidadMedida.objects.create(
+            nombre="CANTIDAD",
+            simbolo="und",
+            dimension=self.dimension,
+            es_base=True,
+            activo=True,
+        )
+        self.item = Item.objects.create(
+            codigo="REP-001",
+            nombre="Filtro de aceite",
+            tipo_insumo=Item.TipoInsumo.REPUESTO,
+            dimension=self.dimension,
+            unidad_medida=self.unidad,
+        )
+
+    def test_jefe_tecnicos_puede_listar_y_crear_tareas_por_estandarizar(self):
+        TareaPorEstandarizar.objects.create(
+            codigo="PROC-001",
+            nombre_tarea="Inspeccion inicial",
+            nivel_criticidad=TareaPorEstandarizar.NivelCriticidad.ALTO,
+            desarrollado=False,
+            area="Taller",
+            item=self.item,
+        )
+
+        response = self.client.get("/api/tareas-por-estandarizar/")
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(len(response.data), 1)
+        self.assertEqual(response.data[0]["item_codigo"], "REP-001")
+
+        create_response = self.client.post(
+            "/api/tareas-por-estandarizar/",
+            {
+                "codigo": "proc-002",
+                "nombre_tarea": "Cambio de filtro",
+                "nivel_criticidad": TareaPorEstandarizar.NivelCriticidad.MEDIO,
+                "desarrollado": True,
+                "area": "Campo",
+                "item": self.item.id,
+            },
+            format="json",
+        )
+        self.assertEqual(create_response.status_code, 201)
+        self.assertEqual(create_response.data["codigo"], "PROC-002")
+        self.assertEqual(create_response.data["desarrollado_label"], "Si")
+
+    def test_documento_estandarizacion_usa_codigo_de_la_tarea_y_lista_detalles(self):
+        tarea = TareaPorEstandarizar.objects.create(
+            codigo="PROC-010",
+            nombre_tarea="Estandarizar cambio de aceite",
+            nivel_criticidad=TareaPorEstandarizar.NivelCriticidad.ALTO,
+            desarrollado=False,
+            area="Taller",
+            item=self.item,
+        )
+
+        encabezado_response = self.client.post(
+            "/api/encabezados-estandarizacion/",
+            {
+                "tarea_por_estandarizar": tarea.id,
+                "fecha": "2026-05-22",
+            },
+            format="json",
+        )
+        self.assertEqual(encabezado_response.status_code, 201)
+        self.assertEqual(encabezado_response.data["codigo"], "PROC-010")
+        self.assertEqual(encabezado_response.data["area"], "Taller")
+
+        detalle_response = self.client.post(
+            "/api/detalles-estandarizacion/",
+            {
+                "encabezado_documento": encabezado_response.data["id"],
+                "numero": 1,
+                "recurso": "Llave de filtro",
+                "actividad": "Retirar filtro usado",
+                "detalle_actividad": "Aflojar el filtro con la herramienta adecuada.",
+                "responsable": "Tecnico lider",
+                "nota_importante": "Verificar bandeja de goteo.",
+                "consideraciones": "Usar guantes resistentes al aceite.",
+            },
+            format="json",
+        )
+        self.assertEqual(detalle_response.status_code, 201)
+
+        list_response = self.client.get(
+            f"/api/detalles-estandarizacion/?encabezado_documento={encabezado_response.data['id']}"
+        )
+        self.assertEqual(list_response.status_code, 200)
+        self.assertEqual(len(list_response.data), 1)
+        self.assertEqual(list_response.data[0]["actividad"], "Retirar filtro usado")
+
+    def test_vista_flujo_crea_bloques_minimos_y_conexion_automatica(self):
+        tarea = TareaPorEstandarizar.objects.create(
+            codigo="PROC-011",
+            nombre_tarea="Flujo vertical",
+            nivel_criticidad=TareaPorEstandarizar.NivelCriticidad.MEDIO,
+            desarrollado=False,
+            area="Taller",
+        )
+        encabezado = EncabezadoDocumentoEstandarizacion.objects.create(
+            tarea_por_estandarizar=tarea,
+            creado_por=self.user,
+            fecha=date(2026, 5, 22),
+        )
+
+        first_response = self.client.post(
+            "/api/detalles-estandarizacion/crear_desde_flujo/",
+            {
+                "encabezado_documento": encabezado.id,
+                "actividad": "Inicio del procedimiento",
+                "tipo_nodo": "inicio",
+            },
+            format="json",
+        )
+        self.assertEqual(first_response.status_code, 201)
+        self.assertEqual(first_response.data["numero"], 1)
+        self.assertEqual(first_response.data["tipo_nodo"], "inicio")
+        self.assertEqual(first_response.data["recurso"], "")
+
+        second_response = self.client.post(
+            "/api/detalles-estandarizacion/crear_desde_flujo/",
+            {
+                "encabezado_documento": encabezado.id,
+                "actividad": "Evaluar presion del sistema",
+                "tipo_nodo": "decision",
+            },
+            format="json",
+        )
+        self.assertEqual(second_response.status_code, 201)
+        self.assertEqual(second_response.data["numero"], 2)
+
+        conexiones = ConexionDetalleDocumento.objects.filter(documento=encabezado)
+        self.assertEqual(conexiones.count(), 1)
+        conexion = conexiones.first()
+        self.assertEqual(conexion.origen.actividad, "Inicio del procedimiento")
+        self.assertEqual(conexion.destino.actividad, "Evaluar presion del sistema")
+
+    def test_eliminar_nodo_renumera_la_secuencia_del_flujo(self):
+        tarea = TareaPorEstandarizar.objects.create(
+            codigo="PROC-012",
+            nombre_tarea="Secuencia de bloques",
+            nivel_criticidad=TareaPorEstandarizar.NivelCriticidad.BAJO,
+            desarrollado=False,
+            area="Campo",
+        )
+        encabezado = EncabezadoDocumentoEstandarizacion.objects.create(
+            tarea_por_estandarizar=tarea,
+            creado_por=self.user,
+            fecha=date(2026, 5, 22),
+        )
+        detalle_1 = DetalleDocumentoEstandarizado.objects.create(
+            encabezado_documento=encabezado,
+            numero=1,
+            actividad="Nodo 1",
+            posicion_y=0,
+        )
+        detalle_2 = DetalleDocumentoEstandarizado.objects.create(
+            encabezado_documento=encabezado,
+            numero=2,
+            actividad="Nodo 2",
+            posicion_y=180,
+        )
+        detalle_3 = DetalleDocumentoEstandarizado.objects.create(
+            encabezado_documento=encabezado,
+            numero=3,
+            actividad="Nodo 3",
+            posicion_y=360,
+        )
+        ConexionDetalleDocumento.objects.create(
+            documento=encabezado,
+            origen=detalle_1,
+            destino=detalle_2,
+        )
+        ConexionDetalleDocumento.objects.create(
+            documento=encabezado,
+            origen=detalle_2,
+            destino=detalle_3,
+        )
+
+        delete_response = self.client.delete(
+            f"/api/detalles-estandarizacion/{detalle_2.id}/"
+        )
+        self.assertEqual(delete_response.status_code, 204)
+
+        remaining = list(
+            DetalleDocumentoEstandarizado.objects
+            .filter(encabezado_documento=encabezado)
+            .order_by("numero", "id")
+            .values_list("actividad", "numero", "posicion_y")
+        )
+        self.assertEqual(
+            remaining,
+            [
+                ("Nodo 1", 1, 0.0),
+                ("Nodo 3", 2, 180.0),
+            ],
+        )
+
+
+class ReporteOrdenViewSetTests(APITestCase):
+    def setUp(self):
+        self.user = User.objects.create_user(
+            username="jefe-reportes",
+            password="secret123",
+        )
+        group, _ = Group.objects.get_or_create(name="Jefe de Tecnicos")
+        self.user.groups.add(group)
+        self.client.force_authenticate(user=self.user)
+
+        self.maquinaria = Maquinaria.objects.create(
+            codigo_maquina="MQ-REPORT-01",
+            nombre="Excavadora de campo",
+            descripcion="Unidad de pruebas",
+        )
+
+    def test_crea_reporte_automatico_al_registrar_ot_en_campo(self):
+        response = self.client.post(
+            "/api/trabajos/",
+            {
+                "maquinaria": self.maquinaria.id,
+                "prioridad": "URGENTE",
+                "lugar": "CAMPO",
+                "ubicacion_detalle": "Frente 4",
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 201)
+        orden = OrdenTrabajo.objects.get(pk=response.data["id"])
+        reporte = ReporteOrden.objects.filter(orden_trabajo=orden).first()
+        self.assertIsNotNone(reporte)
+        self.assertEqual(reporte.estado, ReporteOrden.Estado.PENDIENTE)
+        self.assertTrue(reporte.codigo.startswith("RTO-"))
+        self.assertEqual(reporte.detalles_supervisor.count(), 3)
+        self.assertEqual(
+            reporte.detalles_supervisor.filter(tipo=DetalleSupervisor.Tipo.AUTORIZA).count(),
+            1,
+        )
+        self.assertEqual(
+            reporte.detalles_supervisor.filter(tipo=DetalleSupervisor.Tipo.VERIFICA).count(),
+            1,
+        )
+        self.assertEqual(reporte.detalles_supervisor.filter(tipo="").count(), 1)
+
+    def test_no_crea_reporte_automatico_si_ot_es_en_taller(self):
+        response = self.client.post(
+            "/api/trabajos/",
+            {
+                "maquinaria": self.maquinaria.id,
+                "prioridad": "REGULAR",
+                "lugar": "TALLER",
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 201)
+        orden = OrdenTrabajo.objects.get(pk=response.data["id"])
+        self.assertFalse(ReporteOrden.objects.filter(orden_trabajo=orden).exists())
+
+    def test_lista_y_crea_reportes_solo_para_ot_de_campo(self):
+        orden_campo = OrdenTrabajo.objects.create(
+            maquinaria=self.maquinaria,
+            prioridad="URGENTE",
+            lugar=OrdenTrabajo.Lugar.CAMPO,
+            ubicacion_detalle="Cantera norte",
+        )
+
+        orden_taller = OrdenTrabajo.objects.create(
+            maquinaria=self.maquinaria,
+            prioridad="REGULAR",
+            lugar=OrdenTrabajo.Lugar.TALLER,
+        )
+
+        list_response = self.client.get("/api/reportes-orden/")
+        self.assertEqual(list_response.status_code, 200)
+        self.assertEqual(len(list_response.data), 1)
+        self.assertEqual(list_response.data[0]["orden_trabajo_codigo"], orden_campo.codigo_orden)
+
+        invalid_create = self.client.post(
+            "/api/reportes-orden/",
+            {
+                "orden_trabajo": orden_taller.id,
+                "fecha": str(orden_taller.fecha),
+            },
+            format="json",
+        )
+        self.assertEqual(invalid_create.status_code, 400)
+        self.assertIn("orden_trabajo", invalid_create.data)
+
+        valid_create = self.client.post(
+            "/api/reportes-orden/",
+            {
+                "orden_trabajo": orden_campo.id,
+                "fecha": str(orden_campo.fecha),
+                "epp": "Casco, guantes",
+            },
+            format="json",
+        )
+        self.assertEqual(valid_create.status_code, 400)
+
+        otro_campo = OrdenTrabajo.objects.create(
+            maquinaria=self.maquinaria,
+            prioridad="EMERGENCIA",
+            lugar=OrdenTrabajo.Lugar.CAMPO,
+            ubicacion_detalle="Acceso sur",
+        )
+        self.assertTrue(ReporteOrden.objects.filter(orden_trabajo=otro_campo).exists())
+
+        second_list_response = self.client.get("/api/reportes-orden/")
+        self.assertEqual(second_list_response.status_code, 200)
+        self.assertEqual(len(second_list_response.data), 2)
+
+    def test_actualizar_supervisor_verifica_regenera_slot_vacio(self):
+        orden_campo = OrdenTrabajo.objects.create(
+            maquinaria=self.maquinaria,
+            prioridad="URGENTE",
+            lugar=OrdenTrabajo.Lugar.CAMPO,
+            ubicacion_detalle="Cantera norte",
+        )
+        reporte = ReporteOrden.objects.get(orden_trabajo=orden_campo)
+        placeholder = reporte.detalles_supervisor.filter(tipo="").first()
+
+        response = self.client.patch(
+            f"/api/detalles-supervisor/{placeholder.id}/",
+            {
+                "tipo": DetalleSupervisor.Tipo.VERIFICA,
+                "nombres": "Luis",
+                "apellidos": "Rojas",
+                "dni": "99887766",
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        reporte.refresh_from_db()
+        self.assertGreaterEqual(
+            reporte.detalles_supervisor.filter(tipo=DetalleSupervisor.Tipo.VERIFICA).count(),
+            2,
+        )
+        self.assertEqual(reporte.detalles_supervisor.filter(tipo="").count(), 1)
+
+    def test_crear_iperc_desde_reporte_genera_registro_con_motivo_por_defecto(self):
+        orden_campo = OrdenTrabajo.objects.create(
+            maquinaria=self.maquinaria,
+            prioridad="URGENTE",
+            lugar=OrdenTrabajo.Lugar.CAMPO,
+            ubicacion_detalle="Cantera norte",
+        )
+        reporte = ReporteOrden.objects.get(orden_trabajo=orden_campo)
+
+        response = self.client.post(
+            f"/api/reportes-orden/{reporte.id}/crear_iperc/",
+            {},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 201, response.data)
+        reporte_iperc = ReporteIPERC.objects.get(pk=response.data["id"])
+        self.assertEqual(reporte_iperc.orden_trabajo_id, orden_campo.id)
+        self.assertEqual(reporte_iperc.motivo, ReporteIPERC.Motivo.ACTIVIDAD_NUEVA)
+        self.assertEqual(
+            reporte_iperc.tarea,
+            f"{orden_campo.codigo_orden} - {self.maquinaria.nombre}",
+        )
+        self.assertEqual(reporte_iperc.ipercs.count(), 1)
+        placeholder = reporte.detalles_supervisor.filter(tipo="").first()
+        self.assertIsNotNone(placeholder)
+        placeholder.refresh_from_db()
+        self.assertEqual(placeholder.reporte_iperc_id, reporte_iperc.id)
+        self.assertEqual(response.data["motivo_label"], "Actividad nueva")
+        self.assertEqual(
+            response.data["tarea"],
+            f"{orden_campo.codigo_orden} - {self.maquinaria.nombre}",
+        )
+        self.assertEqual(response.data["ipercs_count"], 1)
+        self.assertIsNotNone(response.data["supervisor_pendiente"])
+        self.assertEqual(
+            response.data["supervisor_pendiente"]["reporte_iperc"],
+            reporte_iperc.id,
+        )
+
+
+class ChecklistViewSetTests(APITestCase):
+    def setUp(self):
+        self.user = User.objects.create_user(
+            username="jefe-checklist",
+            password="secret123",
+        )
+        group, _ = Group.objects.get_or_create(name="Jefe de Tecnicos")
+        self.user.groups.add(group)
+        self.client.force_authenticate(user=self.user)
+
+        self.dimension = Dimension.objects.create(
+            codigo="CHK",
+            nombre="Checklist",
+            descripcion="Dimension base checklist",
+            activo=True,
+        )
+        self.unidad = UnidadMedida.objects.create(
+            nombre="UNIDAD",
+            simbolo="und",
+            dimension=self.dimension,
+            es_base=True,
+            activo=True,
+        )
+        self.item = Item.objects.create(
+            codigo="CHK-001",
+            nombre="Manometro",
+            tipo_insumo=Item.TipoInsumo.CONSUMIBLE,
+            dimension=self.dimension,
+            unidad_medida=self.unidad,
+        )
+        self.maquinaria = Maquinaria.objects.create(
+            codigo_maquina="MQ-CHK-01",
+            nombre="Compresor principal",
+            descripcion="Unidad de checklist",
+        )
+        self.cliente = Cliente.objects.create(
+            nombre="Cliente Checklist",
+            ruc="20123456789",
+        )
+        self.ubicacion = UbicacionCliente.objects.create(
+            cliente=self.cliente,
+            nombre="Patio norte",
+            direccion="Sector A",
+        )
+
+    def test_crea_checklist_con_actividad_y_sistema_dinamicos(self):
+        response = self.client.post(
+            "/api/checklists/",
+            {
+                "motivo": "Checklist de arranque de motor",
+                "fecha": "2026-05-25",
+                "estado": "ACTIVO",
+                "actividades_payload": [
+                    {
+                        "orden": 1,
+                        "obligatorio": True,
+                        "actividad_data": {
+                            "descripcion": "Verificar presion inicial",
+                            "tipo_respuesta": "BOOLEANO",
+                            "obligatorio": True,
+                            "requiere_observacion": True,
+                            "requiere_evidencia": False,
+                            "item": self.item.id,
+                            "activo": True,
+                        },
+                        "sistema_data": {
+                            "nombre": "Motor principal",
+                            "descripcion": "Sistema de propulsion",
+                        },
+                    }
+                ],
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 201, response.data)
+        checklist = Checklist.objects.get(pk=response.data["id"])
+        self.assertEqual(checklist.creado_por_id, self.user.id)
+        self.assertEqual(checklist.actividades_checklist.count(), 1)
+        self.assertEqual(response.data["actividades_count"], 1)
+
+        relacion = checklist.actividades_checklist.select_related("actividad", "sistema").first()
+        self.assertIsNotNone(relacion)
+        self.assertEqual(relacion.orden, 1)
+        self.assertEqual(relacion.actividad.descripcion, "Verificar presion inicial")
+        self.assertEqual(relacion.actividad.item_id, self.item.id)
+        self.assertEqual(relacion.sistema.nombre, "Motor principal")
+
+    def test_crea_checklist_sin_relaciones_iniciales(self):
+        response = self.client.post(
+            "/api/checklists/",
+            {
+                "motivo": "Checklist desacoplado para cabina",
+                "fecha": "2026-05-26",
+                "estado": "BORRADOR",
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 201, response.data)
+        checklist = Checklist.objects.get(pk=response.data["id"])
+        self.assertEqual(checklist.motivo, "Checklist desacoplado para cabina")
+        self.assertEqual(checklist.actividades_checklist.count(), 0)
+        self.assertEqual(response.data["actividades_count"], 0)
+        self.assertEqual(checklist.creado_por_id, self.user.id)
+
+    def test_lista_ejecuciones_de_checklist_con_respuestas_count(self):
+        checklist = Checklist.objects.create(
+            motivo="Checklist de tablero electrico",
+            fecha=date(2026, 5, 25),
+            estado=Checklist.Estado.ACTIVO,
+            creado_por=self.user,
+        )
+        actividad = ActividadChecklist.objects.create(
+            descripcion="Confirmar luces de alarma",
+            tipo_respuesta=ActividadChecklist.TipoRespuesta.BOOLEANO,
+            obligatorio=True,
+            activo=True,
+        )
+        sistema = Sistema.objects.create(
+            nombre="Tablero electrico",
+            descripcion="Controles de cabina",
+        )
+        checklist_actividad = ChecklistActividad.objects.create(
+            checklist=checklist,
+            actividad=actividad,
+            sistema=sistema,
+            orden=1,
+            obligatorio=True,
+        )
+        ejecucion = ChecklistEjecucion.objects.create(
+            checklist=checklist,
+            fecha=date(2026, 5, 25),
+            fecha_inicio=date(2026, 5, 25),
+            fecha_fin=date(2026, 5, 25),
+            horometro=Decimal("1450.50"),
+            maquinaria=self.maquinaria,
+            lugar=self.ubicacion,
+            motivo="Rutina diaria",
+            realizado_por=self.user,
+            estado=ChecklistEjecucion.Estado.COMPLETADO,
+        )
+        ChecklistRespuesta.objects.create(
+            ejecucion=ejecucion,
+            checklist_actividad=checklist_actividad,
+            vb=True,
+            valor_booleano=True,
+            observacion="Todo conforme",
+        )
+
+        response = self.client.get("/api/checklist-ejecuciones/")
+        respuestas_response = self.client.get("/api/checklist-respuestas/")
+
+        self.assertEqual(response.status_code, 200, response.data)
+        self.assertEqual(len(response.data), 1)
+        self.assertTrue(response.data[0]["codigo"].startswith("CHK-EJ-2026-"))
+        self.assertEqual(response.data[0]["checklist_motivo"], "Checklist de tablero electrico")
+        self.assertEqual(response.data[0]["realizado_por_username"], self.user.username)
+        self.assertEqual(response.data[0]["estado"], ChecklistEjecucion.Estado.COMPLETADO)
+        self.assertEqual(response.data[0]["respuestas_count"], 1)
+        self.assertEqual(response.data[0]["maquinaria"], self.maquinaria.id)
+        self.assertEqual(response.data[0]["lugar"], self.ubicacion.id)
+        self.assertEqual(response.data[0]["horometro"], "1450.50")
+        self.assertEqual(response.data[0]["fecha_inicio"], "2026-05-25")
+        self.assertEqual(response.data[0]["fecha_fin"], "2026-05-25")
+        self.assertEqual(response.data[0]["maquinaria_nombre"], "MQ-CHK-01 - Compresor principal")
+        self.assertEqual(response.data[0]["lugar_nombre"], "Patio norte")
+        self.assertEqual(respuestas_response.status_code, 200, respuestas_response.data)
+        self.assertEqual(len(respuestas_response.data), 1)
+        self.assertTrue(respuestas_response.data[0]["vb"])
+
+
+class ReporteIPERCViewSetTests(APITestCase):
+    def setUp(self):
+        self.user = User.objects.create_user(
+            username="jefe-iperc",
+            password="secret123",
+        )
+        group, _ = Group.objects.get_or_create(name="Jefe de Tecnicos")
+        self.user.groups.add(group)
+        self.client.force_authenticate(user=self.user)
+
+        self.maquinaria = Maquinaria.objects.create(
+            codigo_maquina="MQ-IPERC-01",
+            nombre="Excavadora IPERC",
+            descripcion="Unidad de prueba",
+        )
+        self.orden = OrdenTrabajo.objects.create(
+            maquinaria=self.maquinaria,
+            fecha=date(2026, 5, 22),
+            prioridad="URGENTE",
+            lugar=OrdenTrabajo.Lugar.CAMPO,
+            ubicacion_detalle="Frente norte",
+        )
+
+    def test_crea_y_lista_reportes_iperc_con_codigo_y_fecha(self):
+        response = self.client.post(
+            "/api/reportes-iperc/",
+            {
+                "orden_trabajo": self.orden.id,
+                "motivo": ReporteIPERC.Motivo.CAMBIO_PROCESO,
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 201, response.data)
+        reporte = ReporteIPERC.objects.get(pk=response.data["id"])
+        self.assertTrue(reporte.codigo.startswith("RIPERC-2026-"))
+        self.assertEqual(reporte.fecha, self.orden.fecha)
+        self.assertEqual(
+            reporte.tarea,
+            f"{self.orden.codigo_orden} - {self.maquinaria.nombre}",
+        )
+        self.assertEqual(reporte.ipercs.count(), 1)
+
+        list_response = self.client.get("/api/reportes-iperc/")
+        self.assertEqual(list_response.status_code, 200)
+        self.assertEqual(len(list_response.data), 1)
+        self.assertEqual(list_response.data[0]["codigo"], reporte.codigo)
+        self.assertEqual(list_response.data[0]["orden_trabajo_codigo"], self.orden.codigo_orden)
+        self.assertEqual(list_response.data[0]["motivo"], ReporteIPERC.Motivo.CAMBIO_PROCESO)
+        self.assertEqual(list_response.data[0]["motivo_label"], "Cambio del proceso")
+        self.assertEqual(
+            list_response.data[0]["tarea"],
+            f"{self.orden.codigo_orden} - {self.maquinaria.nombre}",
+        )
+        self.assertEqual(list_response.data[0]["ipercs_count"], 1)
+
+    def test_crea_reporte_iperc_manual_con_tarea_y_sin_orden(self):
+        response = self.client.post(
+            "/api/reportes-iperc/",
+            {
+                "motivo": ReporteIPERC.Motivo.TRABAJO_NO_RUTINARIO,
+                "tarea": "Inspeccion extraordinaria de sistema hidraulico",
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 201, response.data)
+        reporte = ReporteIPERC.objects.get(pk=response.data["id"])
+        self.assertIsNone(reporte.orden_trabajo)
+        self.assertEqual(
+            reporte.tarea,
+            "Inspeccion extraordinaria de sistema hidraulico",
+        )
+        self.assertEqual(reporte.motivo, ReporteIPERC.Motivo.TRABAJO_NO_RUTINARIO)
+        self.assertEqual(reporte.ipercs.count(), 1)
+
+    def test_reporte_iperc_manual_exige_tarea_cuando_no_tiene_orden(self):
+        response = self.client.post(
+            "/api/reportes-iperc/",
+            {
+                "motivo": ReporteIPERC.Motivo.ACTIVIDAD_NUEVA,
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 400, response.data)
+        self.assertIn("tarea", response.data)
+
+    def test_retrieve_incluye_supervisor_pendiente_y_registros_relacionados(self):
+        reporte = ReporteIPERC.objects.create(
+            orden_trabajo=self.orden,
+            motivo=ReporteIPERC.Motivo.ACTIVIDAD_NUEVA,
+        )
+        supervisor = reporte.detalles_supervisor.filter(tipo="").first()
+        self.assertIsNotNone(supervisor)
+
+        iperc = reporte.ipercs.first()
+        iperc.descripcion_peligro = "Aceite caliente"
+        iperc.consecuencia_peligro = "Quemaduras"
+        iperc.evaluacion_iperc = "ALTO"
+        iperc.evaluacion_riesgo_residual = "MEDIO"
+        iperc.save()
+
+        GestionCambio.objects.create(
+            iperc=iperc,
+            implementacion="Aislar la zona y usar guantes termicos",
+            estado=GestionCambio.Estado.APROBADO,
+            observacion="Control previo al inicio",
+        )
+        SecuenciaControlRiesgo.objects.create(
+            reporte_iperc=reporte,
+            actividad="Verificar enfriamiento del sistema",
+        )
+        MedidaCorrectiva.objects.create(
+            reporte_iperc=reporte,
+            supervisor=supervisor,
+            detalle="Detener la tarea ante fuga no controlada",
+        )
+
+        response = self.client.get(f"/api/reportes-iperc/{reporte.id}/")
+
+        self.assertEqual(response.status_code, 200, response.data)
+        self.assertEqual(
+            response.data["tarea"],
+            f"{self.orden.codigo_orden} - {self.maquinaria.nombre}",
+        )
+        self.assertIsNotNone(response.data["supervisor_pendiente"])
+        self.assertEqual(response.data["supervisor_pendiente"]["id"], supervisor.id)
+        self.assertEqual(len(response.data["ipercs"]), 1)
+        self.assertEqual(response.data["ipercs"][0]["descripcion_peligro"], "Aceite caliente")
+        self.assertEqual(response.data["ipercs"][0]["evaluacion_iperc"], "ALTO")
+        self.assertEqual(response.data["ipercs"][0]["evaluacion_riesgo_residual"], "MEDIO")
+        self.assertEqual(len(response.data["ipercs"][0]["gestiones_cambio"]), 1)
+        self.assertEqual(
+            response.data["ipercs"][0]["gestiones_cambio"][0]["implementacion"],
+            "Aislar la zona y usar guantes termicos",
+        )
+        self.assertEqual(len(response.data["secuencias_control_riesgo"]), 1)
+        self.assertEqual(
+            response.data["secuencias_control_riesgo"][0]["actividad"],
+            "Verificar enfriamiento del sistema",
+        )
+        self.assertEqual(len(response.data["medidas_correctivas"]), 1)
+        self.assertEqual(
+            response.data["medidas_correctivas"][0]["detalle"],
+            "Detener la tarea ante fuga no controlada",
+        )
+        self.assertEqual(
+            response.data["medidas_correctivas"][0]["supervisor"],
+            supervisor.id,
+        )
+
+    def test_reporte_iperc_asociado_a_orden_conserva_tarea_derivada(self):
+        reporte = ReporteIPERC.objects.create(
+            orden_trabajo=self.orden,
+            motivo=ReporteIPERC.Motivo.ACTIVIDAD_NUEVA,
+        )
+
+        response = self.client.patch(
+            f"/api/reportes-iperc/{reporte.id}/",
+            {
+                "tarea": "Texto manual que no debe persistir",
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 200, response.data)
+        reporte.refresh_from_db()
+        self.assertEqual(
+            reporte.tarea,
+            f"{self.orden.codigo_orden} - {self.maquinaria.nombre}",
+        )
+
+    def test_iperc_registro_rechaza_evaluaciones_fuera_de_alto_medio_bajo(self):
+        reporte = ReporteIPERC.objects.create(
+            orden_trabajo=self.orden,
+            motivo=ReporteIPERC.Motivo.ACTIVIDAD_NUEVA,
+        )
+        iperc = reporte.ipercs.first()
+
+        response = self.client.patch(
+            f"/api/iperc-registros/{iperc.id}/",
+            {
+                "reporte_iperc": reporte.id,
+                "descripcion_peligro": "Faja expuesta",
+                "consecuencia_peligro": "Atrapamiento",
+                "evaluacion_iperc": "CRITICO",
+                "evaluacion_riesgo_residual": "BAJO",
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 400, response.data)
+        self.assertIn("evaluacion_iperc", response.data)
+
+    def test_reporte_iperc_incrementa_correlativo_por_anio(self):
+        primero = ReporteIPERC.objects.create(
+            orden_trabajo=self.orden,
+            motivo=ReporteIPERC.Motivo.ACTIVIDAD_NUEVA,
+        )
+        segundo = ReporteIPERC.objects.create(
+            orden_trabajo=self.orden,
+            motivo=ReporteIPERC.Motivo.FRECUENCIA_PERIODICA,
+        )
+
+        self.assertTrue(primero.codigo.endswith("00001"))
+        self.assertTrue(segundo.codigo.endswith("00002"))
 
 
 class CatalogoSyncViewTests(APITestCase):

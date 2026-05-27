@@ -19,6 +19,7 @@ export default function TableActionButton({
   title,
   tone = "neutral",
   type = "button",
+  ...props
 }) {
   const toneClass = TONE_STYLES[tone] || TONE_STYLES.neutral;
   const sizeClass = iconOnly
@@ -31,6 +32,7 @@ export default function TableActionButton({
       title={title}
       onClick={onClick}
       disabled={disabled}
+      {...props}
       className={[
         "inline-flex items-center gap-1.5 rounded-lg border font-medium transition-colors",
         sizeClass,

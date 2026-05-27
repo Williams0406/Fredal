@@ -624,6 +624,9 @@ class OrdenTrabajo(models.Model):
 
         super().save(*args, **kwargs)
 
+        if self.lugar == self.Lugar.CAMPO:
+            ReporteOrden.ensure_for_orden_trabajo(self)
+
     def __str__(self):
         return self.codigo_orden
 
@@ -726,15 +729,28 @@ class EncabezadoDocumentoEstandarizacion(TimeStampedModel):
 
 
 class DetalleDocumentoEstandarizado(TimeStampedModel):
+    class TipoNodo(models.TextChoices):
+        ACTIVIDAD = "actividad", "Actividad"
+        DECISION = "decision", "Decision"
+        INICIO = "inicio", "Inicio"
+        FIN = "fin", "Fin"
+
     encabezado_documento = models.ForeignKey(
         EncabezadoDocumentoEstandarizacion,
         on_delete=models.CASCADE,
         related_name="detalles",
     )
     numero = models.PositiveIntegerField()
-    recurso = models.CharField(max_length=255)
+    recurso = models.CharField(max_length=255, blank=True, default="")
     actividad = models.CharField(max_length=255)
     detalle_actividad = models.TextField(blank=True, default="")
+    tipo_nodo = models.CharField(
+        max_length=30,
+        choices=TipoNodo.choices,
+        default=TipoNodo.ACTIVIDAD,
+    )
+    posicion_x = models.FloatField(default=0)
+    posicion_y = models.FloatField(default=0)
     responsable = models.CharField(max_length=255, blank=True, default="")
     nota_importante = models.TextField(blank=True, default="")
     consideraciones = models.TextField(blank=True, default="")
@@ -745,6 +761,60 @@ class DetalleDocumentoEstandarizado(TimeStampedModel):
 
     def __str__(self):
         return f"{self.encabezado_documento.codigo} - {self.numero}"
+
+
+class ConexionDetalleDocumento(TimeStampedModel):
+    class TipoConexion(models.TextChoices):
+        NORMAL = "normal", "Normal"
+        SI = "si", "Si"
+        NO = "no", "No"
+        ALTERNATIVO = "alternativo", "Alternativo"
+        RETORNO = "retorno", "Retorno"
+
+    documento = models.ForeignKey(
+        EncabezadoDocumentoEstandarizacion,
+        on_delete=models.CASCADE,
+        related_name="conexiones",
+    )
+    origen = models.ForeignKey(
+        DetalleDocumentoEstandarizado,
+        on_delete=models.CASCADE,
+        related_name="conexiones_salida",
+    )
+    destino = models.ForeignKey(
+        DetalleDocumentoEstandarizado,
+        on_delete=models.CASCADE,
+        related_name="conexiones_entrada",
+    )
+    condicion = models.CharField(max_length=255, blank=True, default="")
+    tipo = models.CharField(
+        max_length=30,
+        choices=TipoConexion.choices,
+        default=TipoConexion.NORMAL,
+    )
+
+    class Meta:
+        ordering = ["documento_id", "id"]
+        unique_together = ("documento", "origen", "destino", "tipo")
+
+    def clean(self):
+        if self.origen_id and self.destino_id and self.origen_id == self.destino_id:
+            raise ValidationError("La conexion no puede apuntar al mismo nodo.")
+
+        if self.documento_id and self.origen_id:
+            if self.origen.encabezado_documento_id != self.documento_id:
+                raise ValidationError("El nodo origen no pertenece al documento indicado.")
+
+        if self.documento_id and self.destino_id:
+            if self.destino.encabezado_documento_id != self.documento_id:
+                raise ValidationError("El nodo destino no pertenece al documento indicado.")
+
+    def save(self, *args, **kwargs):
+        self.full_clean()
+        return super().save(*args, **kwargs)
+
+    def __str__(self):
+        return f"{self.documento.codigo}: {self.origen_id} -> {self.destino_id}"
 
 
 class SoporteVisualDocumentoEstandarizado(TimeStampedModel):
@@ -786,7 +856,283 @@ class ChecklistTaller(TimeStampedModel):
         return f"Checklist taller #{self.pk or 'nuevo'}"
 
 
+class Sistema(TimeStampedModel):
+    nombre = models.CharField(max_length=150, unique=True)
+    descripcion = models.TextField(blank=True, default="")
+
+    class Meta:
+        ordering = ["nombre", "id"]
+
+    def __str__(self):
+        return self.nombre
+
+
+class ActividadChecklist(TimeStampedModel):
+    class TipoRespuesta(models.TextChoices):
+        TEXTO = "TEXTO", "Texto"
+        NUMERO = "NUMERO", "Numero"
+        BOOLEANO = "BOOLEANO", "Booleano"
+        OPCION = "OPCION", "Opcion"
+
+    descripcion = models.TextField()
+    tipo_respuesta = models.CharField(
+        max_length=20,
+        choices=TipoRespuesta.choices,
+        default=TipoRespuesta.BOOLEANO,
+    )
+    obligatorio = models.BooleanField(default=True)
+    requiere_observacion = models.BooleanField(default=False)
+    requiere_evidencia = models.BooleanField(default=False)
+    item = models.ForeignKey(
+        Item,
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name="actividades_checklist",
+    )
+    activo = models.BooleanField(default=True)
+
+    class Meta:
+        ordering = ["id"]
+
+    def __str__(self):
+        descripcion = str(self.descripcion or "").strip()
+        if not descripcion:
+            return "Actividad checklist"
+        return descripcion[:80]
+
+
+class Checklist(TimeStampedModel):
+    class Estado(models.TextChoices):
+        BORRADOR = "BORRADOR", "Borrador"
+        ACTIVO = "ACTIVO", "Activo"
+        INACTIVO = "INACTIVO", "Inactivo"
+
+    motivo = models.TextField(blank=True, default="")
+    fecha = models.DateField(default=current_local_date)
+    estado = models.CharField(
+        max_length=15,
+        choices=Estado.choices,
+        default=Estado.BORRADOR,
+    )
+    creado_por = models.ForeignKey(
+        User,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="checklists_creados",
+    )
+
+    class Meta:
+        ordering = ["-fecha", "-created_at", "-id"]
+
+    def __str__(self):
+        return f"Checklist #{self.pk or 'nuevo'}"
+
+
+class ChecklistActividad(TimeStampedModel):
+    checklist = models.ForeignKey(
+        Checklist,
+        on_delete=models.CASCADE,
+        related_name="actividades_checklist",
+    )
+    actividad = models.ForeignKey(
+        ActividadChecklist,
+        on_delete=models.PROTECT,
+        related_name="checklists",
+    )
+    sistema = models.ForeignKey(
+        Sistema,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="checklist_actividades",
+    )
+    orden = models.PositiveIntegerField(default=1)
+    obligatorio = models.BooleanField(default=True)
+
+    class Meta:
+        ordering = ["checklist_id", "orden", "id"]
+        unique_together = ("checklist", "orden")
+
+    def __str__(self):
+        return f"ChecklistActividad #{self.pk or 'nuevo'}"
+
+
+class ChecklistEjecucion(TimeStampedModel):
+    class Estado(models.TextChoices):
+        PENDIENTE = "PENDIENTE", "Pendiente"
+        EN_PROCESO = "EN_PROCESO", "En proceso"
+        COMPLETADO = "COMPLETADO", "Completado"
+
+    codigo = models.CharField(
+        max_length=50,
+        unique=True,
+        editable=False,
+        null=True,
+        blank=True,
+    )
+    checklist = models.ForeignKey(
+        Checklist,
+        on_delete=models.CASCADE,
+        related_name="ejecuciones",
+    )
+    fecha = models.DateField(default=current_local_date)
+    fecha_inicio = models.DateField(null=True, blank=True)
+    fecha_fin = models.DateField(null=True, blank=True)
+    hora_inicio = models.TimeField(null=True, blank=True)
+    hora_fin = models.TimeField(null=True, blank=True)
+    horometro = models.DecimalField(max_digits=10, decimal_places=2, null=True, blank=True)
+    maquinaria = models.ForeignKey(
+        Maquinaria,
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name="checklist_ejecuciones",
+    )
+    lugar = models.ForeignKey(
+        UbicacionCliente,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="checklist_ejecuciones",
+    )
+    motivo = models.TextField(blank=True, default="")
+    realizado_por = models.ForeignKey(
+        User,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="checklist_ejecuciones_realizadas",
+    )
+    estado = models.CharField(
+        max_length=15,
+        choices=Estado.choices,
+        default=Estado.PENDIENTE,
+    )
+
+    class Meta:
+        ordering = ["-fecha", "-created_at", "-id"]
+
+    def save(self, *args, **kwargs):
+        if self.fecha_inicio and not self.fecha:
+            self.fecha = self.fecha_inicio
+
+        if not self.codigo:
+            year = (self.fecha_inicio or self.fecha or current_local_date()).year
+            prefix = f"CHK-EJ-{year}"
+            last = (
+                ChecklistEjecucion.objects
+                .filter(codigo__startswith=prefix)
+                .aggregate(max_code=Max("codigo"))
+                ["max_code"]
+            )
+            if last:
+                seq = int(last.split("-")[-1]) + 1
+            else:
+                seq = 1
+            self.codigo = f"{prefix}-{seq:05d}"
+
+        super().save(*args, **kwargs)
+
+    def __str__(self):
+        return f"Ejecucion checklist #{self.pk or 'nueva'}"
+
+
+class ChecklistRespuesta(TimeStampedModel):
+    ejecucion = models.ForeignKey(
+        ChecklistEjecucion,
+        on_delete=models.CASCADE,
+        related_name="respuestas",
+    )
+    checklist_actividad = models.ForeignKey(
+        ChecklistActividad,
+        on_delete=models.CASCADE,
+        related_name="respuestas",
+      )
+    vb = models.BooleanField(default=False)
+    valor_texto = models.TextField(blank=True, default="")
+    valor_numero = models.DecimalField(
+        max_digits=12,
+        decimal_places=2,
+        null=True,
+        blank=True,
+    )
+    valor_booleano = models.BooleanField(null=True, blank=True)
+    valor_opcion = models.CharField(max_length=255, blank=True, default="")
+    observacion = models.TextField(blank=True, default="")
+
+    class Meta:
+        ordering = ["ejecucion_id", "checklist_actividad_id", "id"]
+        unique_together = ("ejecucion", "checklist_actividad")
+
+    def __str__(self):
+        return f"Respuesta checklist #{self.pk or 'nueva'}"
+
+
+class Evento(TimeStampedModel):
+    nombre = models.CharField(max_length=255)
+    clasificacion = models.CharField(max_length=150)
+    fecha = models.DateField(default=current_local_date)
+    estandarizacion = models.ForeignKey(
+        TareaPorEstandarizar,
+        on_delete=models.CASCADE,
+        related_name="eventos",
+    )
+
+    class Meta:
+        ordering = ["-fecha", "nombre", "id"]
+
+    def __str__(self):
+        return self.nombre
+
+
+class Asistencia(TimeStampedModel):
+    trabajador = models.ForeignKey(
+        Trabajador,
+        on_delete=models.CASCADE,
+        related_name="asistencias_evento",
+    )
+    asistencia = models.BooleanField(default=False)
+    evento = models.ForeignKey(
+        Evento,
+        on_delete=models.CASCADE,
+        related_name="asistencias",
+    )
+
+    class Meta:
+        ordering = ["evento_id", "trabajador_id"]
+        unique_together = ("trabajador", "evento")
+
+    def __str__(self):
+        return f"{self.trabajador} - {self.evento}"
+
+
 class ReporteOrden(TimeStampedModel):
+    class Estado(models.TextChoices):
+        PENDIENTE = "PENDIENTE", "Pendiente"
+        REALIZADO = "REALIZADO", "Realizado"
+
+    codigo = models.CharField(
+        max_length=50,
+        unique=True,
+        editable=False,
+        null=True,
+        blank=True,
+    )
+    fecha = models.DateField(default=current_local_date)
+    orden_trabajo = models.ForeignKey(
+        OrdenTrabajo,
+        on_delete=models.CASCADE,
+        null=True,
+        blank=True,
+        related_name="reportes_orden",
+    )
+    estado = models.CharField(
+        max_length=15,
+        choices=Estado.choices,
+        default=Estado.PENDIENTE,
+    )
     epp = models.TextField(blank=True, default="")
     herramientas = models.TextField(blank=True, default="")
     pregunta_1 = models.BooleanField(default=False)
@@ -798,14 +1144,74 @@ class ReporteOrden(TimeStampedModel):
     descripcion_tarea = models.TextField(blank=True, default="")
 
     class Meta:
-        ordering = ["-created_at", "-id"]
+        ordering = ["-fecha", "-created_at", "-id"]
+
+    def ensure_supervisor_slots(self):
+        if not self.pk:
+            return
+
+        if not self.detalles_supervisor.filter(tipo=DetalleSupervisor.Tipo.AUTORIZA).exists():
+            DetalleSupervisor.objects.create(
+                reporte_orden=self,
+                tipo=DetalleSupervisor.Tipo.AUTORIZA,
+            )
+
+        if not self.detalles_supervisor.filter(tipo=DetalleSupervisor.Tipo.VERIFICA).exists():
+            DetalleSupervisor.objects.create(
+                reporte_orden=self,
+                tipo=DetalleSupervisor.Tipo.VERIFICA,
+            )
+
+        if not self.detalles_supervisor.filter(tipo="").exists():
+            DetalleSupervisor.objects.create(
+                reporte_orden=self,
+                tipo="",
+            )
+
+    @classmethod
+    def ensure_for_orden_trabajo(cls, orden_trabajo):
+        if not orden_trabajo or orden_trabajo.lugar != OrdenTrabajo.Lugar.CAMPO:
+            return None
+
+        defaults = {
+            "fecha": orden_trabajo.fecha or current_local_date(),
+        }
+        reporte, _ = cls.objects.get_or_create(
+            orden_trabajo=orden_trabajo,
+            defaults=defaults,
+        )
+        return reporte
+
+    def save(self, *args, **kwargs):
+        if self.orden_trabajo_id and not self.fecha:
+            self.fecha = self.orden_trabajo.fecha
+
+        if not self.codigo:
+            year = (self.fecha or current_local_date()).year
+            last = (
+                ReporteOrden.objects
+                .filter(codigo__startswith=f"RTO-{year}")
+                .aggregate(max_code=Max("codigo"))
+                .get("max_code")
+            )
+            seq = int(last.split("-")[-1]) + 1 if last else 1
+            self.codigo = f"RTO-{year}-{seq:05d}"
+
+        super().save(*args, **kwargs)
+        self.ensure_supervisor_slots()
 
     def __str__(self):
-        return f"Reporte de orden #{self.pk or 'nuevo'}"
+        return self.codigo or f"Reporte de orden #{self.pk or 'nuevo'}"
 
 
 class IPERC(TimeStampedModel):
-    motivo = models.CharField(max_length=255)
+    reporte_iperc = models.ForeignKey(
+        "ReporteIPERC",
+        on_delete=models.CASCADE,
+        null=True,
+        blank=True,
+        related_name="ipercs",
+    )
     descripcion_peligro = models.TextField()
     consecuencia_peligro = models.TextField()
     evaluacion_iperc = models.TextField()
@@ -815,7 +1221,9 @@ class IPERC(TimeStampedModel):
         ordering = ["-created_at", "-id"]
 
     def __str__(self):
-        return self.motivo
+        if self.reporte_iperc_id:
+            return f"IPERC {self.reporte_iperc.codigo}"
+        return f"IPERC #{self.pk or 'nuevo'}"
 
 
 class GestionCambio(TimeStampedModel):
@@ -843,7 +1251,8 @@ class GestionCambio(TimeStampedModel):
         ordering = ["-created_at", "-id"]
 
     def __str__(self):
-        return f"{self.get_estado_display()} - {self.iperc.motivo}"
+        motivo = self.iperc.reporte_iperc.get_motivo_display() if self.iperc.reporte_iperc_id else "IPERC"
+        return f"{self.get_estado_display()} - {motivo}"
 
 
 class DetalleSupervisor(TimeStampedModel):
@@ -852,13 +1261,15 @@ class DetalleSupervisor(TimeStampedModel):
         AUTORIZA = "AUTORIZA", "Autoriza"
         VERIFICA = "VERIFICA", "Verifica"
 
-    hora = models.TimeField()
-    apellidos = models.CharField(max_length=100)
-    nombres = models.CharField(max_length=100)
-    dni = models.CharField(max_length=20)
+    hora = models.TimeField(null=True, blank=True)
+    apellidos = models.CharField(max_length=100, blank=True, default="")
+    nombres = models.CharField(max_length=100, blank=True, default="")
+    dni = models.CharField(max_length=20, blank=True, default="")
     tipo = models.CharField(
         max_length=10,
         choices=Tipo.choices,
+        blank=True,
+        default="",
     )
     observaciones = models.TextField(blank=True, default="")
     firma = models.ImageField(
@@ -885,40 +1296,131 @@ class DetalleSupervisor(TimeStampedModel):
         ordering = ["-created_at", "-id"]
 
     def __str__(self):
-        return f"{self.apellidos}, {self.nombres} - {self.get_tipo_display()}"
+        tipo_label = self.get_tipo_display() or "Sin tipo"
+        nombre = f"{self.apellidos}, {self.nombres}".strip(", ").strip() or "Supervisor"
+        return f"{nombre} - {tipo_label}"
 
 
 class ReporteIPERC(TimeStampedModel):
+    class Motivo(models.TextChoices):
+        ACTIVIDAD_NUEVA = "ACTIVIDAD_NUEVA", "Actividad nueva"
+        CAMBIO_PROCESO = "CAMBIO_PROCESO", "Cambio del proceso"
+        TRABAJO_NO_RUTINARIO = "TRABAJO_NO_RUTINARIO", "Trabajo no rutinario"
+        INCIDENTE_ACCIDENTE = "INCIDENTE_ACCIDENTE", "Incidente / accidente"
+        INDICADORES_DETERIORO = "INDICADORES_DETERIORO", "Indicadores de deterioro operativo"
+        FRECUENCIA_PERIODICA = "FRECUENCIA_PERIODICA", "Frecuencia periodica"
+        LICITACIONES_AUDITORIAS = "LICITACIONES_AUDITORIAS", "Licitaciones o auditorias"
+
+    codigo = models.CharField(
+        max_length=50,
+        unique=True,
+        editable=False,
+        null=True,
+        blank=True,
+    )
+    fecha = models.DateField(default=current_local_date)
     orden_trabajo = models.ForeignKey(
         OrdenTrabajo,
         on_delete=models.PROTECT,
         related_name="reportes_iperc",
-    )
-    trabajador = models.ForeignKey(
-        Trabajador,
-        on_delete=models.PROTECT,
-        related_name="reportes_iperc",
-    )
-    iperc = models.ForeignKey(
-        IPERC,
-        on_delete=models.PROTECT,
-        related_name="reportes",
-    )
-    secuencia = models.PositiveIntegerField(default=1)
-    supervisor = models.ForeignKey(
-        DetalleSupervisor,
-        on_delete=models.SET_NULL,
         null=True,
         blank=True,
-        related_name="reportes_iperc_supervisados",
+    )
+    tarea = models.TextField(blank=True, default="")
+    motivo = models.CharField(
+        max_length=40,
+        choices=Motivo.choices,
+        default=Motivo.ACTIVIDAD_NUEVA,
     )
 
     class Meta:
-        ordering = ["orden_trabajo_id", "secuencia", "id"]
-        unique_together = ("orden_trabajo", "trabajador", "iperc", "secuencia")
+        ordering = ["-fecha", "orden_trabajo_id", "-id"]
+
+    def construir_tarea_desde_orden(self):
+        if not self.orden_trabajo_id:
+            return ""
+
+        maquinaria = getattr(self.orden_trabajo, "maquinaria", None)
+        if maquinaria:
+            return f"{self.orden_trabajo.codigo_orden} - {maquinaria.nombre}"
+        return self.orden_trabajo.codigo_orden
+
+    def obtener_reporte_orden_relacionado(self):
+        if not self.orden_trabajo_id:
+            return None
+        return self.orden_trabajo.reportes_orden.order_by("id").first()
+
+    def ensure_supervisor_pendiente(self):
+        if not self.pk:
+            return None
+
+        existente = self.detalles_supervisor.filter(tipo="").order_by("id").first()
+        if existente:
+            return existente
+
+        reporte_orden = self.obtener_reporte_orden_relacionado()
+        if reporte_orden:
+            placeholder = reporte_orden.detalles_supervisor.filter(tipo="").order_by("id").first()
+            if placeholder and placeholder.reporte_iperc_id in (None, self.id):
+                if placeholder.reporte_iperc_id != self.id:
+                    placeholder.reporte_iperc = self
+                    placeholder.save(update_fields=["reporte_iperc"])
+                return placeholder
+
+            return DetalleSupervisor.objects.create(
+                reporte_orden=reporte_orden,
+                reporte_iperc=self,
+                tipo="",
+            )
+
+        return DetalleSupervisor.objects.create(
+            reporte_iperc=self,
+            tipo="",
+        )
+
+    def ensure_iperc_slots(self):
+        if not self.pk:
+            return
+
+        if not self.ipercs.exists():
+            IPERC.objects.create(
+                reporte_iperc=self,
+                descripcion_peligro="",
+                consecuencia_peligro="",
+                evaluacion_iperc="",
+                evaluacion_riesgo_residual="",
+            )
+
+    def save(self, *args, **kwargs):
+        if self.orden_trabajo_id and not self.fecha:
+            self.fecha = self.orden_trabajo.fecha
+
+        if self.orden_trabajo_id:
+            self.tarea = self.construir_tarea_desde_orden()
+
+        if not self.codigo:
+            year = (self.fecha or current_local_date()).year
+            last = (
+                ReporteIPERC.objects
+                .filter(codigo__startswith=f"RIPERC-{year}")
+                .aggregate(max_code=Max("codigo"))
+                .get("max_code")
+            )
+            seq = int(last.split("-")[-1]) + 1 if last else 1
+            self.codigo = f"RIPERC-{year}-{seq:05d}"
+
+        super().save(*args, **kwargs)
+        self.ensure_supervisor_pendiente()
+        self.ensure_iperc_slots()
 
     def __str__(self):
-        return f"{self.orden_trabajo.codigo_orden} - Secuencia {self.secuencia}"
+        if self.codigo:
+            return self.codigo
+        if self.orden_trabajo_id:
+            return f"{self.orden_trabajo.codigo_orden} - IPERC"
+        if self.tarea:
+            return f"{self.tarea} - IPERC"
+        return "Reporte IPERC"
 
 
 class SecuenciaControlRiesgo(TimeStampedModel):
@@ -941,6 +1443,13 @@ class MedidaCorrectiva(TimeStampedModel):
     reporte_iperc = models.ForeignKey(
         ReporteIPERC,
         on_delete=models.CASCADE,
+        related_name="medidas_correctivas",
+    )
+    supervisor = models.ForeignKey(
+        DetalleSupervisor,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
         related_name="medidas_correctivas",
     )
 

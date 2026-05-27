@@ -374,6 +374,192 @@ export const ubicacionClienteAPI = {
   delete: (id) => api.delete(`/api/ubicaciones-cliente/${id}/`),
 };
 
+export const tareaPorEstandarizarAPI = {
+  list: (params) => api.get("/api/tareas-por-estandarizar/", { params }),
+  create: (data) => api.post("/api/tareas-por-estandarizar/", data),
+  retrieve: (id) => api.get(`/api/tareas-por-estandarizar/${id}/`),
+  patch: (id, data) => api.patch(`/api/tareas-por-estandarizar/${id}/`, data),
+  update: (id, data) => api.put(`/api/tareas-por-estandarizar/${id}/`, data),
+  delete: (id) => api.delete(`/api/tareas-por-estandarizar/${id}/`),
+};
+
+export const eventoAPI = {
+  list: (params) => api.get("/api/eventos/", { params }),
+  retrieve: (id) => api.get(`/api/eventos/${id}/`),
+  create: (data) => api.post("/api/eventos/", data),
+  patch: (id, data) => api.patch(`/api/eventos/${id}/`, data),
+  update: (id, data) => api.put(`/api/eventos/${id}/`, data),
+  delete: (id) => api.delete(`/api/eventos/${id}/`),
+};
+
+export const asistenciaAPI = {
+  list: (params) => api.get("/api/asistencias/", { params }),
+  retrieve: (id) => api.get(`/api/asistencias/${id}/`),
+  create: (data) => api.post("/api/asistencias/", data),
+  patch: (id, data) => api.patch(`/api/asistencias/${id}/`, data),
+  update: (id, data) => api.put(`/api/asistencias/${id}/`, data),
+  delete: (id) => api.delete(`/api/asistencias/${id}/`),
+};
+
+export const sistemaAPI = {
+  list: (params) => api.get("/api/sistemas/", { params }),
+  create: (data) => api.post("/api/sistemas/", data),
+  patch: (id, data) => api.patch(`/api/sistemas/${id}/`, data),
+  update: (id, data) => api.put(`/api/sistemas/${id}/`, data),
+  delete: (id) => api.delete(`/api/sistemas/${id}/`),
+};
+
+export const actividadChecklistAPI = {
+  list: (params) => api.get("/api/actividades-checklist/", { params }),
+  create: (data) => api.post("/api/actividades-checklist/", data),
+  patch: (id, data) => api.patch(`/api/actividades-checklist/${id}/`, data),
+  update: (id, data) => api.put(`/api/actividades-checklist/${id}/`, data),
+  delete: (id) => api.delete(`/api/actividades-checklist/${id}/`),
+};
+
+export const checklistAPI = {
+  list: (params) => api.get("/api/checklists/", { params }),
+  retrieve: (id) => api.get(`/api/checklists/${id}/`),
+  create: (data) => api.post("/api/checklists/", data),
+  patch: (id, data) => api.patch(`/api/checklists/${id}/`, data),
+  update: (id, data) => api.put(`/api/checklists/${id}/`, data),
+  delete: (id) => api.delete(`/api/checklists/${id}/`),
+};
+
+export const checklistActividadAPI = {
+  list: (params) => api.get("/api/checklist-actividades/", { params }),
+  retrieve: (id) => api.get(`/api/checklist-actividades/${id}/`),
+  create: (data) => api.post("/api/checklist-actividades/", data),
+  patch: (id, data) => api.patch(`/api/checklist-actividades/${id}/`, data),
+  update: (id, data) => api.put(`/api/checklist-actividades/${id}/`, data),
+  delete: (id) => api.delete(`/api/checklist-actividades/${id}/`),
+};
+
+export const checklistEjecucionAPI = {
+  list: (params) => api.get("/api/checklist-ejecuciones/", { params }),
+  retrieve: (id) => api.get(`/api/checklist-ejecuciones/${id}/`),
+  create: (data) => api.post("/api/checklist-ejecuciones/", data),
+  patch: (id, data) => api.patch(`/api/checklist-ejecuciones/${id}/`, data),
+  update: (id, data) => api.put(`/api/checklist-ejecuciones/${id}/`, data),
+  delete: (id) => api.delete(`/api/checklist-ejecuciones/${id}/`),
+};
+
+export const checklistRespuestaAPI = {
+  list: (params) => api.get("/api/checklist-respuestas/", { params }),
+  retrieve: (id) => api.get(`/api/checklist-respuestas/${id}/`),
+  create: (data) => api.post("/api/checklist-respuestas/", data),
+  patch: (id, data) => api.patch(`/api/checklist-respuestas/${id}/`, data),
+  update: (id, data) => api.put(`/api/checklist-respuestas/${id}/`, data),
+  delete: (id) => api.delete(`/api/checklist-respuestas/${id}/`),
+};
+
+export const reporteOrdenAPI = {
+  list: (params) => api.get("/api/reportes-orden/", { params }),
+  retrieve: (id) => api.get(`/api/reportes-orden/${id}/`),
+  create: (data) => api.post("/api/reportes-orden/", data),
+  patch: (id, data) => api.patch(`/api/reportes-orden/${id}/`, data),
+  update: (id, data) => api.put(`/api/reportes-orden/${id}/`, data),
+  delete: (id) => api.delete(`/api/reportes-orden/${id}/`),
+  createIperc: (id) => api.post(`/api/reportes-orden/${id}/crear_iperc/`, {}),
+};
+
+export const reporteIpercAPI = {
+  list: (params) => api.get("/api/reportes-iperc/", { params }),
+  retrieve: (id) => api.get(`/api/reportes-iperc/${id}/`),
+  create: (data) => api.post("/api/reportes-iperc/", data),
+  patch: (id, data) => api.patch(`/api/reportes-iperc/${id}/`, data),
+  update: (id, data) => api.put(`/api/reportes-iperc/${id}/`, data),
+  delete: (id) => api.delete(`/api/reportes-iperc/${id}/`),
+};
+
+export const ipercRegistroAPI = {
+  list: (params) => api.get("/api/iperc-registros/", { params }),
+  create: (data) => api.post("/api/iperc-registros/", data),
+  patch: (id, data) => api.patch(`/api/iperc-registros/${id}/`, data),
+  update: (id, data) => api.put(`/api/iperc-registros/${id}/`, data),
+  delete: (id) => api.delete(`/api/iperc-registros/${id}/`),
+};
+
+export const gestionCambioAPI = {
+  list: (params) => api.get("/api/gestiones-cambio/", { params }),
+  create: (data) => api.post("/api/gestiones-cambio/", data),
+  patch: (id, data) => api.patch(`/api/gestiones-cambio/${id}/`, data),
+  update: (id, data) => api.put(`/api/gestiones-cambio/${id}/`, data),
+  delete: (id) => api.delete(`/api/gestiones-cambio/${id}/`),
+};
+
+export const secuenciaControlRiesgoAPI = {
+  list: (params) => api.get("/api/secuencias-control-riesgo/", { params }),
+  create: (data) => api.post("/api/secuencias-control-riesgo/", data),
+  patch: (id, data) => api.patch(`/api/secuencias-control-riesgo/${id}/`, data),
+  update: (id, data) => api.put(`/api/secuencias-control-riesgo/${id}/`, data),
+  delete: (id) => api.delete(`/api/secuencias-control-riesgo/${id}/`),
+};
+
+export const medidaCorrectivaAPI = {
+  list: (params) => api.get("/api/medidas-correctivas/", { params }),
+  create: (data) => api.post("/api/medidas-correctivas/", data),
+  patch: (id, data) => api.patch(`/api/medidas-correctivas/${id}/`, data),
+  update: (id, data) => api.put(`/api/medidas-correctivas/${id}/`, data),
+  delete: (id) => api.delete(`/api/medidas-correctivas/${id}/`),
+};
+
+export const detalleSupervisorAPI = {
+  list: (params) => api.get("/api/detalles-supervisor/", { params }),
+  create: (data, isMultipart = false) =>
+    api.post("/api/detalles-supervisor/", data, isMultipart ? {
+      headers: {
+        "Content-Type": "multipart/form-data",
+      },
+    } : undefined),
+  patch: (id, data, isMultipart = false) =>
+    api.patch(`/api/detalles-supervisor/${id}/`, data, isMultipart ? {
+      headers: {
+        "Content-Type": "multipart/form-data",
+      },
+    } : undefined),
+};
+
+export const encabezadoEstandarizacionAPI = {
+  list: (params) => api.get("/api/encabezados-estandarizacion/", { params }),
+  create: (data) => api.post("/api/encabezados-estandarizacion/", data),
+  update: (id, data) => api.put(`/api/encabezados-estandarizacion/${id}/`, data),
+  patch: (id, data) => api.patch(`/api/encabezados-estandarizacion/${id}/`, data),
+};
+
+export const detalleEstandarizacionAPI = {
+  list: (params) => api.get("/api/detalles-estandarizacion/", { params }),
+  retrieve: (id) => api.get(`/api/detalles-estandarizacion/${id}/`),
+  createFlowBlock: (data) =>
+    api.post("/api/detalles-estandarizacion/crear_desde_flujo/", data),
+  create: (formData) =>
+    api.post("/api/detalles-estandarizacion/", formData, {
+      headers: {
+        "Content-Type": "multipart/form-data",
+      },
+    }),
+  patch: (id, data, isMultipart = false) =>
+    api.patch(`/api/detalles-estandarizacion/${id}/`, data, isMultipart ? {
+      headers: {
+        "Content-Type": "multipart/form-data",
+      },
+    } : undefined),
+    update: (id, formData) =>
+      api.put(`/api/detalles-estandarizacion/${id}/`, formData, {
+        headers: {
+          "Content-Type": "multipart/form-data",
+        },
+      }),
+  delete: (id) => api.delete(`/api/detalles-estandarizacion/${id}/`),
+};
+
+export const conexionEstandarizacionAPI = {
+  list: (params) => api.get("/api/conexiones-estandarizacion/", { params }),
+  create: (data) => api.post("/api/conexiones-estandarizacion/", data),
+  patch: (id, data) => api.patch(`/api/conexiones-estandarizacion/${id}/`, data),
+  delete: (id) => api.delete(`/api/conexiones-estandarizacion/${id}/`),
+};
+
 export const dimensionAPI = {
   list: () => api.get("/api/dimensiones/"),
   create: (data) => api.post("/api/dimensiones/", data),

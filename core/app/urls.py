@@ -22,6 +22,25 @@ from .views import (
     AlmacenViewSet,
     ClienteViewSet,
     UbicacionClienteViewSet,
+    ReporteOrdenViewSet,
+    ReporteIPERCViewSet,
+    IPERCViewSet,
+    GestionCambioViewSet,
+    SecuenciaControlRiesgoViewSet,
+    MedidaCorrectivaViewSet,
+    DetalleSupervisorViewSet,
+    SistemaViewSet,
+    ActividadChecklistViewSet,
+    ChecklistViewSet,
+    ChecklistActividadViewSet,
+    ChecklistEjecucionViewSet,
+    ChecklistRespuestaViewSet,
+    EventoViewSet,
+    AsistenciaViewSet,
+    TareaPorEstandarizarViewSet,
+    EncabezadoDocumentoEstandarizacionViewSet,
+    DetalleDocumentoEstandarizadoViewSet,
+    ConexionDetalleDocumentoViewSet,
     DimensionViewSet,
     UnidadMedidaViewSet,
     UnidadRelacionViewSet,
@@ -47,6 +66,25 @@ router.register(r"proveedores", ProveedorViewSet)
 router.register(r"almacenes", AlmacenViewSet)
 router.register(r"clientes", ClienteViewSet)
 router.register(r"ubicaciones-cliente", UbicacionClienteViewSet)
+router.register(r"reportes-orden", ReporteOrdenViewSet)
+router.register(r"reportes-iperc", ReporteIPERCViewSet)
+router.register(r"iperc-registros", IPERCViewSet)
+router.register(r"gestiones-cambio", GestionCambioViewSet)
+router.register(r"secuencias-control-riesgo", SecuenciaControlRiesgoViewSet)
+router.register(r"medidas-correctivas", MedidaCorrectivaViewSet)
+router.register(r"detalles-supervisor", DetalleSupervisorViewSet)
+router.register(r"sistemas", SistemaViewSet)
+router.register(r"actividades-checklist", ActividadChecklistViewSet)
+router.register(r"checklists", ChecklistViewSet)
+router.register(r"checklist-actividades", ChecklistActividadViewSet)
+router.register(r"checklist-ejecuciones", ChecklistEjecucionViewSet)
+router.register(r"checklist-respuestas", ChecklistRespuestaViewSet)
+router.register(r"eventos", EventoViewSet)
+router.register(r"asistencias", AsistenciaViewSet)
+router.register(r"tareas-por-estandarizar", TareaPorEstandarizarViewSet)
+router.register(r"encabezados-estandarizacion", EncabezadoDocumentoEstandarizacionViewSet)
+router.register(r"detalles-estandarizacion", DetalleDocumentoEstandarizadoViewSet)
+router.register(r"conexiones-estandarizacion", ConexionDetalleDocumentoViewSet)
 router.register(r"dimensiones", DimensionViewSet)
 router.register(r"unidades-medida", UnidadMedidaViewSet)
 router.register(r"relaciones-unidad", UnidadRelacionViewSet)
