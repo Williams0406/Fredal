@@ -45,6 +45,15 @@ def is_maintenance_boss(user):
     return user.is_staff or user_in_any_group(user, ["Jefe de Tecnicos", "Jefe de Mantenimiento"])
 
 
+def can_assign_requirement_technician(user):
+    if not user or not user.is_authenticated:
+        return False
+    return user.is_staff or user_in_any_group(
+        user,
+        ["Jefe de Almaceneros", "Jefe de Tecnicos", "Jefe de Mantenimiento"],
+    )
+
+
 def is_tecnico_user(user):
     if not user or not user.is_authenticated:
         return False
@@ -117,6 +126,32 @@ class TrabajoPermission(BasePermission):
 
         if user_in_group(user, "Tecnico"):
             return request.method in ["GET", "HEAD", "OPTIONS", "PUT", "PATCH"]
+
+        return request.method in SAFE_METHODS
+
+
+class ActividadTrabajoPermission(BasePermission):
+    """
+    Actividades:
+    - Admin / jefaturas -> CRUD.
+    - Tecnico -> puede crear y gestionar actividades registradas en OTs asignadas.
+      Las actividades planificadas quedan reservadas para jefaturas.
+    """
+
+    def has_permission(self, request, view):
+        user = request.user
+
+        if not user or not user.is_authenticated:
+            return False
+
+        if user.is_staff:
+            return True
+
+        if user_in_any_group(user, ["Jefe de Tecnicos", "Jefe de Almaceneros", "Jefe de Mantenimiento"]):
+            return True
+
+        if user_in_group(user, "Tecnico"):
+            return request.method in ["GET", "HEAD", "OPTIONS", "POST", "PUT", "PATCH", "DELETE"]
 
         return request.method in SAFE_METHODS
 

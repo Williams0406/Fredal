@@ -30,6 +30,18 @@ const TABS = [
   { key: 'FINALIZADO', label: 'Cerradas', icon: 'checkmark-done-outline' },
 ];
 
+const getTrabajoDateValue = (trabajo) => {
+  const dateValue = Date.parse(trabajo?.created_at || trabajo?.fecha || '');
+  return Number.isNaN(dateValue) ? 0 : dateValue;
+};
+
+const sortTrabajosByNewest = (trabajos = []) =>
+  [...trabajos].sort((a, b) => {
+    const dateDiff = getTrabajoDateValue(b) - getTrabajoDateValue(a);
+    if (dateDiff !== 0) return dateDiff;
+    return Number(b?.id || 0) - Number(a?.id || 0);
+  });
+
 export default function TrabajosScreen() {
   const router = useRouter();
   const { user } = useAuthStore();
@@ -51,24 +63,26 @@ export default function TrabajosScreen() {
 
   const filtered = useMemo(() => {
     const needle = query.trim().toLowerCase();
-    return trabajos
-      .filter((trabajo) => trabajo.estatus === activeTab)
-      .filter((trabajo) => {
-        if (!needle) return true;
-        const haystack = [
-          trabajo.codigo_orden,
-          trabajo.maquinaria_nombre,
-          trabajo.maquinaria_codigo,
-          trabajo.ubicacion_detalle,
-          trabajo.prioridad,
-          trabajo.lugar,
-        ]
-          .filter(Boolean)
-          .join(' ')
-          .toLowerCase();
+    return sortTrabajosByNewest(
+      trabajos
+        .filter((trabajo) => trabajo.estatus === activeTab)
+        .filter((trabajo) => {
+          if (!needle) return true;
+          const haystack = [
+            trabajo.codigo_orden,
+            trabajo.maquinaria_nombre,
+            trabajo.maquinaria_codigo,
+            trabajo.ubicacion_detalle,
+            trabajo.prioridad,
+            trabajo.lugar,
+          ]
+            .filter(Boolean)
+            .join(' ')
+            .toLowerCase();
 
-        return haystack.includes(needle);
-      });
+          return haystack.includes(needle);
+        })
+    );
   }, [trabajos, activeTab, query]);
 
   if (isStorageUserByRole(user)) {

@@ -11,6 +11,8 @@ export const useTrabajos = (params) =>
       const { data } = await trabajoAPI.list(params);
       return data;
     },
+    refetchInterval: 5000,
+    refetchIntervalInBackground: false,
   });
 
 export const useTrabajo = (id) =>
@@ -21,6 +23,8 @@ export const useTrabajo = (id) =>
       return data;
     },
     enabled: !!id,
+    refetchInterval: 5000,
+    refetchIntervalInBackground: false,
   });
 
 export const useCreateTrabajo = () => {

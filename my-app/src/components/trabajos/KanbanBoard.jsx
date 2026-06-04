@@ -34,6 +34,18 @@ const TAB_ACTIVE = {
 const TAB_INACTIVE =
   "border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300";
 
+const getTrabajoDateValue = (trabajo) => {
+  const dateValue = Date.parse(trabajo?.created_at || trabajo?.fecha || "");
+  return Number.isNaN(dateValue) ? 0 : dateValue;
+};
+
+const sortTrabajosByNewest = (trabajos = []) =>
+  [...trabajos].sort((a, b) => {
+    const dateDiff = getTrabajoDateValue(b) - getTrabajoDateValue(a);
+    if (dateDiff !== 0) return dateDiff;
+    return Number(b?.id || 0) - Number(a?.id || 0);
+  });
+
 export default function KanbanBoard({
   trabajos,
   onStatusChange,
@@ -87,7 +99,9 @@ export default function KanbanBoard({
             <KanbanColumn
               key={estado.key}
               estado={estado}
-              trabajos={trabajos.filter((t) => t.estatus === estado.key)}
+              trabajos={sortTrabajosByNewest(
+                trabajos.filter((t) => t.estatus === estado.key)
+              )}
               onStatusChange={onStatusChange}
               onEdit={onEdit}
               onDelete={onDelete}
@@ -104,7 +118,9 @@ export default function KanbanBoard({
           <KanbanColumn
             key={estado.key}
             estado={estado}
-            trabajos={trabajos.filter((t) => t.estatus === estado.key)}
+            trabajos={sortTrabajosByNewest(
+              trabajos.filter((t) => t.estatus === estado.key)
+            )}
             onStatusChange={onStatusChange}
             onEdit={onEdit}
             onDelete={onDelete}

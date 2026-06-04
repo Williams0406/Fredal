@@ -1,14 +1,14 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
-import { maquinariaAPI, ordenRequerimientoAPI, trabajoAPI, trabajadorAPI } from "@/lib/api";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { maquinariaAPI, trabajoAPI, trabajadorAPI } from "@/lib/api";
 import { useAuth } from "@/context/AuthContext";
 import { formatDisplayDate } from "@/lib/utils";
+import { useAutoRefresh } from "@/hooks/useAutoRefresh";
 
 import KanbanBoard from "@/components/trabajos/KanbanBoard";
 import TrabajoFormModal from "@/components/trabajos/TrabajoFormModal";
 import TrabajoDetalleModal from "@/components/trabajos/TrabajoDetalleModal";
-import OrdenRequerimientoTable from "@/components/ordenes/OrdenRequerimientoTable";
 import { FilterField, FilterInput, FilterPanel, FilterSelect } from "@/components/ui/FilterPanel";
 import { Search } from "lucide-react";
 
@@ -45,22 +45,20 @@ export default function TrabajosPage() {
   const [detalleOpen, setDetalleOpen] = useState(false);
   const [detalleId, setDetalleId] = useState(null);
   const [loading, setLoading] = useState(true);
-  const [requerimientosTecnico, setRequerimientosTecnico] = useState([]);
-  const [loadingRequerimientosTecnico, setLoadingRequerimientosTecnico] = useState(false);
   const [filtros, setFiltros] = useState(initialFilters);
   const [viewMode, setViewMode] = useState("kanban");
 
-  const loadTrabajos = async () => {
-    setLoading(true);
+  const loadTrabajos = useCallback(async ({ silent = false } = {}) => {
+    if (!silent) setLoading(true);
     try {
       const res = await trabajoAPI.list();
       setTrabajos(res.data);
     } catch (error) {
       console.error("Error cargando trabajos:", error);
     } finally {
-      setLoading(false);
+      if (!silent) setLoading(false);
     }
-  };
+  }, []);
 
   useEffect(() => {
      let mounted = true;
@@ -92,6 +90,12 @@ export default function TrabajosPage() {
     };
   }, []);
 
+  useAutoRefresh(
+    () => loadTrabajos({ silent: true }),
+    5000,
+    !modalOpen && !detalleOpen
+  );
+
   const normalizeRole = (role) => {
     if (!role) return "";
     if (typeof role === "string") return role.toLowerCase();
@@ -105,33 +109,6 @@ export default function TrabajosPage() {
       ? trabajo.tecnicos.includes(trabajadorId)
       : false;
 
-  useEffect(() => {
-    if (!isTecnico) {
-      setRequerimientosTecnico([]);
-      return;
-    }
-
-    let active = true;
-    setLoadingRequerimientosTecnico(true);
-
-    ordenRequerimientoAPI
-      .list()
-      .then((response) => {
-        if (!active) return;
-        setRequerimientosTecnico(response.data || []);
-      })
-      .catch((error) => {
-        console.error("Error cargando requerimientos del técnico:", error);
-      })
-      .finally(() => {
-        if (active) setLoadingRequerimientosTecnico(false);
-      });
-
-    return () => {
-      active = false;
-    };
-  }, [isTecnico, trabajadorId]);
-  
   const tecnicoLookup = useMemo(
     () =>
       tecnicos.reduce((acc, tecnico) => {
@@ -217,17 +194,6 @@ export default function TrabajosPage() {
     setDetalleOpen(true);
   };
 
-  const handleConfirmarRequerimiento = async (orden) => {
-    try {
-      await ordenRequerimientoAPI.confirmarRecepcion(orden.id);
-      const response = await ordenRequerimientoAPI.list();
-      setRequerimientosTecnico(response.data || []);
-    } catch (error) {
-      console.error("Error confirmando requerimiento:", error);
-      alert(error?.response?.data?.detail || "No se pudo confirmar la recepción del requerimiento.");
-    }
-  };
-
   const trabajosFiltrados = trabajos.filter((t) => {
     if (isTecnico && !isTrabajoAsignado(t)) return false;
     if (filtros.prioridad && t.prioridad !== filtros.prioridad) return false;
@@ -291,23 +257,6 @@ export default function TrabajosPage() {
 
       {isTecnico && (
         <p className="text-sm text-gray-500">Los técnicos solo pueden visualizar e interactuar con órdenes asignadas.</p>
-      )}
-
-      {isTecnico && (
-        <div className="space-y-3">
-          <div>
-            <h2 className="text-lg font-semibold text-[#1e3a8a]">Órdenes de requerimiento asignadas</h2>
-            <p className="text-sm text-gray-500 mt-1">
-              Aquí ves las entregas de almacén pendientes de validación por técnico.
-            </p>
-          </div>
-          <OrdenRequerimientoTable
-            ordenes={requerimientosTecnico}
-            loading={loadingRequerimientosTecnico}
-            onConfirmarTecnico={handleConfirmarRequerimiento}
-            emptyMessage="No tienes órdenes de requerimiento pendientes."
-          />
-        </div>
       )}
 
       <FilterPanel

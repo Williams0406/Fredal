@@ -39,6 +39,8 @@ export default function Sidebar({ collapsed, onToggle, onMobileClose }) {
   const menuItems = MENU_ITEMS.filter((item) =>
     item.roles.some((role) => roles.includes(role))
   );
+  const canSeeDashboard = menuItems.some((item) => item.path === "/dashboard");
+  const homePath = canSeeDashboard ? "/dashboard" : "/trabajos";
 
   const expandedContentClass = collapsed ? "block md:hidden" : "block";
   const expandedInlineFlexClass = collapsed
@@ -69,7 +71,7 @@ export default function Sidebar({ collapsed, onToggle, onMobileClose }) {
             }`}
           >
             <Link
-              href="/dashboard"
+              href={homePath}
               className={`flex min-w-0 items-center gap-3 ${
                 collapsed ? "md:flex-col md:gap-2" : ""
               }`}

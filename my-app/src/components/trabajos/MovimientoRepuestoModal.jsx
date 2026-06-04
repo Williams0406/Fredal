@@ -30,7 +30,13 @@ const formatFileSize = (bytes) => {
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 };
 
-export default function MovimientoRepuestoModal({ open, onClose, actividad, onSaved }) {
+export default function MovimientoRepuestoModal({
+  open,
+  onClose,
+  actividad,
+  onSaved,
+  canManagePlannedActivities = false,
+}) {
   const { trabajador } = useAuth();
   const [items, setItems] = useState([]);
   const [tecnicosAsignados, setTecnicosAsignados] = useState([]);
@@ -60,6 +66,7 @@ export default function MovimientoRepuestoModal({ open, onClose, actividad, onSa
   const movimientos = [...movimientosDB, ...movimientosNew];
   const esActividadPlanificada = Boolean(actividad?.es_planificada);
   const esActividadRealizada = !esActividadPlanificada;
+  const canManageEvidencias = esActividadRealizada || canManagePlannedActivities;
   const selectedItem = items.find((i) => String(i.id) === String(form.item));
   const selectedItemLabel = selectedItem ? `${selectedItem.codigo} - ${selectedItem.nombre}` : "";
   const esConsumible = selectedItem?.tipo_insumo === "CONSUMIBLE";
@@ -487,7 +494,7 @@ export default function MovimientoRepuestoModal({ open, onClose, actividad, onSa
   const handleSave = async () => {
     setLoading(true);
     try {
-      if (esActividadRealizada && evidenciasPendientes.length) {
+      if (canManageEvidencias && evidenciasPendientes.length) {
         const uploadRes = await actividadTrabajoAPI.subirEvidencias(
           actividad.id,
           evidenciasPendientes.map((entry) => entry.file)
@@ -548,7 +555,7 @@ export default function MovimientoRepuestoModal({ open, onClose, actividad, onSa
             <span className="px-2.5 py-1 rounded-full bg-white border text-slate-700">Registros: {movimientosFiltrados.length}</span>
             <span className="px-2.5 py-1 rounded-full bg-white border text-slate-700">Nuevos: {movimientosNew.length}</span>
             <span className="px-2.5 py-1 rounded-full bg-white border text-slate-700">Guardados: {movimientosDB.length}</span>
-            {esActividadRealizada && <span className="px-2.5 py-1 rounded-full bg-white border text-slate-700">Evidencias: {totalEvidencias}</span>}
+            {canManageEvidencias && <span className="px-2.5 py-1 rounded-full bg-white border text-slate-700">Evidencias: {totalEvidencias}</span>}
           </div>
         </div>
 
@@ -718,13 +725,13 @@ export default function MovimientoRepuestoModal({ open, onClose, actividad, onSa
             </div>
           </div>
 
-          {esActividadRealizada && (
+          {canManageEvidencias && (
             <div className="rounded-xl border border-slate-200 bg-slate-50 p-4 space-y-4">
               <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
                 <div>
                   <h4 className="text-sm font-semibold text-slate-800">Evidencias de trabajo</h4>
                   <p className="text-xs text-slate-600">
-                    Puedes adjuntar varias fotos para respaldar la actividad realizada. En Railway usa Cloudinary si las variables estan configuradas; en local guarda en `media/`.
+                    Puedes adjuntar varias fotos para respaldar esta actividad. En Railway usa Cloudinary si las variables estan configuradas; en local guarda en `media/`.
                   </p>
                 </div>
 

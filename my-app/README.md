@@ -4,7 +4,13 @@ This is the web frontend for the Fredal operational platform. It is built with [
 
 ## Getting Started
 
-First, make sure you have the backend running and an environment variable pointing to the API:
+First, make sure you have the backend running and create the local environment file from the committed template:
+
+```bash
+cp .env.example .env.local
+```
+
+The default local API URL is:
 
 ```bash
 NEXT_PUBLIC_API_URL=http://localhost:8000

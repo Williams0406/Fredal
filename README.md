@@ -27,6 +27,22 @@
 
 ---
 
+## Configuración local de variables de entorno
+
+El repositorio incluye plantillas versionadas para configurar el backend y el frontend en desarrollo local sin exponer secretos reales.
+
+```bash
+cp core/.env.example core/.env
+cp my-app/.env.example my-app/.env.local
+```
+
+Valores principales incluidos:
+
+- `core/.env.example`: `DEBUG`, `DJANGO_SECRET_KEY`, `ALLOWED_HOSTS`, `CORS_ALLOWED_ORIGINS`, `CSRF_TRUSTED_ORIGINS`, `DATABASE_URL` y placeholders opcionales de Cloudinary.
+- `my-app/.env.example`: `NEXT_PUBLIC_API_URL` y `EXPO_PUBLIC_API_URL` apuntando al backend local en `http://localhost:8000`.
+
+Después de copiar las plantillas, ejecuta el backend desde `core/` y el frontend desde `my-app/` siguiendo los comandos habituales del proyecto.
+
 ## ¿Qué es Fredal?
 
 > **Fredal** convierte cada acción operativa del día a día — una orden de trabajo, un despacho de repuesto, una compra — en información estructurada y accionable. Deja de buscar datos en hojas de cálculo dispersas y empieza a tomar decisiones sobre datos reales.

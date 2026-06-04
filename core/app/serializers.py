@@ -62,6 +62,7 @@ from .models import (
     Asistencia,
 )
 from .permissions import (
+    can_assign_requirement_technician,
     can_manage_planned_activities,
     is_compras_user,
     is_maintenance_boss,
@@ -1056,6 +1057,7 @@ class OrdenRequerimientoDetalleSerializer(serializers.ModelSerializer):
 class OrdenRequerimientoSerializer(serializers.ModelSerializer):
     items = OrdenRequerimientoDetalleSerializer(source="detalles", many=True)
     trabajo_codigo = serializers.CharField(source="trabajo.codigo_orden", read_only=True)
+    trabajo_tecnicos = serializers.SerializerMethodField()
     tecnico_asignado_nombre = serializers.SerializerMethodField()
     pendiente_confirmacion_tecnico = serializers.SerializerMethodField()
     tiene_items_sin_stock = serializers.SerializerMethodField()
@@ -1072,6 +1074,7 @@ class OrdenRequerimientoSerializer(serializers.ModelSerializer):
             "codigo",
             "trabajo",
             "trabajo_codigo",
+            "trabajo_tecnicos",
             "estado",
             "tecnico_asignado",
             "tecnico_asignado_nombre",
@@ -1096,6 +1099,7 @@ class OrdenRequerimientoSerializer(serializers.ModelSerializer):
             "fecha_confirmacion_tecnico",
             "emitido_por",
             "trabajo_codigo",
+            "trabajo_tecnicos",
             "tecnico_asignado_nombre",
             "pendiente_confirmacion_tecnico",
             "tiene_items_sin_stock",
@@ -1110,6 +1114,9 @@ class OrdenRequerimientoSerializer(serializers.ModelSerializer):
         if not obj.tecnico_asignado:
             return None
         return f"{obj.tecnico_asignado.nombres} {obj.tecnico_asignado.apellidos}".strip()
+
+    def get_trabajo_tecnicos(self, obj):
+        return list(obj.trabajo.tecnicos.values_list("id", flat=True))
 
     def get_pendiente_confirmacion_tecnico(self, obj):
         return obj.estado == OrdenRequerimiento.Estado.ENTREGADO and not obj.recepcion_confirmada_tecnico
@@ -1138,15 +1145,7 @@ class OrdenRequerimientoSerializer(serializers.ModelSerializer):
         ):
             return False
 
-        if is_storage_user(user):
-            return True
-
-        trabajador = obtener_trabajador_request(request) if request else None
-        return bool(
-            trabajador
-            and obj.tecnico_asignado_id
-            and trabajador.id == obj.tecnico_asignado_id
-        )
+        return is_storage_user(user)
 
     def get_puede_marcar_sin_stock(self, obj):
         request = self.context.get("request")
@@ -1176,7 +1175,21 @@ class OrdenRequerimientoSerializer(serializers.ModelSerializer):
         user = getattr(request, "user", None)
         if not user or not user.is_authenticated:
             return False
-        return is_storage_user(user) and obj.estado != OrdenRequerimiento.Estado.ENTREGADO
+        return (
+            can_assign_requirement_technician(user)
+            and obj.estado != OrdenRequerimiento.Estado.ENTREGADO
+        )
+
+    def validate(self, attrs):
+        attrs = super().validate(attrs)
+        tecnico = attrs.get("tecnico_asignado")
+        if tecnico:
+            trabajo = attrs.get("trabajo") or getattr(self.instance, "trabajo", None)
+            if trabajo and not trabajo.tecnicos.filter(id=tecnico.id).exists():
+                raise serializers.ValidationError(
+                    {"tecnico_asignado": "El técnico seleccionado no está asignado a la orden de trabajo."}
+                )
+        return attrs
 
     def create(self, validated_data):
         items_data = validated_data.pop("detalles", [])
@@ -3095,6 +3108,7 @@ class ReporteIPERCSerializer(serializers.ModelSerializer):
 
     class GestionCambioSerializer(serializers.ModelSerializer):
         estado_label = serializers.CharField(source="get_estado_display", read_only=True)
+        iperc_label = serializers.SerializerMethodField()
 
         class Meta:
             model = GestionCambio
@@ -3105,7 +3119,20 @@ class ReporteIPERCSerializer(serializers.ModelSerializer):
                 "estado_label",
                 "observacion",
                 "iperc",
+                "iperc_label",
+                "created_at",
+                "updated_at",
             ]
+
+        def get_iperc_label(self, obj):
+            if not obj.iperc_id:
+                return ""
+            reporte = getattr(obj.iperc, "reporte_iperc", None)
+            if reporte:
+                codigo = getattr(reporte, "codigo", "")
+                motivo = reporte.get_motivo_display() if getattr(reporte, "motivo", None) else ""
+                return " - ".join(part for part in [codigo, motivo] if part)
+            return f"IPERC #{obj.iperc_id}"
 
     class IPERCSerializer(serializers.ModelSerializer):
         EVALUACION_VALID_VALUES = {"", "ALTO", "MEDIO", "BAJO"}

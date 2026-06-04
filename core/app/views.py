@@ -13,6 +13,7 @@ from datetime import timedelta
 from .permissions import IsAdmin
 from django.db.models import Avg, Count, Max, Prefetch, Sum
 from decimal import Decimal
+from collections import defaultdict
 from itertools import chain
 from datetime import datetime, time
 from django.db import transaction
@@ -131,10 +132,12 @@ from .permissions import (
     EstandarizacionPermission,
     ReporteOrdenPermission,
     TrabajoPermission,
+    ActividadTrabajoPermission,
     CompraPermission,
     OrdenCompraPermission,
     OrdenRequerimientoPermission,
     CambioEquipoPermission,
+    can_assign_requirement_technician,
     can_manage_planned_activities,
     is_compras_user,
     is_maintenance_boss,
@@ -2186,7 +2189,12 @@ class OrdenRequerimientoViewSet(viewsets.ModelViewSet):
             "emitido_por",
             "confirmado_por_tecnico",
         )
-        .prefetch_related("detalles__item", "detalles__proveedor", "detalles__unidad_medida")
+        .prefetch_related(
+            "detalles__item",
+            "detalles__proveedor",
+            "detalles__unidad_medida",
+            "trabajo__tecnicos",
+        )
         .all()
     )
     serializer_class = OrdenRequerimientoSerializer
@@ -2235,9 +2243,6 @@ class OrdenRequerimientoViewSet(viewsets.ModelViewSet):
         serializer.save()
 
     def partial_update(self, request, *args, **kwargs):
-        if not is_maintenance_boss(request.user):
-            raise PermissionDenied("Solo el jefe de mantenimiento puede actualizar esta orden.")
-
         permitidos = {"tecnico_asignado", "observaciones"}
         extras = set(request.data.keys()) - permitidos
         if extras:
@@ -2245,6 +2250,19 @@ class OrdenRequerimientoViewSet(viewsets.ModelViewSet):
                 {"detail": "Solo se puede actualizar el técnico asignado u observaciones."},
                 status=status.HTTP_400_BAD_REQUEST,
             )
+
+        requested_fields = set(request.data.keys())
+        if requested_fields == {"tecnico_asignado"}:
+            if not can_assign_requirement_technician(request.user):
+                raise PermissionDenied(
+                    "Solo jefaturas de mantenimiento o almacén pueden asignar el técnico."
+                )
+            if self.get_object().estado == OrdenRequerimiento.Estado.ENTREGADO:
+                raise PermissionDenied(
+                    "No se puede cambiar el técnico de una orden ya entregada."
+                )
+        elif not is_maintenance_boss(request.user):
+            raise PermissionDenied("Solo el jefe de mantenimiento puede actualizar esta orden.")
 
         return super().partial_update(request, *args, **kwargs)
 
@@ -2358,13 +2376,7 @@ class OrdenRequerimientoViewSet(viewsets.ModelViewSet):
         orden = self.get_object()
         nuevo_estado = request.data.get("estado")
         detalle_id = request.data.get("detalle_id")
-        trabajador = self._get_trabajador_request()
         es_storage = is_storage_user(request.user)
-        es_tecnico_asignado = bool(
-            trabajador
-            and orden.tecnico_asignado_id
-            and trabajador.id == orden.tecnico_asignado_id
-        )
 
         if nuevo_estado not in {
             OrdenRequerimiento.Estado.SIN_STOCK,
@@ -2378,9 +2390,9 @@ class OrdenRequerimientoViewSet(viewsets.ModelViewSet):
         if nuevo_estado == OrdenRequerimiento.Estado.SIN_STOCK and not es_storage:
             raise PermissionDenied("Solo el área de almacén puede marcar la orden como sin stock.")
 
-        if nuevo_estado == OrdenRequerimiento.Estado.ENTREGADO and not (es_storage or es_tecnico_asignado):
+        if nuevo_estado == OrdenRequerimiento.Estado.ENTREGADO and not es_storage:
             raise PermissionDenied(
-                "Solo el técnico asignado o el área de almacén pueden marcar la orden como entregada."
+                "Solo el área de almacén puede marcar la orden como entregada."
             )
 
         if orden.estado == OrdenRequerimiento.Estado.ENTREGADO:
@@ -2551,10 +2563,188 @@ class OrdenTrabajoViewSet(viewsets.ModelViewSet):
 
         return queryset
 
+    @staticmethod
+    def _actividad_signature(actividad):
+        return (
+            actividad.tipo_actividad,
+            actividad.tipo_mantenimiento,
+            actividad.subtipo,
+            actividad.descripcion,
+        )
+
+    @staticmethod
+    def _assert_user_is_assigned_tecnico(user, orden):
+        if not user.groups.filter(name="Tecnico").exists():
+            raise PermissionDenied("Solo el tecnico asignado puede completar actividades")
+
+        try:
+            trabajador = user.perfil.trabajador
+        except PerfilUsuario.DoesNotExist:
+            raise PermissionDenied("Usuario sin trabajador asociado")
+
+        if not orden.tecnicos.filter(id=trabajador.id).exists():
+            raise PermissionDenied("No puedes completar actividades en esta orden")
+
+        return trabajador
+
+    def _copiar_repuestos_planificados(self, actividad_origen, actividad_destino, request):
+        creados = 0
+        repuestos_existentes = set(
+            actividad_destino.repuestos.values_list("item_unidad_id", flat=True)
+        )
+
+        for movimiento in actividad_origen.repuestos.select_related("tecnico", "item_unidad"):
+            if movimiento.item_unidad_id in repuestos_existentes:
+                continue
+
+            data = {
+                "actividad": actividad_destino.id,
+                "item_unidad": movimiento.item_unidad_id,
+            }
+            if movimiento.tecnico_id:
+                data["tecnico"] = movimiento.tecnico_id
+
+            serializer = MovimientoRepuestoSerializer(
+                data=data,
+                context={"request": request},
+            )
+            serializer.is_valid(raise_exception=True)
+            serializer.save()
+            repuestos_existentes.add(movimiento.item_unidad_id)
+            creados += 1
+
+        return creados
+
+    def _copiar_consumibles_planificados(self, actividad_origen, actividad_destino, request):
+        creados = 0
+        consumibles_existentes = set(
+            actividad_destino.consumibles.values_list(
+                "item_id",
+                "cantidad",
+                "unidad_medida_id",
+                "tecnico_id",
+            )
+        )
+
+        for movimiento in actividad_origen.consumibles.select_related(
+            "tecnico",
+            "item",
+            "unidad_medida",
+        ):
+            firma_movimiento = (
+                movimiento.item_id,
+                movimiento.cantidad,
+                movimiento.unidad_medida_id,
+                movimiento.tecnico_id,
+            )
+            if firma_movimiento in consumibles_existentes:
+                continue
+
+            data = {
+                "actividad": actividad_destino.id,
+                "item": movimiento.item_id,
+                "cantidad": movimiento.cantidad,
+            }
+            if movimiento.unidad_medida_id:
+                data["unidad_medida"] = movimiento.unidad_medida_id
+            if movimiento.tecnico_id:
+                data["tecnico"] = movimiento.tecnico_id
+
+            serializer = MovimientoConsumibleSerializer(
+                data=data,
+                context={"request": request},
+            )
+            serializer.is_valid(raise_exception=True)
+            serializer.save()
+            consumibles_existentes.add(firma_movimiento)
+            creados += 1
+
+        return creados
+
+    @action(
+        detail=True,
+        methods=["post"],
+        url_path="completar-plan",
+        permission_classes=[IsAuthenticated],
+    )
+    def completar_plan(self, request, pk=None):
+        orden = self.get_object()
+        self._assert_user_is_assigned_tecnico(request.user, orden)
+
+        if orden.estatus == OrdenTrabajo.Estatus.FINALIZADO:
+            return Response(
+                {"detail": "No se pueden completar actividades en una orden finalizada"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        actividades_planificadas = (
+            orden.actividades
+            .filter(es_planificada=True)
+            .prefetch_related("repuestos", "consumibles")
+            .order_by("id")
+        )
+        if not actividades_planificadas.exists():
+            return Response(
+                {"detail": "No hay actividades planificadas para completar"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        registradas_por_firma = defaultdict(list)
+        for actividad in orden.actividades.filter(es_planificada=False).order_by("id"):
+            registradas_por_firma[self._actividad_signature(actividad)].append(actividad)
+
+        actividades_creadas = 0
+        repuestos_creados = 0
+        consumibles_creados = 0
+
+        with transaction.atomic():
+            for actividad in actividades_planificadas:
+                firma = self._actividad_signature(actividad)
+                if registradas_por_firma[firma]:
+                    actividad_registrada = registradas_por_firma[firma].pop(0)
+                else:
+                    serializer = ActividadTrabajoSerializer(
+                        data={
+                            "orden": orden.id,
+                            "tipo_actividad": actividad.tipo_actividad,
+                            "tipo_mantenimiento": actividad.tipo_mantenimiento,
+                            "subtipo": actividad.subtipo,
+                            "descripcion": actividad.descripcion,
+                            "es_planificada": False,
+                        },
+                        context={"request": request},
+                    )
+                    serializer.is_valid(raise_exception=True)
+                    actividad_registrada = serializer.save()
+                    actividades_creadas += 1
+
+                repuestos_creados += self._copiar_repuestos_planificados(
+                    actividad,
+                    actividad_registrada,
+                    request,
+                )
+                consumibles_creados += self._copiar_consumibles_planificados(
+                    actividad,
+                    actividad_registrada,
+                    request,
+                )
+
+        serializer = self.get_serializer(self.get_object())
+        return Response(
+            {
+                "detail": "Actividades completadas correctamente",
+                "actividades_creadas": actividades_creadas,
+                "repuestos_creados": repuestos_creados,
+                "consumibles_creados": consumibles_creados,
+                "orden": serializer.data,
+            },
+            status=status.HTTP_200_OK,
+        )
+
 class ActividadTrabajoViewSet(viewsets.ModelViewSet):
     queryset = ActividadTrabajo.objects.all()
     serializer_class = ActividadTrabajoSerializer
-    permission_classes = [TrabajoPermission]
+    permission_classes = [ActividadTrabajoPermission]
     filter_backends = [DjangoFilterBackend]
     filterset_fields = ["orden"]
 
@@ -2564,6 +2754,20 @@ class ActividadTrabajoViewSet(viewsets.ModelViewSet):
             "Solo Jefe de Tecnicos, Jefe de Almaceneros o admin pueden "
             "registrar o modificar actividades planificadas"
         )
+
+    def get_queryset(self):
+        queryset = super().get_queryset()
+        user = self.request.user
+
+        if user.groups.filter(name="Tecnico").exists():
+            try:
+                trabajador = user.perfil.trabajador
+            except PerfilUsuario.DoesNotExist:
+                return queryset.none()
+
+            return queryset.filter(orden__tecnicos=trabajador)
+
+        return queryset
 
     def perform_create(self, serializer):
         user = self.request.user
@@ -2601,11 +2805,31 @@ class ActividadTrabajoViewSet(viewsets.ModelViewSet):
             if not can_manage_planned_activities(user):
                 raise PermissionDenied(self._planned_activity_message())
 
+        if user.groups.filter(name="Tecnico").exists():
+            try:
+                trabajador = user.perfil.trabajador
+            except PerfilUsuario.DoesNotExist:
+                raise PermissionDenied("Usuario sin trabajador asociado")
+
+            orden = serializer.validated_data.get("orden", actividad.orden)
+            if not orden.tecnicos.filter(id=trabajador.id).exists():
+                raise PermissionDenied("No puedes modificar actividades en esta orden")
+
         serializer.save()
 
     def perform_destroy(self, instance):
         if instance.es_planificada and not can_manage_planned_activities(self.request.user):
             raise PermissionDenied(self._planned_activity_message())
+
+        user = self.request.user
+        if user.groups.filter(name="Tecnico").exists():
+            try:
+                trabajador = user.perfil.trabajador
+            except PerfilUsuario.DoesNotExist:
+                raise PermissionDenied("Usuario sin trabajador asociado")
+
+            if not instance.orden.tecnicos.filter(id=trabajador.id).exists():
+                raise PermissionDenied("No puedes eliminar actividades en esta orden")
 
         instance.delete()
 
@@ -2618,10 +2842,9 @@ class ActividadTrabajoViewSet(viewsets.ModelViewSet):
     def subir_evidencias(self, request, pk=None):
         actividad = self.get_object()
 
-        if actividad.es_planificada:
-            return Response(
-                {"detail": "Solo las actividades realizadas pueden guardar evidencias."},
-                status=status.HTTP_400_BAD_REQUEST,
+        if actividad.es_planificada and not can_manage_planned_activities(request.user):
+            raise PermissionDenied(
+                "Solo jefaturas o admin pueden guardar evidencias en actividades planificadas."
             )
 
         imagenes = request.FILES.getlist("imagenes")
@@ -2649,10 +2872,9 @@ class ActividadTrabajoViewSet(viewsets.ModelViewSet):
     def eliminar_evidencia(self, request, pk=None, evidencia_id=None):
         actividad = self.get_object()
 
-        if actividad.es_planificada:
-            return Response(
-                {"detail": "Solo las actividades realizadas pueden gestionar evidencias."},
-                status=status.HTTP_400_BAD_REQUEST,
+        if actividad.es_planificada and not can_manage_planned_activities(request.user):
+            raise PermissionDenied(
+                "Solo jefaturas o admin pueden gestionar evidencias en actividades planificadas."
             )
 
         evidencia = actividad.evidencias.filter(pk=evidencia_id).first()
@@ -2949,7 +3171,7 @@ class GestionCambioViewSet(viewsets.ModelViewSet):
         GestionCambio.objects
         .select_related("iperc", "iperc__reporte_iperc")
         .all()
-        .order_by("iperc_id", "id")
+        .order_by("-created_at", "-id")
     )
     serializer_class = _ReporteIPERCSerializer.GestionCambioSerializer
     permission_classes = [ReporteOrdenPermission]

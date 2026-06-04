@@ -22,7 +22,7 @@ const ROLE_REDIRECT = {
   JEFE_MANTENIMIENTO: "/dashboard/mantenimiento",
   JEFE_ALMACEN: "/dashboard/almacen",
   MANAGE_COMPRAS: "/dashboard/compras",
-  TECNICO: "/dashboard/tecnico",
+  TECNICO: "/trabajos",
   ALMACENERO: "/dashboard/almacen",
 };
 

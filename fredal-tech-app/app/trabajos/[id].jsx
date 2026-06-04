@@ -24,6 +24,7 @@ import MovimientoModal from '../../components/movimientos/MovimientoModal';
 import { useAuthStore } from '../../store/authStore';
 import { API_URL } from '../../lib/constants';
 import { ordenRequerimientoAPI } from '../../lib/api';
+import { generateTrabajoResumenPdfMobile } from '../../lib/trabajoResumenPdf';
 import {
   canEditTrabajoData,
   canCreateRequirementOrders,
@@ -449,6 +450,8 @@ export default function TrabajoDetalleScreen() {
       return parseCollection(data);
     },
     enabled: Boolean(trabajoId),
+    refetchInterval: 5000,
+    refetchIntervalInBackground: false,
   });
   const patchTrabajoMut = usePatchTrabajo();
 
@@ -479,6 +482,7 @@ export default function TrabajoDetalleScreen() {
   const [showFinModal, setShowFinModal] = useState(false);
   const [showEditSheet, setShowEditSheet] = useState(false);
   const [actividadSeleccionada, setActividadSeleccionada] = useState(null);
+  const [generatingResumen, setGeneratingResumen] = useState(false);
 
   const esFinalizado = trabajo?.estatus === 'FINALIZADO';
   const esPendiente = trabajo?.estatus === 'PENDIENTE';
@@ -611,6 +615,36 @@ export default function TrabajoDetalleScreen() {
     );
   };
 
+  const handleDownloadResumen = async () => {
+    if (!trabajo || generatingResumen) return;
+
+    setGeneratingResumen(true);
+    try {
+      const maquinariaLabel =
+        [trabajo.maquinaria_codigo, trabajo.maquinaria_nombre].filter(Boolean).join(' - ') ||
+        'Sin maquinaria asignada';
+      const tecnicosCount = Array.isArray(trabajo.tecnicos) ? trabajo.tecnicos.length : 0;
+      const tecnicosLabel =
+        trabajo.tecnicos_nombres ||
+        trabajo.tecnicos_label ||
+        `${tecnicosCount} tecnico${tecnicosCount === 1 ? '' : 's'} asignado${tecnicosCount === 1 ? '' : 's'}`;
+
+      await generateTrabajoResumenPdfMobile({
+        trabajo,
+        actividades: registradas,
+        maquinariaLabel,
+        tecnicosLabel,
+      });
+    } catch (error) {
+      Alert.alert(
+        'No se pudo generar el resumen',
+        error?.message || 'Intentalo nuevamente en unos segundos.'
+      );
+    } finally {
+      setGeneratingResumen(false);
+    }
+  };
+
   if (isLoading) {
     return (
       <View style={styles.loadingScreen}>
@@ -666,15 +700,32 @@ export default function TrabajoDetalleScreen() {
               <Text style={styles.sectionTitle}>Resumen operativo</Text>
               <Text style={styles.sectionMeta}>OT activa</Text>
             </View>
-            {canEditTrabajo ? (
+            <View style={styles.summaryActions}>
               <Pressable
                 style={styles.summaryEditButton}
-                onPress={() => setShowEditSheet(true)}
+                onPress={handleDownloadResumen}
+                disabled={generatingResumen}
               >
-                <Ionicons name='create-outline' size={15} color={colors.navy} />
-                <Text style={styles.summaryEditButtonText}>Editar</Text>
+                {generatingResumen ? (
+                  <ActivityIndicator size='small' color={colors.navy} />
+                ) : (
+                  <Ionicons name='download-outline' size={15} color={colors.navy} />
+                )}
+                <Text style={styles.summaryEditButtonText}>
+                  {generatingResumen ? 'Generando...' : 'Resumen'}
+                </Text>
               </Pressable>
-            ) : null}
+
+              {canEditTrabajo ? (
+                <Pressable
+                  style={styles.summaryEditButton}
+                  onPress={() => setShowEditSheet(true)}
+                >
+                  <Ionicons name='create-outline' size={15} color={colors.navy} />
+                  <Text style={styles.summaryEditButtonText}>Editar</Text>
+                </Pressable>
+              ) : null}
+            </View>
           </View>
 
           <View style={styles.metricsRow}>
@@ -1072,6 +1123,12 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     marginBottom: 14,
     gap: 12,
+  },
+  summaryActions: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    justifyContent: 'flex-end',
+    gap: 8,
   },
   summaryEditButton: {
     minHeight: 38,

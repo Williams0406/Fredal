@@ -29,7 +29,7 @@ export function useProtectedRoute() {
       routeConfig &&
       !routeConfig.roles.some((role) => roles.includes(role))
     ) {
-      router.replace("/dashboard"); // o /403 si luego lo creas
+      router.replace(roles.includes("Tecnico") ? "/trabajos" : "/dashboard");
     }
   }, [loading, isAuthenticated, roles, pathname, router]);
 

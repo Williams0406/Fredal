@@ -6,6 +6,10 @@ module.exports = () => {
   return {
     expo: {
       ...baseExpoConfig,
+      plugins: [
+        ...(baseExpoConfig.plugins ?? []),
+        'expo-sharing',
+      ],
       extra: {
         ...baseExpoConfig.extra,
       },

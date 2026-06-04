@@ -3,7 +3,6 @@ export const MENU_ITEMS = [
     label: "Dashboard",
     path: "/dashboard",
     roles: [
-      "Tecnico",
       "Jefe de Tecnicos",
       "Almacenero",
       "Jefe de Almaceneros",
@@ -80,6 +79,11 @@ export const MENU_ITEMS = [
   {
     label: "IPERC",
     path: "/iperc",
+    roles: ["admin", "Jefe de Tecnicos", "Jefe de Almaceneros", "Jefe de Mantenimiento", "Tecnico"],
+  },
+  {
+    label: "Gestión Cambio",
+    path: "/gestion-cambio",
     roles: ["admin", "Jefe de Tecnicos", "Jefe de Almaceneros", "Jefe de Mantenimiento", "Tecnico"],
   },
   {

@@ -67,6 +67,10 @@ export default function OrdenRequerimientoTable({
         const canManageDetails = (orden.items || []).some(
           (itemRow) => itemRow.puede_marcar_sin_stock || itemRow.sin_stock
         );
+        const trabajoTecnicoIds = new Set((orden.trabajo_tecnicos || []).map((id) => Number(id)));
+        const tecnicosDisponibles = tecnicos.filter((tecnico) =>
+          trabajoTecnicoIds.has(Number(tecnico.id))
+        );
 
         return (
           <div key={orden.id} className="rounded-2xl border border-gray-200 bg-white p-5 shadow-sm">
@@ -136,15 +140,21 @@ export default function OrdenRequerimientoTable({
                 <select
                   value={orden.tecnico_asignado || ""}
                   onChange={(event) => onAssignTecnico?.(orden, event.target.value)}
+                  disabled={tecnicosDisponibles.length === 0}
                   className="w-full max-w-sm rounded-lg border border-gray-300 px-3 py-2.5 text-sm bg-white"
                 >
                   <option value="">Selecciona un tecnico</option>
-                  {tecnicos.map((tecnico) => (
+                  {tecnicosDisponibles.map((tecnico) => (
                     <option key={tecnico.id} value={tecnico.id}>
                       {tecnico.nombres} {tecnico.apellidos}
                     </option>
                   ))}
                 </select>
+                {tecnicosDisponibles.length === 0 && (
+                  <p className="mt-2 text-xs text-amber-700">
+                    La orden de trabajo no tiene técnicos asignados.
+                  </p>
+                )}
               </div>
             )}
 

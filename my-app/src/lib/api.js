@@ -246,6 +246,7 @@ export const trabajoAPI = {
   update: (id, data) => api.put(`/api/trabajos/${id}/`, data),
   patch: (id, data) => api.patch(`/api/trabajos/${id}/`, data),
   delete: (id) => api.delete(`/api/trabajos/${id}/`),
+  completarPlan: (id) => api.post(`/api/trabajos/${id}/completar-plan/`),
   finalizar: (id, data) =>
     api.patch(`/api/trabajos/${id}/`, {
       ...data,

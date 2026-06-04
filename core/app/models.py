@@ -19,6 +19,21 @@ LIMA_TIME_ZONE = ZoneInfo("America/Lima")
 def current_local_date():
     return datetime.now(LIMA_TIME_ZONE).date()
 
+
+def generate_monthly_sequential_code(model_class, field_name, prefix):
+    created_date = current_local_date()
+    max_sequence = 0
+
+    for code in model_class.objects.filter(
+        **{f"{field_name}__startswith": f"{prefix}-"}
+    ).values_list(field_name, flat=True):
+        try:
+            max_sequence = max(max_sequence, int(str(code).split("-")[-1]))
+        except (TypeError, ValueError):
+            continue
+
+    return f"{prefix}-{created_date:%Y-%m}-{max_sequence + 1:04d}"
+
 # =========================
 # MODELOS BASE
 # =========================
@@ -607,20 +622,11 @@ class OrdenTrabajo(models.Model):
 
     def save(self, *args, **kwargs):
         if not self.codigo_orden:
-            year = timezone.now().year
-            last = (
-                OrdenTrabajo.objects
-                .filter(codigo_orden__startswith=f"OT-{year}")
-                .aggregate(max_code=Max("codigo_orden"))
-                ["max_code"]
+            self.codigo_orden = generate_monthly_sequential_code(
+                OrdenTrabajo,
+                "codigo_orden",
+                "OT",
             )
-
-            if last:
-                seq = int(last.split("-")[-1]) + 1
-            else:
-                seq = 1
-
-            self.codigo_orden = f"OT-{year}-{seq:05d}"
 
         super().save(*args, **kwargs)
 
@@ -1231,6 +1237,7 @@ class GestionCambio(TimeStampedModel):
     class Estado(models.TextChoices):
         SUGERIDO = "SUGERIDO", "Sugerido"
         APROBADO = "APROBADO", "Aprobado"
+        DESAPROBADO = "DESAPROBADO", "Desaprobado"
         EN_PROCESO = "EN_PROCESO", "En proceso"
         TERMINADO = "TERMINADO", "Terminado"
 
@@ -1244,6 +1251,8 @@ class GestionCambio(TimeStampedModel):
     iperc = models.ForeignKey(
         IPERC,
         on_delete=models.PROTECT,
+        null=True,
+        blank=True,
         related_name="gestiones_cambio",
     )
 
@@ -1251,7 +1260,11 @@ class GestionCambio(TimeStampedModel):
         ordering = ["-created_at", "-id"]
 
     def __str__(self):
-        motivo = self.iperc.reporte_iperc.get_motivo_display() if self.iperc.reporte_iperc_id else "IPERC"
+        motivo = "Sin IPERC"
+        if self.iperc_id and self.iperc.reporte_iperc_id:
+            motivo = self.iperc.reporte_iperc.get_motivo_display()
+        elif self.iperc_id:
+            motivo = "IPERC"
         return f"{self.get_estado_display()} - {motivo}"
 
 
@@ -1777,15 +1790,11 @@ class OrdenCompra(TimeStampedModel):
 
     def save(self, *args, **kwargs):
         if not self.codigo:
-            year = timezone.now().year
-            last = (
-                OrdenCompra.objects
-                .filter(codigo__startswith=f"OC-{year}")
-                .aggregate(max_code=Max("codigo"))
-                ["max_code"]
+            self.codigo = generate_monthly_sequential_code(
+                OrdenCompra,
+                "codigo",
+                "OC",
             )
-            seq = int(last.split("-")[-1]) + 1 if last else 1
-            self.codigo = f"OC-{year}-{seq:05d}"
 
         super().save(*args, **kwargs)
 
@@ -1868,15 +1877,11 @@ class OrdenRequerimiento(TimeStampedModel):
 
     def save(self, *args, **kwargs):
         if not self.codigo:
-            year = timezone.now().year
-            last = (
-                OrdenRequerimiento.objects
-                .filter(codigo__startswith=f"OR-{year}")
-                .aggregate(max_code=Max("codigo"))
-                ["max_code"]
+            self.codigo = generate_monthly_sequential_code(
+                OrdenRequerimiento,
+                "codigo",
+                "OR",
             )
-            seq = int(last.split("-")[-1]) + 1 if last else 1
-            self.codigo = f"OR-{year}-{seq:05d}"
 
         super().save(*args, **kwargs)
 

@@ -1,7 +1,8 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { compraAPI, ordenCompraAPI } from "@/lib/api";
+import { useAutoRefresh } from "@/hooks/useAutoRefresh";
 import CompraTable from "@/components/compras/CompraTable";
 import CompraForm from "@/components/compras/CompraForm";
 import TipoCambioModal from "@/components/compras/TipoCambioModal";
@@ -15,32 +16,32 @@ export default function ComprasPage() {
   const [loading, setLoading] = useState(true);
   const [deletingCompraId, setDeletingCompraId] = useState(null);
 
+  const loadData = useCallback(async ({ silent = false } = {}) => {
+    if (!silent) setLoading(true);
+    try {
+      const [comprasRes, ordenesRes] = await Promise.all([
+        compraAPI.list(),
+        ordenCompraAPI.list(),
+      ]);
+
+      setCompras(comprasRes.data || []);
+      setOrdenesCompra(ordenesRes.data || []);
+    } catch (error) {
+      console.error("Error cargando compras:", error);
+    } finally {
+      if (!silent) setLoading(false);
+    }
+  }, []);
+
   useEffect(() => {
-    let active = true;
-
-    const loadData = async () => {
-      setLoading(true);
-      try {
-        const [comprasRes, ordenesRes] = await Promise.all([
-          compraAPI.list(),
-          ordenCompraAPI.list(),
-        ]);
-
-        if (!active) return;
-        setCompras(comprasRes.data || []);
-        setOrdenesCompra(ordenesRes.data || []);
-      } catch (error) {
-        console.error("Error cargando compras:", error);
-      } finally {
-        if (active) setLoading(false);
-      }
-    };
-
     loadData();
-    return () => {
-      active = false;
-    };
-  }, [refresh]);
+  }, [loadData, refresh]);
+
+  useAutoRefresh(
+    () => loadData({ silent: true }),
+    5000,
+    true
+  );
 
   const handleDeleteRegistro = async (compraId) => {
     setDeletingCompraId(compraId);

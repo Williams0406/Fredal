@@ -53,7 +53,7 @@ export default function Navbar({ user }) {
       <div className="flex gap-4 items-center">
         <span className="font-bold text-lg">FREDAL</span>
 
-        <Link href="/dashboard">Dashboard</Link>
+        {role !== "Tecnico" && <Link href="/dashboard">Dashboard</Link>}
 
         {(role === "Administrador" || role === "Jefe de Tecnicos") && (
           <Link href="/trabajos">Trabajos</Link>

@@ -10,6 +10,8 @@ export const useActividades = (trabajoId) =>
       return data;
     },
     enabled: !!trabajoId,
+    refetchInterval: 5000,
+    refetchIntervalInBackground: false,
   });
 
 export const useCreateActividad = (trabajoId) => {

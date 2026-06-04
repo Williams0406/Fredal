@@ -137,6 +137,8 @@ export default function AlmacenDashboard() {
       const { data } = await ordenRequerimientoAPI.list();
       return parseCollection(data);
     },
+    refetchInterval: 5000,
+    refetchIntervalInBackground: false,
   });
 
   const ordenesCompraQuery = useQuery({
@@ -145,6 +147,8 @@ export default function AlmacenDashboard() {
       const { data } = await ordenCompraAPI.list();
       return parseCollection(data);
     },
+    refetchInterval: 5000,
+    refetchIntervalInBackground: false,
   });
 
   const itemsQuery = useQuery({
@@ -153,6 +157,8 @@ export default function AlmacenDashboard() {
       const { data } = await itemAPI.list({ vista: itemView });
       return parseCollection(data);
     },
+    refetchInterval: 5000,
+    refetchIntervalInBackground: false,
   });
 
   const changeOrderState = useMutation({

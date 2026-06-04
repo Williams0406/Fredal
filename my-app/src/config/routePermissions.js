@@ -3,7 +3,6 @@ export const ROUTE_PERMISSIONS = [
     path: "/dashboard",
     roles: [
       "admin",
-      "Tecnico",
       "Jefe de Tecnicos",
       "Almacenero",
       "Jefe de Almaceneros",
@@ -29,6 +28,10 @@ export const ROUTE_PERMISSIONS = [
   {
     path: "/gestion",
     roles: ["admin", "Jefe de Tecnicos", "Jefe de Almaceneros", "ManageCompras"],
+  },
+  {
+    path: "/gestion-cambio",
+    roles: ["admin", "Jefe de Tecnicos", "Jefe de Almaceneros", "Jefe de Mantenimiento", "Tecnico"],
   },
   {
     path: "/usuarios",

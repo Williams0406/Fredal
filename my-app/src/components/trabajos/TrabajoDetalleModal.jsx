@@ -1,6 +1,6 @@
 // src/components/trabajos/TrabajoDetalleModal.jsx
 
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
   trabajoAPI,
   trabajadorAPI,
@@ -14,6 +14,7 @@ import {
 } from "@/lib/api";
 import { getTodayDateInputValue } from "@/lib/utils";
 import { useAuth } from "@/context/AuthContext";
+import { useAutoRefresh } from "@/hooks/useAutoRefresh";
 import ActividadTrabajoModal from "./ActividadTrabajoModal";
 import MovimientoRepuestoModal from "./MovimientoRepuestoModal";
 import FinalizarOrdenModal from "./FinalizarOrdenModal";
@@ -66,6 +67,7 @@ export default function TrabajoDetalleModal({ open, trabajoId, onClose, onUpdate
   const [ordenesRequerimiento, setOrdenesRequerimiento] = useState([]);
   const [loadingRequerimientos, setLoadingRequerimientos] = useState(false);
   const [generatingResumen, setGeneratingResumen] = useState(false);
+  const [completingPlan, setCompletingPlan] = useState(false);
 
   /* =========================
      FLAGS DE ESTADO
@@ -95,11 +97,13 @@ export default function TrabajoDetalleModal({ open, trabajoId, onClose, onUpdate
     return tieneRolAsignable(rolesData);
   });
 
-  const canAssignTecnicos = currentUserRoles
-    .map((role) => normalizeRole(role))
+  const normalizedCurrentUserRoles = currentUserRoles.map((role) => normalizeRole(role));
+  const isTecnicoUser = normalizedCurrentUserRoles.includes("tecnico");
+  const canAssignTecnicos = normalizedCurrentUserRoles
     .some((role) => role === "admin" || role === "jefe de almaceneros" || role === "jefe de tecnicos");
-  const canCreateRequerimiento = currentUserRoles
-    .map((role) => normalizeRole(role))
+  const canManagePlannedActivities = normalizedCurrentUserRoles
+    .some((role) => role === "admin" || role === "jefe de almaceneros" || role === "jefe de tecnicos" || role === "jefe de mantenimiento");
+  const canCreateRequerimiento = normalizedCurrentUserRoles
     .some((role) => role === "admin" || role === "jefe de tecnicos" || role === "jefe de mantenimiento");
 
   const getToday = () => getTodayDateInputValue();
@@ -125,16 +129,16 @@ export default function TrabajoDetalleModal({ open, trabajoId, onClose, onUpdate
     return nombres.length ? nombres.join(", ") : "Sin tecnicos asignados";
   };
 
-  const loadOrdenesRequerimiento = async () => {
+  const loadOrdenesRequerimiento = async ({ silent = false } = {}) => {
     if (!trabajoId) return;
-    setLoadingRequerimientos(true);
+    if (!silent) setLoadingRequerimientos(true);
     try {
       const response = await ordenRequerimientoAPI.list({ trabajo: trabajoId });
       setOrdenesRequerimiento(response.data || []);
     } catch (error) {
       console.error("Error cargando órdenes de requerimiento:", error);
     } finally {
-      setLoadingRequerimientos(false);
+      if (!silent) setLoadingRequerimientos(false);
     }
   };
   
@@ -142,19 +146,20 @@ export default function TrabajoDetalleModal({ open, trabajoId, onClose, onUpdate
   /* =========================
      LOAD DATA
   ========================= */
-  useEffect(() => {
-    if (!open || !trabajoId) return;
+  const loadDetalleData = useCallback(async ({ silent = false } = {}) => {
+    if (!trabajoId) return;
+    if (!silent) setLoading(true);
 
-    setLoading(true);
-
-    Promise.all([
+    try {
+      const [tRes, actRes, tecRes, userRes, maqRes, ubiRes] = await Promise.all([
       trabajoAPI.retrieve(trabajoId),
       actividadTrabajoAPI.listByTrabajo(trabajoId),
       trabajadorAPI.list(),
       userAPI.list(),
       maquinariaAPI.list(),
       ubicacionClienteAPI.list(),
-    ]).then(([tRes, actRes, tecRes, userRes, maqRes, ubiRes]) => {
+      ]);
+
       const rolesMap = (userRes.data || []).reduce((acc, user) => {
         const trabajadorId =
           user.trabajador_id ??
@@ -179,9 +184,17 @@ export default function TrabajoDetalleModal({ open, trabajoId, onClose, onUpdate
       setRolesPorTrabajador(rolesMap);
       setMaquinarias(maqRes.data);
       setUbicacionesCliente(ubiRes.data);
-      setLoading(false);
-    });
-  }, [open, trabajoId]);
+    } catch (error) {
+      console.error("Error cargando detalle de trabajo:", error);
+    } finally {
+      if (!silent) setLoading(false);
+    }
+  }, [trabajoId]);
+
+  useEffect(() => {
+    if (!open || !trabajoId) return;
+    loadDetalleData();
+  }, [open, trabajoId, loadDetalleData]);
 
   useEffect(() => {
     if (!open || !trabajoId) return;
@@ -229,6 +242,20 @@ export default function TrabajoDetalleModal({ open, trabajoId, onClose, onUpdate
 
     loadUnidadesHistorial();
   }, [actividades, trabajoId]);
+
+  const hayModalHijoAbierto =
+    showActividadModal || showMovimientoModal || showFinalizarModal;
+
+  useAutoRefresh(
+    async () => {
+      await Promise.all([
+        loadDetalleData({ silent: true }),
+        loadOrdenesRequerimiento({ silent: true }),
+      ]);
+    },
+    5000,
+    Boolean(open && trabajoId && !saving && !hayModalHijoAbierto)
+  );
 
   if (!open) return null;
 
@@ -367,6 +394,30 @@ export default function TrabajoDetalleModal({ open, trabajoId, onClose, onUpdate
     }
   };
 
+  const handleCompletarPlan = async () => {
+    if (completingPlan) return;
+    setCompletingPlan(true);
+
+    try {
+      const response = await trabajoAPI.completarPlan(trabajoId);
+      if (response.data?.orden) {
+        setTrabajo(response.data.orden);
+        setForm(response.data.orden);
+        onUpdated?.(response.data.orden);
+      }
+
+      const actividadesResponse = await actividadTrabajoAPI.listByTrabajo(trabajoId);
+      setActividades(actividadesResponse.data || []);
+    } catch (error) {
+      console.error("Error completando actividades planificadas:", error);
+      const data = error?.response?.data;
+      const detail = data?.detail || data?.non_field_errors?.[0] || "No se pudieron completar las actividades.";
+      alert(detail);
+    } finally {
+      setCompletingPlan(false);
+    }
+  };
+
   const handleCloseAll = () => {
     setTrabajo(null);
     setForm(null);
@@ -385,22 +436,29 @@ export default function TrabajoDetalleModal({ open, trabajoId, onClose, onUpdate
 
     setGeneratingResumen(true);
     try {
-      const actividadesResumen = await Promise.all(
-        actividadesRegistradas.map(async (actividad) => {
-          const repuestos = Array.isArray(actividad.repuestos)
-            ? actividad.repuestos
-            : (await movimientoRepuestoAPI.list({ actividad: actividad.id })).data || [];
-          const consumibles = Array.isArray(actividad.consumibles)
-            ? actividad.consumibles
-            : (await movimientoConsumibleAPI.list({ actividad: actividad.id })).data || [];
+      const buildActividadesResumen = (source) =>
+        Promise.all(
+          source.map(async (actividad) => {
+            const repuestos = Array.isArray(actividad.repuestos)
+              ? actividad.repuestos
+              : (await movimientoRepuestoAPI.list({ actividad: actividad.id })).data || [];
+            const consumibles = Array.isArray(actividad.consumibles)
+              ? actividad.consumibles
+              : (await movimientoConsumibleAPI.list({ actividad: actividad.id })).data || [];
 
-          return {
-            ...actividad,
-            repuestos,
-            consumibles,
-          };
-        })
-      );
+            return {
+              ...actividad,
+              repuestos,
+              consumibles,
+              evidencias: Array.isArray(actividad.evidencias) ? actividad.evidencias : [],
+            };
+          })
+        );
+
+      const [actividadesPlanificadasResumen, actividadesResumen] = await Promise.all([
+        buildActividadesResumen(actividadesPlanificadas),
+        buildActividadesResumen(actividadesRegistradas),
+      ]);
 
       const { generateTrabajoResumenPdf } = await import("@/lib/trabajoResumenPdf");
 
@@ -419,6 +477,7 @@ export default function TrabajoDetalleModal({ open, trabajoId, onClose, onUpdate
         },
         maquinariaLabel: getMaquinariaResumenLabel(),
         tecnicosLabel: getTecnicosResumenLabel(),
+        actividadesPlanificadas: actividadesPlanificadasResumen,
         actividades: actividadesResumen,
       });
     } catch (error) {
@@ -428,9 +487,6 @@ export default function TrabajoDetalleModal({ open, trabajoId, onClose, onUpdate
       setGeneratingResumen(false);
     }
   };
-
-  const hayModalHijoAbierto =
-    showActividadModal || showMovimientoModal || showFinalizarModal;
 
   /* =========================
      RENDER
@@ -475,7 +531,7 @@ export default function TrabajoDetalleModal({ open, trabajoId, onClose, onUpdate
         {/* CONTENIDO CON SCROLL */}
         <div className="flex-1 overflow-y-auto px-6 py-6">
           <div className="space-y-6">
-            
+
             {/* SECCIÓN: Información General */}
             <section>
               <h3 className="text-base font-semibold text-gray-900 mb-4 flex items-center gap-2">
@@ -717,7 +773,7 @@ export default function TrabajoDetalleModal({ open, trabajoId, onClose, onUpdate
                           ({actividadesPlanificadas.length})
                         </span>
                       </h3>
-                      {!esFinalizado && (
+                      {!esFinalizado && canManagePlannedActivities && (
                         <button
                           className="px-4 py-2 text-sm font-medium text-white bg-[#84cc16] 
                                    rounded-lg hover:bg-[#84cc16]/90 focus:outline-none 
@@ -757,7 +813,7 @@ export default function TrabajoDetalleModal({ open, trabajoId, onClose, onUpdate
                             key={a.id}
                             actividad={a}
                             unidades={unidadesPorActividad[a.id]}
-                            esFinalizado={esFinalizado}
+                            esFinalizado={esFinalizado || !canManagePlannedActivities}
                             onEditar={() => {
                               setActividadSeleccionada(a);
                               setActividadModalPlanificada(true);
@@ -793,22 +849,39 @@ export default function TrabajoDetalleModal({ open, trabajoId, onClose, onUpdate
                           </span>
                         </h3>
                         {!esFinalizado && (
-                          <button
-                            className="px-4 py-2 text-sm font-medium text-white bg-[#1e3a8a] 
-                                     rounded-lg hover:bg-[#1e3a8a]/90 focus:outline-none 
-                                     focus:ring-2 focus:ring-[#1e3a8a] focus:ring-offset-2
-                                     transition-all duration-200 flex items-center gap-2"
-                            onClick={() => {
-                              setActividadModalPlanificada(false);
-                              setActividadSeleccionada(null);
-                              setShowActividadModal(true);
-                            }}
-                          >
-                            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
-                            </svg>
-                            Nueva Actividad
-                          </button>
+                          <div className="flex flex-wrap justify-end gap-2">
+                            {isTecnicoUser && actividadesPlanificadas.length > 0 && (
+                              <button
+                                className="px-4 py-2 text-sm font-medium text-white bg-[#84cc16]
+                                         rounded-lg hover:bg-[#84cc16]/90 focus:outline-none
+                                         focus:ring-2 focus:ring-[#84cc16] focus:ring-offset-2
+                                         transition-all duration-200 flex items-center gap-2 disabled:opacity-60"
+                                onClick={handleCompletarPlan}
+                                disabled={completingPlan}
+                              >
+                                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                                </svg>
+                                {completingPlan ? "Completando..." : "Completar"}
+                              </button>
+                            )}
+                            <button
+                              className="px-4 py-2 text-sm font-medium text-white bg-[#1e3a8a]
+                                       rounded-lg hover:bg-[#1e3a8a]/90 focus:outline-none
+                                       focus:ring-2 focus:ring-[#1e3a8a] focus:ring-offset-2
+                                       transition-all duration-200 flex items-center gap-2"
+                              onClick={() => {
+                                setActividadModalPlanificada(false);
+                                setActividadSeleccionada(null);
+                                setShowActividadModal(true);
+                              }}
+                            >
+                              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
+                              </svg>
+                              Nueva Actividad
+                            </button>
+                          </div>
                         )}
                       </div>
 
@@ -955,6 +1028,7 @@ export default function TrabajoDetalleModal({ open, trabajoId, onClose, onUpdate
           key={actividadSeleccionada.id}
           open={showMovimientoModal}
           actividad={actividadSeleccionada}
+          canManagePlannedActivities={canManagePlannedActivities}
           onClose={() => setShowMovimientoModal(false)}
           onSaved={async () => {
             const res = await actividadTrabajoAPI.listByTrabajo(trabajoId);

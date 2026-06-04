@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import ItemTable from "@/components/items/ItemTable";
 import ItemGroupManager from "@/components/items/ItemGroupManager";
 import OrdenCompraFormModal from "@/components/ordenes/OrdenCompraFormModal";
@@ -12,6 +12,7 @@ import {
   trabajadorAPI,
   userAPI,
 } from "@/lib/api";
+import { useAutoRefresh } from "@/hooks/useAutoRefresh";
 
 const SECTIONS = [
   { key: "inventario", label: "Inventario" },
@@ -41,36 +42,36 @@ export default function AlmacenPage() {
   const [users, setUsers] = useState([]);
   const [loadingOrders, setLoadingOrders] = useState(true);
 
+  const loadData = useCallback(async ({ silent = false } = {}) => {
+    if (!silent) setLoadingOrders(true);
+    try {
+      const [ordenesCompraRes, ordenesReqRes, trabajadoresRes, usersRes] = await Promise.all([
+        ordenCompraAPI.list(),
+        ordenRequerimientoAPI.list(),
+        trabajadorAPI.list(),
+        userAPI.list(),
+      ]);
+
+      setOrdenesCompra(ordenesCompraRes.data || []);
+      setOrdenesRequerimiento(ordenesReqRes.data || []);
+      setTrabajadores(trabajadoresRes.data || []);
+      setUsers(usersRes.data || []);
+    } catch (error) {
+      console.error("Error cargando datos de almacen:", error);
+    } finally {
+      if (!silent) setLoadingOrders(false);
+    }
+  }, []);
+
   useEffect(() => {
-    let active = true;
-
-    const loadData = async () => {
-      setLoadingOrders(true);
-      try {
-        const [ordenesCompraRes, ordenesReqRes, trabajadoresRes, usersRes] = await Promise.all([
-          ordenCompraAPI.list(),
-          ordenRequerimientoAPI.list(),
-          trabajadorAPI.list(),
-          userAPI.list(),
-        ]);
-
-        if (!active) return;
-        setOrdenesCompra(ordenesCompraRes.data || []);
-        setOrdenesRequerimiento(ordenesReqRes.data || []);
-        setTrabajadores(trabajadoresRes.data || []);
-        setUsers(usersRes.data || []);
-      } catch (error) {
-        console.error("Error cargando datos de almacén:", error);
-      } finally {
-        if (active) setLoadingOrders(false);
-      }
-    };
-
     loadData();
-    return () => {
-      active = false;
-    };
-  }, [refresh]);
+  }, [loadData, refresh]);
+
+  useAutoRefresh(
+    () => loadData({ silent: true }),
+    5000,
+    section === "ordenes-compra" || section === "requerimientos"
+  );
 
   const tecnicos = useMemo(() => {
     const rolesPorTrabajador = (users || []).reduce((acc, user) => {
