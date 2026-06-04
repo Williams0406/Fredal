@@ -43,6 +43,7 @@ export default function GestionCambioPage() {
   const [savingId, setSavingId] = useState(null);
   const [error, setError] = useState("");
   const [search, setSearch] = useState("");
+  const [showNewRow, setShowNewRow] = useState(false);
   const [newRow, setNewRow] = useState({
     implementacion: "",
     estado: "SUGERIDO",
@@ -133,6 +134,7 @@ export default function GestionCambioPage() {
         },
       }));
       setNewRow({ implementacion: "", estado: "SUGERIDO", observacion: "" });
+      setShowNewRow(false);
       setError("");
     } catch (createError) {
       console.error("Error creando gestion de cambio:", createError);
@@ -255,69 +257,21 @@ export default function GestionCambioPage() {
 
       <section className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
         <div className="overflow-x-auto">
-          <table className="min-w-full divide-y divide-slate-200 text-sm">
-            <thead className="bg-slate-50 text-left text-xs font-semibold uppercase tracking-wide text-slate-500">
+          <table className="min-w-full border-collapse text-sm">
+            <thead className="bg-slate-100 text-left text-[11px] font-semibold uppercase tracking-wide text-slate-600">
               <tr>
-                <th className="px-4 py-3">Fecha</th>
-                <th className="min-w-[340px] px-4 py-3">Implementación</th>
-                <th className="px-4 py-3">Estado</th>
-                <th className="min-w-[260px] px-4 py-3">Observación</th>
-                <th className="px-4 py-3">IPERC</th>
-                <th className="px-4 py-3 text-right">Acción</th>
+                <th className="w-[118px] border border-slate-200 px-3 py-2">Fecha</th>
+                <th className="min-w-[380px] border border-slate-200 px-3 py-2">Implementación</th>
+                <th className="w-[180px] border border-slate-200 px-3 py-2">Estado</th>
+                <th className="min-w-[280px] border border-slate-200 px-3 py-2">Observación</th>
+                <th className="w-[180px] border border-slate-200 px-3 py-2">IPERC</th>
+                <th className="w-[128px] border border-slate-200 px-3 py-2 text-right">Acción</th>
               </tr>
             </thead>
-            <tbody className="divide-y divide-slate-100">
-              <tr className="bg-[#f8fbff]">
-                <td className="whitespace-nowrap px-4 py-3 text-slate-500">Nuevo</td>
-                <td className="px-4 py-3">
-                  <textarea
-                    value={newRow.implementacion}
-                    onChange={(event) =>
-                      setNewRow((current) => ({
-                        ...current,
-                        implementacion: event.target.value,
-                      }))
-                    }
-                    placeholder="Describe la implementación propuesta"
-                    rows={2}
-                    className="w-full resize-none rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm outline-none focus:border-[#1e3a8a] focus:ring-2 focus:ring-[#1e3a8a]/10"
-                  />
-                </td>
-                <td className="px-4 py-3">
-                  <span className="inline-flex items-center rounded-full border border-slate-200 bg-slate-100 px-3 py-1 text-xs font-semibold text-slate-700">
-                    Sugerido
-                  </span>
-                </td>
-                <td className="px-4 py-3">
-                  <input
-                    value={newRow.observacion}
-                    onChange={(event) =>
-                      setNewRow((current) => ({
-                        ...current,
-                        observacion: event.target.value,
-                      }))
-                    }
-                    placeholder="Observación opcional"
-                    className="h-10 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm outline-none focus:border-[#1e3a8a] focus:ring-2 focus:ring-[#1e3a8a]/10"
-                  />
-                </td>
-                <td className="px-4 py-3 text-slate-400">Sin IPERC</td>
-                <td className="px-4 py-3 text-right">
-                  <button
-                    type="button"
-                    onClick={handleCreate}
-                    disabled={!newRow.implementacion.trim() || savingNew}
-                    className="inline-flex h-10 items-center justify-center gap-2 rounded-xl bg-[#1e3a8a] px-4 text-sm font-semibold text-white transition hover:bg-[#173569] disabled:cursor-not-allowed disabled:opacity-60"
-                  >
-                    <Plus className="h-4 w-4" />
-                    {savingNew ? "Registrando..." : "Registrar"}
-                  </button>
-                </td>
-              </tr>
-
+            <tbody>
               {loading ? (
                 <tr>
-                  <td colSpan={6} className="px-4 py-10 text-center text-slate-500">
+                  <td colSpan={6} className="border border-slate-200 px-4 py-10 text-center text-slate-500">
                     Cargando registros...
                   </td>
                 </tr>
@@ -327,70 +281,63 @@ export default function GestionCambioPage() {
                     estado: registro.estado || "SUGERIDO",
                     observacion: registro.observacion || "",
                   };
-                  const estado = ESTADO_BY_VALUE[registro.estado] || ESTADO_BY_VALUE.SUGERIDO;
+                  const estadoDraft = ESTADO_BY_VALUE[draft.estado] || ESTADO_BY_VALUE.SUGERIDO;
                   const changed = hasChanges(registro);
 
                   return (
-                    <tr key={registro.id} className="align-top hover:bg-slate-50/70">
-                      <td className="whitespace-nowrap px-4 py-4 text-slate-500">
+                    <tr key={registro.id} className="align-top transition hover:bg-slate-50">
+                      <td className="whitespace-nowrap border border-slate-200 px-3 py-2 text-slate-500">
                         {formatDate(registro.created_at)}
                       </td>
-                      <td className="px-4 py-4 text-slate-800">
-                        <div className="max-w-xl whitespace-pre-wrap leading-6">
+                      <td className="border border-slate-200 px-3 py-2 text-slate-800">
+                        <div className="max-w-xl whitespace-pre-wrap leading-5">
                           {registro.implementacion}
                         </div>
                       </td>
-                      <td className="px-4 py-4">
-                        <div className="space-y-2">
-                          <span
-                            className={[
-                              "inline-flex items-center rounded-full border px-3 py-1 text-xs font-semibold",
-                              estado.badge,
-                            ].join(" ")}
-                          >
-                            {estado.label}
-                          </span>
-                          <select
-                            value={draft.estado}
-                            onChange={(event) =>
-                              handleDraftChange(registro.id, "estado", event.target.value)
-                            }
-                            className="block h-10 rounded-xl border border-slate-200 bg-white px-3 text-sm outline-none focus:border-[#1e3a8a] focus:ring-2 focus:ring-[#1e3a8a]/10"
-                          >
-                            {ESTADOS.map((option) => (
-                              <option key={option.value} value={option.value}>
-                                {option.label}
-                              </option>
-                            ))}
-                          </select>
-                        </div>
+                      <td className="border border-slate-200 p-0">
+                        <select
+                          value={draft.estado}
+                          onChange={(event) =>
+                            handleDraftChange(registro.id, "estado", event.target.value)
+                          }
+                          className={[
+                            "h-12 w-full border-0 bg-transparent px-3 text-sm font-semibold outline-none transition focus:bg-white focus:ring-2 focus:ring-inset focus:ring-[#1e3a8a]/20",
+                            estadoDraft.badge,
+                          ].join(" ")}
+                        >
+                          {ESTADOS.map((option) => (
+                            <option key={option.value} value={option.value}>
+                              {option.label}
+                            </option>
+                          ))}
+                        </select>
                       </td>
-                      <td className="px-4 py-4">
+                      <td className="border border-slate-200 p-0">
                         <textarea
                           value={draft.observacion}
                           onChange={(event) =>
                             handleDraftChange(registro.id, "observacion", event.target.value)
                           }
-                          rows={2}
-                          className="w-full resize-none rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm outline-none focus:border-[#1e3a8a] focus:ring-2 focus:ring-[#1e3a8a]/10"
+                          rows={1}
+                          className="block min-h-12 w-full resize-y border-0 bg-transparent px-3 py-3 text-sm outline-none transition focus:bg-white focus:ring-2 focus:ring-inset focus:ring-[#1e3a8a]/20"
                         />
                       </td>
-                      <td className="px-4 py-4 text-slate-500">
+                      <td className="border border-slate-200 px-3 py-2 text-slate-500">
                         {registro.iperc_label || "Sin IPERC"}
                       </td>
-                      <td className="px-4 py-4 text-right">
+                      <td className="border border-slate-200 px-2 py-2 text-right">
                         {changed ? (
                           <button
                             type="button"
                             onClick={() => handleSave(registro)}
                             disabled={savingId === registro.id}
-                            className="inline-flex h-10 items-center justify-center gap-2 rounded-xl bg-[#84cc16] px-3 text-sm font-semibold text-white transition hover:bg-[#76b914] disabled:opacity-60"
+                            className="inline-flex h-9 items-center justify-center gap-2 rounded-lg bg-[#1e3a8a] px-3 text-sm font-semibold text-white transition hover:bg-[#173569] disabled:opacity-60"
                           >
                             <Save className="h-4 w-4" />
                             {savingId === registro.id ? "Guardando..." : "Guardar"}
                           </button>
                         ) : (
-                          <span className="inline-flex h-10 items-center justify-center gap-2 rounded-xl border border-slate-200 px-3 text-xs font-semibold text-slate-400">
+                          <span className="inline-flex h-9 items-center justify-center gap-2 rounded-lg border border-slate-200 px-3 text-xs font-semibold text-slate-400">
                             <Check className="h-4 w-4" />
                             Sin cambios
                           </span>
@@ -401,11 +348,90 @@ export default function GestionCambioPage() {
                 })
               ) : (
                 <tr>
-                  <td colSpan={6} className="px-4 py-10 text-center">
+                  <td colSpan={6} className="border border-slate-200 px-4 py-10 text-center">
                     <div className="flex flex-col items-center gap-2 text-slate-500">
                       <X className="h-5 w-5" />
                       No hay registros de gestión de cambio.
                     </div>
+                  </td>
+                </tr>
+              )}
+
+              {showNewRow ? (
+                <tr className="bg-[#f8fbff] align-top">
+                  <td className="whitespace-nowrap border border-slate-200 px-3 py-2 text-slate-500">
+                    Nuevo
+                  </td>
+                  <td className="border border-slate-200 p-0">
+                    <textarea
+                      value={newRow.implementacion}
+                      onChange={(event) =>
+                        setNewRow((current) => ({
+                          ...current,
+                          implementacion: event.target.value,
+                        }))
+                      }
+                      placeholder="Describe la implementación propuesta"
+                      rows={2}
+                      autoFocus
+                      className="block min-h-16 w-full resize-y border-0 bg-white px-3 py-3 text-sm outline-none focus:ring-2 focus:ring-inset focus:ring-[#1e3a8a]/20"
+                    />
+                  </td>
+                  <td className="border border-slate-200 p-0">
+                    <div className="flex h-full min-h-16 items-center px-3 text-sm font-semibold text-slate-700">
+                      Sugerido
+                    </div>
+                  </td>
+                  <td className="border border-slate-200 p-0">
+                    <input
+                      value={newRow.observacion}
+                      onChange={(event) =>
+                        setNewRow((current) => ({
+                          ...current,
+                          observacion: event.target.value,
+                        }))
+                      }
+                      placeholder="Observación opcional"
+                      className="h-16 w-full border-0 bg-white px-3 text-sm outline-none focus:ring-2 focus:ring-inset focus:ring-[#1e3a8a]/20"
+                    />
+                  </td>
+                  <td className="border border-slate-200 px-3 py-2 text-slate-400">Sin IPERC</td>
+                  <td className="border border-slate-200 px-2 py-2 text-right">
+                    <div className="flex justify-end gap-2">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setShowNewRow(false);
+                          setNewRow({ implementacion: "", estado: "SUGERIDO", observacion: "" });
+                        }}
+                        className="inline-flex h-9 w-9 items-center justify-center rounded-lg border border-slate-200 text-slate-500 transition hover:bg-slate-50"
+                        title="Cancelar"
+                      >
+                        <X className="h-4 w-4" />
+                      </button>
+                      <button
+                        type="button"
+                        onClick={handleCreate}
+                        disabled={!newRow.implementacion.trim() || savingNew}
+                        className="inline-flex h-9 items-center justify-center gap-2 rounded-lg bg-[#1e3a8a] px-3 text-sm font-semibold text-white transition hover:bg-[#173569] disabled:cursor-not-allowed disabled:opacity-60"
+                      >
+                        <Plus className="h-4 w-4" />
+                        {savingNew ? "Registrando..." : "Registrar"}
+                      </button>
+                    </div>
+                  </td>
+                </tr>
+              ) : (
+                <tr>
+                  <td colSpan={6} className="border border-dashed border-slate-300 bg-slate-50 p-0">
+                    <button
+                      type="button"
+                      onClick={() => setShowNewRow(true)}
+                      className="flex h-12 w-full items-center justify-center gap-2 text-sm font-semibold text-[#1e3a8a] transition hover:bg-blue-50"
+                    >
+                      <Plus className="h-4 w-4" />
+                      Agregar nuevo registro
+                    </button>
                   </td>
                 </tr>
               )}
