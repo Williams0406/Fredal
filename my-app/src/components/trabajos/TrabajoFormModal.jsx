@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { maquinariaAPI, trabajoAPI, ubicacionClienteAPI } from "@/lib/api";
+import { maquinariaAPI, trabajoAPI, trabajadorAPI, ubicacionClienteAPI } from "@/lib/api";
 import { getTodayDateInputValue } from "@/lib/utils";
 
 const ESTADOS = ["PENDIENTE", "EN_PROCESO", "FINALIZADO"];
@@ -28,9 +28,11 @@ export default function TrabajoFormModal({
     horometro: "",
     estado_equipo: "",
     observaciones: "",
+    tecnicos: [],
   });
 
   const [maquinarias, setMaquinarias] = useState([]);
+  const [tecnicos, setTecnicos] = useState([]);
   const [ubicacionesCliente, setUbicacionesCliente] = useState([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
@@ -52,6 +54,7 @@ export default function TrabajoFormModal({
         horometro: "",
         estado_equipo: "",
         observaciones: "",
+        tecnicos: [],
       });
       setError("");
     }
@@ -60,9 +63,10 @@ export default function TrabajoFormModal({
   // Cargar maquinarias
   useEffect(() => {
     if (open) {
-      Promise.all([maquinariaAPI.list(), ubicacionClienteAPI.list()]).then(([maqRes, ubiRes]) => {
+      Promise.all([maquinariaAPI.list(), ubicacionClienteAPI.list(), trabajadorAPI.list()]).then(([maqRes, ubiRes, tecRes]) => {
         setMaquinarias(maqRes.data);
         setUbicacionesCliente(ubiRes.data);
+        setTecnicos(tecRes.data || []);
       });
     }
   }, [open]);
@@ -82,6 +86,7 @@ export default function TrabajoFormModal({
         horometro: trabajo.horometro || "",
         estado_equipo: trabajo.estado_equipo || "",
         observaciones: trabajo.observaciones || "",
+        tecnicos: Array.isArray(trabajo.tecnicos) ? trabajo.tecnicos : [],
       });
     }
   }, [trabajo]);
@@ -98,6 +103,39 @@ export default function TrabajoFormModal({
     }
 
     setForm(nextForm);
+    if (error) setError("");
+  };
+
+  const getTecnicoLabel = (tecnico) => {
+    const nombreCompleto = [tecnico.nombres, tecnico.apellidos].filter(Boolean).join(" ").trim();
+    return [nombreCompleto || tecnico.codigo || `Trabajador ${tecnico.id}`, tecnico.puesto]
+      .filter(Boolean)
+      .join(" - ");
+  };
+
+  const normalizeText = (value) =>
+    String(value || "")
+      .normalize("NFD")
+      .replace(/[\u0300-\u036f]/g, "")
+      .toLowerCase()
+      .trim();
+
+  const tecnicosAsignables = tecnicos.filter((tecnico) =>
+    normalizeText(tecnico.puesto).includes("tecnico")
+  );
+  const opcionesTecnicos = tecnicosAsignables.length ? tecnicosAsignables : tecnicos;
+
+  const toggleTecnico = (tecnicoId) => {
+    const id = Number(tecnicoId);
+    setForm((current) => {
+      const actuales = Array.isArray(current.tecnicos) ? current.tecnicos : [];
+      return {
+        ...current,
+        tecnicos: actuales.includes(id)
+          ? actuales.filter((item) => item !== id)
+          : [...actuales, id],
+      };
+    });
     if (error) setError("");
   };
 
@@ -316,6 +354,55 @@ export default function TrabajoFormModal({
                 Cuando el lugar es taller, la ubicacion se asume automaticamente.
               </p>
             )}
+          </div>
+
+          {/* Técnicos asignados */}
+          <div>
+            <div className="mb-2 flex items-center justify-between gap-3">
+              <label className="block text-sm font-medium text-gray-700">
+                Técnicos asignados
+              </label>
+              <span className="text-xs font-medium text-gray-500">
+                {(form.tecnicos || []).length} seleccionado{(form.tecnicos || []).length === 1 ? "" : "s"}
+              </span>
+            </div>
+
+            <div className="rounded-lg border border-gray-300 bg-white">
+              {opcionesTecnicos.length ? (
+                <div className="max-h-56 overflow-y-auto p-2">
+                  <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+                    {opcionesTecnicos.map((tecnico) => {
+                      const selected = (form.tecnicos || []).includes(tecnico.id);
+                      return (
+                        <label
+                          key={tecnico.id}
+                          className={[
+                            "flex cursor-pointer items-start gap-3 rounded-lg border p-3 text-sm transition-all duration-200",
+                            selected
+                              ? "border-[#1e3a8a] bg-blue-50 text-[#1e3a8a]"
+                              : "border-gray-200 bg-white text-gray-700 hover:border-gray-300 hover:bg-gray-50",
+                          ].join(" ")}
+                        >
+                          <input
+                            type="checkbox"
+                            checked={selected}
+                            onChange={() => toggleTecnico(tecnico.id)}
+                            className="mt-0.5 h-4 w-4 rounded border-gray-300 text-[#1e3a8a] focus:ring-2 focus:ring-[#1e3a8a]"
+                          />
+                          <span className="min-w-0 flex-1 font-medium leading-5">
+                            {getTecnicoLabel(tecnico)}
+                          </span>
+                        </label>
+                      );
+                    })}
+                  </div>
+                </div>
+              ) : (
+                <div className="px-4 py-6 text-center text-sm text-gray-500">
+                  No hay técnicos disponibles para asignar.
+                </div>
+              )}
+            </div>
           </div>
 
           {/* Campos técnicos solo al finalizar */}

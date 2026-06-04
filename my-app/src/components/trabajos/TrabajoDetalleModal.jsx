@@ -115,6 +115,12 @@ export default function TrabajoDetalleModal({ open, trabajoId, onClose, onUpdate
     if (!tecnico) return "";
     return [tecnico.nombres, tecnico.apellidos].filter(Boolean).join(" ").trim();
   };
+  const getTecnicoAsignacionLabel = (tecnico) => {
+    const nombreCompleto = [tecnico.nombres, tecnico.apellidos].filter(Boolean).join(" ").trim();
+    return [nombreCompleto || tecnico.codigo || `Trabajador ${tecnico.id}`, tecnico.puesto]
+      .filter(Boolean)
+      .join(" - ");
+  };
   const getMaquinariaResumenLabel = () => {
     const maquinaria = maquinarias.find((item) => Number(item.id) === Number(form?.maquinaria));
     if (!maquinaria) {
@@ -704,7 +710,7 @@ export default function TrabajoDetalleModal({ open, trabajoId, onClose, onUpdate
                                focus:ring-2 focus:ring-[#1e3a8a]"
                     />
                     <span className="flex-1 font-medium">
-                      {t.nombres} {t.apellidos}
+                      {getTecnicoAsignacionLabel(t)}
                     </span>
                   </label>
                 ))}
