@@ -1241,13 +1241,29 @@ class GestionCambio(TimeStampedModel):
         EN_PROCESO = "EN_PROCESO", "En proceso"
         TERMINADO = "TERMINADO", "Terminado"
 
+    class Moneda(models.TextChoices):
+        PEN = "PEN", "Soles"
+        USD = "USD", "Dolares"
+
+    codigo = models.CharField(max_length=50, blank=True, default="")
     implementacion = models.TextField()
     estado = models.CharField(
         max_length=15,
         choices=Estado.choices,
         default=Estado.SUGERIDO,
     )
+    costo = models.DecimalField(max_digits=12, decimal_places=2, null=True, blank=True)
+    moneda = models.CharField(max_length=3, choices=Moneda.choices, default=Moneda.PEN)
+    doc = models.FileField(upload_to="gestiones_cambio/docs/%Y/%m/", null=True, blank=True)
+    volvo = models.BooleanField(default=False)
     observacion = models.TextField(blank=True, default="")
+    creado_por = models.ForeignKey(
+        User,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="gestiones_cambio_creadas",
+    )
     iperc = models.ForeignKey(
         IPERC,
         on_delete=models.PROTECT,

@@ -3109,20 +3109,141 @@ class ReporteIPERCSerializer(serializers.ModelSerializer):
     class GestionCambioSerializer(serializers.ModelSerializer):
         estado_label = serializers.CharField(source="get_estado_display", read_only=True)
         iperc_label = serializers.SerializerMethodField()
+        doc_nombre = serializers.SerializerMethodField()
+        doc_eliminar = serializers.BooleanField(write_only=True, required=False, default=False)
+        creado_por_nombre = serializers.SerializerMethodField()
+        can_edit = serializers.SerializerMethodField()
+        can_edit_estado = serializers.SerializerMethodField()
+
+        EDITABLE_FIELDS = {
+            "codigo",
+            "implementacion",
+            "costo",
+            "moneda",
+            "doc",
+            "doc_eliminar",
+            "volvo",
+            "observacion",
+        }
+        ADMIN_EDITABLE_FIELDS = EDITABLE_FIELDS | {"estado"}
 
         class Meta:
             model = GestionCambio
             fields = [
                 "id",
+                "codigo",
                 "implementacion",
                 "estado",
                 "estado_label",
+                "costo",
+                "moneda",
+                "doc",
+                "doc_nombre",
+                "doc_eliminar",
+                "volvo",
                 "observacion",
+                "creado_por",
+                "creado_por_nombre",
+                "can_edit",
+                "can_edit_estado",
                 "iperc",
                 "iperc_label",
                 "created_at",
                 "updated_at",
             ]
+            read_only_fields = ["creado_por"]
+
+        def to_internal_value(self, data):
+            if hasattr(data, "copy"):
+                data = data.copy()
+            if data.get("costo") == "":
+                data["costo"] = None
+            if data.get("doc_eliminar") in ("true", "True", "1", 1, True):
+                data["doc_eliminar"] = True
+            return super().to_internal_value(data)
+
+        def _request_user(self):
+            request = self.context.get("request")
+            user = getattr(request, "user", None)
+            if not user or not user.is_authenticated:
+                return None
+            return user
+
+        def _is_admin_user(self, user):
+            return bool(user and (user.is_staff or user.is_superuser))
+
+        def _is_owner_user(self, user, obj=None):
+            obj = obj or self.instance
+            return bool(user and obj and obj.creado_por_id == user.id)
+
+        def validate(self, attrs):
+            attrs = super().validate(attrs)
+            user = self._request_user()
+            is_admin = self._is_admin_user(user)
+
+            if not self.instance:
+                incoming_fields = set(getattr(self, "initial_data", {}).keys())
+                if not is_admin and "estado" in incoming_fields:
+                    incoming_estado = str(getattr(self, "initial_data", {}).get("estado") or "")
+                    if incoming_estado and incoming_estado != GestionCambio.Estado.SUGERIDO:
+                        raise serializers.ValidationError(
+                            {"estado": "Solo el administrador puede crear registros con otro estado."}
+                        )
+                return attrs
+
+            is_owner = self._is_owner_user(user)
+
+            if not (is_admin or is_owner):
+                raise serializers.ValidationError(
+                    "Solo el administrador o el usuario que creó este registro puede editarlo."
+                )
+
+            incoming_fields = set(getattr(self, "initial_data", {}).keys())
+            allowed_fields = self.ADMIN_EDITABLE_FIELDS if is_admin else self.EDITABLE_FIELDS
+            blocked_fields = incoming_fields - allowed_fields
+            if blocked_fields:
+                labels = ", ".join(sorted(blocked_fields))
+                raise serializers.ValidationError(
+                    f"No tienes permiso para editar estos campos: {labels}."
+                )
+
+            if not is_admin and "estado" in incoming_fields:
+                incoming_estado = str(getattr(self, "initial_data", {}).get("estado") or "")
+                current_estado = str(getattr(self.instance, "estado", "") or "")
+                if incoming_estado and incoming_estado != current_estado:
+                    raise serializers.ValidationError(
+                        {"estado": "Solo el administrador puede editar el estado."}
+                    )
+
+            return attrs
+
+        def create(self, validated_data):
+            validated_data.pop("doc_eliminar", None)
+            return super().create(validated_data)
+
+        def update(self, instance, validated_data):
+            eliminar_doc = validated_data.pop("doc_eliminar", False)
+            if eliminar_doc and instance.doc:
+                instance.doc.delete(save=False)
+                instance.doc = None
+            return super().update(instance, validated_data)
+
+        def get_doc_nombre(self, obj):
+            if not obj.doc:
+                return ""
+            return obj.doc.name.rsplit("/", 1)[-1]
+
+        def get_creado_por_nombre(self, obj):
+            if not obj.creado_por_id:
+                return ""
+            return obj.creado_por.get_full_name() or obj.creado_por.username
+
+        def get_can_edit(self, obj):
+            user = self._request_user()
+            return self._is_admin_user(user) or self._is_owner_user(user, obj)
+
+        def get_can_edit_estado(self, obj):
+            return self._is_admin_user(self._request_user())
 
         def get_iperc_label(self, obj):
             if not obj.iperc_id:

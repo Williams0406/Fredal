@@ -483,9 +483,24 @@ export const ipercRegistroAPI = {
 
 export const gestionCambioAPI = {
   list: (params) => api.get("/api/gestiones-cambio/", { params }),
-  create: (data) => api.post("/api/gestiones-cambio/", data),
-  patch: (id, data) => api.patch(`/api/gestiones-cambio/${id}/`, data),
-  update: (id, data) => api.put(`/api/gestiones-cambio/${id}/`, data),
+  create: (data, isMultipart = false) =>
+    api.post("/api/gestiones-cambio/", data, isMultipart ? {
+      headers: {
+        "Content-Type": "multipart/form-data",
+      },
+    } : undefined),
+  patch: (id, data, isMultipart = false) =>
+    api.patch(`/api/gestiones-cambio/${id}/`, data, isMultipart ? {
+      headers: {
+        "Content-Type": "multipart/form-data",
+      },
+    } : undefined),
+  update: (id, data, isMultipart = false) =>
+    api.put(`/api/gestiones-cambio/${id}/`, data, isMultipart ? {
+      headers: {
+        "Content-Type": "multipart/form-data",
+      },
+    } : undefined),
   delete: (id) => api.delete(`/api/gestiones-cambio/${id}/`),
 };
 

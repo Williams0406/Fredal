@@ -3169,14 +3169,18 @@ class IPERCViewSet(viewsets.ModelViewSet):
 class GestionCambioViewSet(viewsets.ModelViewSet):
     queryset = (
         GestionCambio.objects
-        .select_related("iperc", "iperc__reporte_iperc")
+        .select_related("iperc", "iperc__reporte_iperc", "creado_por")
         .all()
         .order_by("-created_at", "-id")
     )
     serializer_class = _ReporteIPERCSerializer.GestionCambioSerializer
     permission_classes = [ReporteOrdenPermission]
+    parser_classes = [JSONParser, FormParser, MultiPartParser]
     filter_backends = [DjangoFilterBackend]
     filterset_fields = ["iperc"]
+
+    def perform_create(self, serializer):
+        serializer.save(creado_por=self.request.user)
 
 
 class SecuenciaControlRiesgoViewSet(viewsets.ModelViewSet):
